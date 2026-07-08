@@ -131,6 +131,8 @@ wrap for mobile only if there's real pull.
 - [x] Operating manual and roles documented (`docs/AISHA_OPERATING_MANUAL.md`).
 - [x] Projection-source framework spec written; open questions resolved;
       pending Aisha's technical review.
+- [x] Review-gated contribution workflow documented (`CONTRIBUTING.md`);
+      branch protection to be enabled on `main`.
 - [ ] Restructure the flat backend (`api.py`, `data_feed.py`) into a package.
 - [ ] Implement the projection-source framework (after Aisha's review).
 - [ ] Close the loop: schedule + deliver weekly recaps to the group chat.
