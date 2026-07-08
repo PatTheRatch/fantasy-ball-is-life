@@ -1,7 +1,8 @@
 # Feature Spec: Pluggable Projection-Source Framework
 
-**Status:** DRAFT — awaiting Aisha / Patrick approval (architecture decision per
-`docs/AISHA_OPERATING_MANUAL.md`)
+**Status:** Open questions resolved by Patrick (product owner) 2026-07-08 —
+pending Aisha's technical review before implementation
+(architecture decision per `docs/AISHA_OPERATING_MANUAL.md`)
 **Author:** Claude Code (implementation engineer)
 **Date:** 2026-07-08
 **Decision basis:** Product Decision B — user-uploaded projections now, our own
@@ -22,9 +23,10 @@ optimizer, dashboard, or recap features.
 
 ## 2. Acceptance criteria
 
-1. A user can upload a Basketball Monster `.xls/.xlsx` export **or** a Hashtag
-   Basketball CSV **or** an ESPN projections export, and the app auto-detects the
-   source (with a manual override dropdown).
+1. A user can bring in projections from Basketball Monster (`.xls/.xlsx`
+   upload, season **or** weekly export) or Hashtag Basketball (CSV upload or
+   pasted table text), and the app auto-detects the source (with a manual
+   override dropdown). ESPN exports are a follow-up adapter.
 2. Whatever the source, the upload is normalized into one canonical
    `PlayerProjection` schema (§3). All downstream consumers (optimizer,
    matchup confidence, projected scoreboards, recaps) read **only** that schema —
@@ -146,14 +148,30 @@ Store:    data/projections/{source}_{horizon}_{timestamp}.parquet + manifest.jso
 Accessor: get_active_projections(horizon) -> DataFrame[PlayerProjection]
 ```
 
-**v1 scope proposal:** `BbmAdapter` (port of existing reader) + `HashtagAdapter`
-(CSV, free source — makes the framework honest with two real adapters), the
-store/accessor, the four endpoints, and the upload UI. ESPN adapter and the
-internal model are follow-ups.
+**v1 scope (per Patrick's answers, 2026-07-08):**
 
-**Open questions for Aisha/Patrick:**
-1. OK to defer a real database and use the on-disk parquet + manifest store for v1?
-2. Is Hashtag Basketball the right second adapter, or is ESPN's export more
-   useful to league members?
-3. Weekly-horizon uploads (BBM `WeeklyProjections.xls`) in v1, or season-only
-   first?
+- `BbmAdapter` — port of the existing reader; handles **both horizons**:
+  season exports (`BBM_Projections.xls`, needed for the draft) and weekly
+  exports (`WeeklyProjections.xls`).
+- `HashtagAdapter` — second adapter. Hashtag Basketball is a paid source and
+  its site blocks automated access, so the adapter must be **input-tolerant**:
+  accept (a) a CSV/Excel file if their premium tier exports one, and (b) a
+  **pasted table** (user copies the projections table from the browser into a
+  textarea; adapter parses tab/whitespace-delimited text). No scraping — it's
+  unreliable against their bot protection and a ToS risk.
+- Store/accessor (on-disk parquet + manifest), the four endpoints, and the
+  upload UI with the paste option.
+- ESPN adapter and the internal model are follow-ups.
+
+**Resolved questions (Patrick, 2026-07-08):**
+1. ~~Database?~~ **Deferred** — on-disk parquet + manifest store for v1;
+   schemas become the first DB tables when a database is introduced.
+2. ~~Second adapter?~~ **Hashtag Basketball**, with the caveat above: it is not
+   free, export availability is unconfirmed (site 403s automated checks), so
+   the adapter ships with file **and** paste-input modes. Action: verify with a
+   real Hashtag account whether premium offers CSV export; if yes, add a golden
+   fixture from it.
+3. ~~Horizons?~~ **Both in v1** — season projections (required for the draft
+   optimizer) and weekly-horizon uploads. `ProjectionSet.horizon` is therefore
+   load-bearing from day one, and the accessor takes `horizon` as a required
+   argument.
