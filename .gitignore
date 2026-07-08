@@ -1,0 +1,37 @@
+# Secrets — never commit credentials or cookies
+.env
+*.pem
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node / frontend build
+node_modules/
+frontend/dist/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Data files live outside git (user-uploaded projections, pulled league data, local DBs)
+data/*
+player_rankings/*
+league_*/
+*.csv
+*.xls
+*.xlsx
+*.db
+*.db-shm
+*.db-wal
+
+# Keep placeholder dirs
+!data/.gitkeep
+!player_rankings/.gitkeep
+
+# macOS duplicate-file artifacts ("foo 2.ext")
+* 2.*

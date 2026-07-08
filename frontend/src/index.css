@@ -1,0 +1,22 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --color-pg-bg: #0d1117;
+  --color-pg-card: #161b22;
+  --color-pg-border: #30363d;
+  --color-pg-accent: #e03131;
+  --shadow-pg-card: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+html {
+  @apply antialiased;
+}
+
+body {
+  @apply m-0 min-h-dvh bg-pg-bg font-sans text-slate-100;
+}
+
+#root {
+  @apply min-h-dvh;
+}
