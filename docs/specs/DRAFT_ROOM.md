@@ -1,9 +1,12 @@
 # Feature Spec: Draft Room — redesigned optimizer + draft-day resilience
 
-**Status:** Design decisions locked by Patrick (product owner) 2026-07-09 —
-pending Aisha's technical review before implementation. The resilience engine
-(§3–§4) changes how the optimizer is invoked and adds background solving, so it
-needs architecture sign-off per [`docs/AISHA_OPERATING_MANUAL.md`](../AISHA_OPERATING_MANUAL.md).
+**Status:** Reviewed by Aisha (lead systems engineer) 2026-07-09 —
+[`DRAFT_ROOM_REVIEW.md`](DRAFT_ROOM_REVIEW.md). Approved to implement with six
+required amendments; those amendments are applied in this revision (see §4/§5).
+Gate 2 (constraint relaxation) now uses iterative relaxation on the current solver
+stack. Cleared for implementation pending Aisha's quick re-check of the Gate 2
+wording. Product decisions in §0 remain final (architecture sign-off per
+[`docs/AISHA_OPERATING_MANUAL.md`](../AISHA_OPERATING_MANUAL.md)).
 **Author:** Claude Code (implementation engineer)
 **Date:** 2026-07-09
 **Decision basis:** Product design review with Patrick, 2026-07-09. Replaces the
@@ -65,7 +68,7 @@ day is execution, not improvisation.
    or **Safe to pass** (in no live plan and not a value target), reading off the
    already-computed plan portfolio — no fresh solve.
 4. **Plan portfolio with live health.** In prep, the app auto-generates a diverse
-   set of plans (target 5–10); the user keeps/tunes/saves them. During the draft
+   set of plans (up to 10); the user keeps/tunes/saves them. During the draft
    each saved plan shows health: **Alive**, **At risk** (feasible but hinges on a
    scarce player), or **Broken** (infeasible). Health recomputes as picks land.
 5. **Auto-advance on a miss.** When the active plan's target is taken by a rival,
@@ -106,6 +109,8 @@ way.
 | Field | Notes |
 |---|---|
 | `session_id` | opaque id |
+| `schema_version` | bumps the localStorage format so old drafts migrate cleanly across deploys (D12) |
+| `picks_version` | monotonic counter incremented on every pick/undo; echoed on mutating calls to discard stale/out-of-order responses (concurrency) |
 | `league_id`, `season` | from config |
 | `budget`, `roster_size`, `games_per_week` | auction/league params |
 | `teams` | list of `{team_id, name, is_user}` — powers the pick dropdown (D6) |
@@ -138,6 +143,14 @@ way.
 vs league, best-available value board — all computed from `picks` + the active
 `ProjectionSet` so an undo simply recomputes them.
 
+**Persistence format (D12):** the whole `DraftSession` (including the last
+warm-cache snapshot, §4) is JSON-serialized to a versioned localStorage key. On
+load, a `schema_version` mismatch triggers a migration (or a clean reset with a
+warning) rather than a crash. Player names in `PickLogEntry` resolve to
+`player_key` through the existing `normalize_name` + fuzzy-match pipeline
+([`PROJECTION_SOURCE_FRAMEWORK.md`](PROJECTION_SOURCE_FRAMEWORK.md)); pick logging
+reuses that resolver so a typed "Giannis" maps to the projection row.
+
 ## 4. API / UI impact
 
 **Optimizer / backend.** Extends the existing `POST /optimizer/optimize` and the
@@ -145,9 +158,10 @@ already-present `generate_multiple_plans` in `optimize_lineup.py`. New/changed:
 
 - `POST /draft/session` — create/reset a draft session (params from §3). Returns
   `session_id`.
-- `POST /draft/{id}/plans` — generate the diverse portfolio for prep (target
-  5–10 plans via `generate_multiple_plans`), returns `SavedPlan[]` with strategy
-  labels. `PUT /draft/{id}/plans/{plan_id}` to hand-tune and save (D8).
+- `POST /draft/{id}/plans` — generate the diverse portfolio for prep (up to 10
+  plans via `generate_multiple_plans`, one per strategy shape), returns
+  `SavedPlan[]` with strategy labels. `PUT /draft/{id}/plans/{plan_id}` to
+  hand-tune and save (D8).
 - `POST /draft/{id}/pick` — log a pick (`PickLogEntry`). Side effect: recompute
   every plan's `health` + `next_target`, and **warm the pivot cache** (§ below).
   `DELETE /draft/{id}/pick/{ts}` — undo (D6/criterion 7).
@@ -159,24 +173,115 @@ already-present `generate_multiple_plans` in `optimize_lineup.py`. New/changed:
   proposal(s) with tradeoff; caller confirms via `PUT .../active` (D9/D10).
 
 **The optimizer must return infeasibility *diagnostics*, not opaque errors.**
-This builds directly on the merged `_validate_pool_feasibility`. Required:
-- classify the infeasibility cause (budget / position / category / value-player);
-- expose the LP **dual values (shadow prices)** so relaxations rank by cost
-  without iterating over every category (see §5/§7 notes);
-- surface an infeasibility certificate / irreducible infeasible subset so we
-  relax only the constraints actually at fault.
+Builds directly on the merged `_validate_pool_feasibility`. On an infeasible
+solve the backend classifies the cause — budget exhausted / position exhausted /
+category target unreachable / too few value players — from cheap pre-checks (no
+solve) so the UI can name *why* it broke.
 
-**Warm pivot cache (the "never freeze" mechanism).** The client posts each pick
-and gets back a freshly recomputed portfolio, which it stores. The "warmth" comes
-from doing that recompute **at pick time** — when there's slack (other managers
-nominating players the user doesn't want) — rather than at panic time. So "if the
-current target is sniped, the next move is X" is already computed before the miss.
-In v1 this needs **no durable server session**: state is client-held (D12) and
-each pick POST triggers a stateless recompute. Compute stays on the backend
-because cvxpy is Python-only. **Remaining question for Aisha:** the recompute
-execution model (does a single pick POST synchronously return all ~10 plans in
-the between-pick window, or does it need to stream / run async?), and whether the
-solver warm-starts from the prior solution when one player is removed.
+**Constraint relaxation is iterative, not dual-value-based.** Aisha's benchmark
+(review, Gate 2) established that the current stack — cvxpy → HiGHS for the
+boolean MILP — exposes *neither* reliable dual values (shadow prices) *nor* an
+irreducible infeasible subset, so the earlier "rank relaxations by shadow price /
+IIS" plan is not implementable here. v1 relaxes **iteratively** instead: for each
+of the 9 category requirements, re-solve the active plan with that one category
+dropped from `set_requirements`; keep the feasible results and propose the
+**lowest-cost** one (least category-strength / objective lost) with its tradeoff
+(e.g. "punt BLK, −0.4σ"). Cost ≈ 9 × ~4s ≈ **36s worst case** — acceptable because
+this path runs **only when every saved plan is Broken** (rare), and the result is
+**cached** so re-viewing it is instant. Throughout that sweep the always-available
+value board (below) is the shown pick, so the user is never blocked (§2 crit. 6).
+
+*Future performance upgrade (not v1):* solve the LP relaxation (drop
+`boolean=True`) with CLARABEL, which does expose duals, rank constraints by shadow
+price, and re-solve only the top candidate (~4s for one LP solve). Deferred
+pending validation that LP-relaxation duals reliably match the MILP binding order.
+
+**Per-pick execution model** (the "never freeze" mechanism; benchmarked in the
+review). On each `POST /draft/{id}/pick` the backend:
+1. runs **synchronous health checks** on all saved plans — each is an O(1) lookup
+   ("is the drafted player in this plan's roster?"), <100ms for all 10 together;
+2. **re-solves only the plans the pick broke.** Portfolio diversity (strategy map
+   below) means a given pick typically breaks **0–2** plans, so this is
+   0–2 × ~4s = **0–8s**, returned synchronously — comfortably inside a 30–90s
+   between-pick window.
+
+That is the "warmth": the recompute happens **at pick time** (slack — other
+managers nominating players the user doesn't want), so "if my target is sniped,
+the next move is X" is already computed before the miss. In v1 this needs **no
+durable server session** — state is client-held (D12) and each pick POST triggers
+a stateless recompute; compute stays on the backend because cvxpy is Python-only.
+
+**Cascade fallback.** In the rare case a pick breaks **>3** plans at once, the
+backend returns the health statuses immediately and **streams** the remaining
+re-solves via **SSE**; affected plans render a "recomputing" state (`stale: true`,
+below) until their result arrives.
+
+**No solver warm-start.** cvxpy builds fresh `cp.Variable`/`cp.Problem` objects
+each call, and a drafted player shrinks the variable dimension, so warm-starting
+is structurally impossible regardless of backend. It doesn't matter — a single
+solve is **~3.77s** (benchmark: 564-player pool, 13 spots), and cold 10-plan
+generation is **~42s**, a one-time prep/reset cost, not the per-pick workload.
+
+**Concurrency.** Every mutating call carries a monotonic `picks_version`
+(§3). The client echoes the version it acted on; a response for a superseded
+version is discarded, so rapid pick entry can't apply out of order.
+
+**Warm-cache structure & location.** The cache is a plain snapshot returned in the
+`POST /draft/{id}/pick` response (also `/plans` and `GET /state`) and stored
+**client-side** in the localStorage `DraftSession` (D12) — the server keeps none
+of it. Shape:
+
+    {
+      picks_version: int,
+      active_plan_id: str,
+      value_board: [ {player_key, value, max_bid}, … ],   # solver-free floor
+      plans: {
+        <plan_id>: {
+          health: "alive" | "at_risk" | "broken",
+          health_reason: str | null,
+          roster: [PlanSlot, …],
+          next_target: {player_key, max_bid, fills: [cat, …]} | null,
+          stale: bool                 # true while a cascade re-solve is pending
+        }, …
+      },
+      fallback_next: {plan_id, player_key, max_bid}        # top still-alive plan's move
+    }
+
+The client renders entirely from this snapshot; triage (`/triage`) and
+auto-advance read it with **no** network round-trip (a miss just promotes
+`fallback_next`).
+
+**Plan strategy → solver parameters.** Portfolio diversity comes from distinct
+strategy parameterizations, not just percentile cycling + top-price banning (which
+the review found yields plans sharing 8–10 of 13 players). Each D8 shape maps to
+concrete knobs on `OptimizeLineup` / `generate_multiple_plans`:
+
+| Strategy | Categories in `set_requirements` | `percentiles_cycle` | Other knobs |
+|---|---|---|---|
+| Balanced | all 9 | ~0.65–0.75 | default `minimum_value_players`; rotate `stat_to_maximize` |
+| Punt one | 8 (drop the punted cat) | ~0.72–0.80 (higher — freed spend) | maximize a cat you're strong in |
+| Punt multiple | 6–7 (drop 2–3, e.g. FG%+TO or AST+3PM) | ~0.75–0.82 | — |
+| Stars & scrubs | all 9 at a low floor | ~0.55–0.65 | concentrate budget — fewer required value players, more min-priced fills |
+| Spread value | all 9 | ~0.68 | more value players; lift the top-price ban |
+
+A "punt" is literally dropping that category from `set_requirements`. Exact bands
+and counts are tuned in implementation and pinned by the diversity test (§5); the
+map fixes *which* knob each shape turns.
+
+**Health classification (`SavedPlan.health`).**
+- **Broken** — infeasible given `picks` (a `_validate_pool_feasibility` cause
+  fires, or the re-solve returns no roster).
+- **At risk** — feasible, but the roster is **fragile**: it depends on a *scarce*
+  rostered target, defined concretely as a player that is both (a) **load-bearing**
+  — removing them from the pool makes the plan Broken — and (b) **hard to replace**
+  — after removing them, **≤2** still-available players can fill their slot within
+  the plan's remaining budget and position need, *or* they sit at ≥**90th
+  percentile** projected value with no near-substitute at that position.
+  `health_reason` names the player.
+- **Alive** — feasible and not fragile by the above test.
+
+The `≤2`-replacement count and 90th-percentile cutoff are tunable constants pinned
+by the health tests (§5).
 
 **UI (React) — the `DraftPage` rebuild** (per mockup; components):
 `OnTheBlockBar` (manual player set + triage + max + Sold-to actions) ·
@@ -192,10 +297,17 @@ token theme; responsive collapse to the phone live-companion (D4).
 - **Optimizer diagnostics (unit).** For each infeasibility cause (budget gone,
   position exhausted, category target unreachable, too few value players): assert
   a typed diagnosis + a ranked relaxation candidate, not a raw exception.
-- **Shadow-price ranking.** Given a solved plan, the proposed relaxation is the
-  minimum-cost binding constraint (no brute-force over all 9 categories).
-- **Portfolio.** `generate_multiple_plans` yields N *distinct*, individually
-  feasible plans; diversity assertion (different punts/shapes), 5–10 range.
+- **Iterative relaxation.** With every saved plan Broken, the relaxation sweep
+  re-solves dropping each of the 9 categories, returns the lowest-cost *feasible*
+  relaxation with a confirmable pick, and caches it; assert a result comes back and
+  the value-board floor was shown throughout.
+- **Portfolio & diversity.** Each D8 strategy shape produces the expected solver
+  parameterization (punt = category absent from `set_requirements`, etc.); the
+  resulting plans are *distinct* (assert roster overlap below a threshold, e.g.
+  ≤8/13 shared), individually feasible, up to 10.
+- **Health classification.** Construct pool states that exercise Alive / At-risk
+  (load-bearing + hard-to-replace player) / Broken; assert the right label and that
+  `health_reason` names the scarce player.
 - **Auto-advance (integration).** Scripted pick sequence that snipes plan A's
   target → app switches to the top still-Alive plan **without** a fresh solve;
   assert the served `next_target` came from cache.
@@ -210,6 +322,13 @@ token theme; responsive collapse to the phone live-companion (D4).
   pre-pick state (property: log then undo == identity).
 - **Frontend.** `npm run lint` + `npm run build`; desktop and phone layout
   snapshots; light and dark themes both legible; no horizontal body scroll.
+- **Benchmark regression (CI).** Assert single solve < 5s and 10-plan generation
+  < 60s against a fixture projection set, so solver regressions fail the build.
+- **Persistence round-trip.** Serialize a `DraftSession` to localStorage, reload,
+  deserialize → identity; a `schema_version` bump migrates (or resets) cleanly.
+- **Concurrency / rapid picks.** Fire 3 `pick` POSTs in rapid succession; assert
+  all are applied, final state is correct, and stale-`picks_version` responses are
+  discarded (no out-of-order application).
 
 ## 6. Rollback / failure considerations
 
@@ -229,8 +348,10 @@ token theme; responsive collapse to the phone live-companion (D4).
 - **Failure modes to design for:** solve exceeds the between-pick window (always
   fall back to cache/value board; never block the UI); duplicate/typo player
   entry (validate against the projection set, offer close matches); undo of a
-  non-last pick (recompute from the full `picks` log, not incremental patching);
-  stale portfolio after a hand-tune (invalidate + rewarm on plan edit).
+  non-last pick (recompute from the full `picks` log, not incremental patching —
+  this triggers a full portfolio re-solve, ~42s, so the UI shows a spinner and
+  keeps the value board live meanwhile); stale portfolio after a hand-tune
+  (invalidate + rewarm on plan edit).
 
 ---
 
@@ -245,13 +366,14 @@ Resolved with Patrick 2026-07-09 (recorded here so they're not re-litigated):
   spread value, stars & scrubs), all expressed as "constrain categories, maximize
   one" (D8). Target 10 plans, validated against solve time.
 
-Remaining, genuinely for Aisha (engineering):
+Resolved by Aisha's technical review 2026-07-09
+([`DRAFT_ROOM_REVIEW.md`](DRAFT_ROOM_REVIEW.md)):
 
-1. **Solver performance & warm cache.** Is cvxpy fast enough to recompute up to
-   10 plans within a typical between-pick gap? Does it warm-start from the prior
-   solution when one player is removed? Can a single pick POST return them
-   synchronously, or is async/streaming needed? This benchmark decides whether the
-   "warm" promise (and the target of 10) holds, or if we trim the count.
-2. **Shadow prices / IIS.** Does the current solver backend expose dual values
-   and an infeasibility certificate we can read to rank constraint relaxations
-   (§4/§5), or do we need to switch backends?
+1. **Solver performance & warm cache** — benchmarked: ~3.77s/solve, ~42s for a
+   cold 10-plan generation (prep only). Per-pick workload is health checks (<100ms)
+   + 0–2 re-solves (0–8s), synchronous in the common case, SSE for a >3-plan
+   cascade. cvxpy does not warm-start (structurally blocked; irrelevant at ~3.77s).
+   Documented in §4. Target of 10 plans holds, guarded by the CI benchmark test.
+2. **Shadow prices / IIS** — the cvxpy → HiGHS MILP stack exposes neither, so v1
+   uses **iterative** relaxation (§4/§5); LP-relaxation duals (CLARABEL) are a
+   documented future upgrade.
