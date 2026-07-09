@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from draft_engine import apply_pick, build_initial_snapshot, pick_fallback, plan_id_for
+from draft_engine import apply_pick, build_initial_snapshot, pick_fallback, plan_id_for, triage_player
 from draft_strategies import Plan, balanced_config, punt_config
 
 
@@ -96,3 +96,55 @@ def test_plan_id_is_a_clean_deterministic_slug():
     assert plan_id == "punt_fg_and_to"
     assert plan_id == plan_id_for(cfg)  # deterministic across calls
     assert re.fullmatch(r"[a-z0-9_]+", plan_id)  # safe as a JSON key / future URL segment
+
+
+def test_triage_relevant_when_player_is_an_unowned_target_in_an_alive_plan():
+    cfg = balanced_config()
+    snaps = build_initial_snapshot([_plan(cfg, ["jokic", "curry"])])
+    result = triage_player("curry", snaps, owned_keys=frozenset(), value_lookup={"curry": 13.4})
+    assert result.relevant is True
+    assert result.reason == "in_plan"
+    assert result.in_plans == (plan_id_for(cfg),)
+    assert result.max_bid == 13  # rounded
+
+
+def test_triage_ignores_broken_plans_and_already_owned_players():
+    cfg_a = balanced_config()
+    cfg_b = punt_config(["FT%"])
+    snaps = build_initial_snapshot([_plan(cfg_a, ["curry"]), _plan(cfg_b, ["curry", "tatum"])])
+    # Break plan A specifically (no feasible replacement) so it no longer
+    # counts as a live target for "curry"; plan B is untouched.
+    broken_a = apply_pick([snaps[0]], "curry", solve_fn=lambda cfg: None)
+    snaps = broken_a + [snaps[1]]
+
+    # Not in a live plan (A is broken) but not yet owned -> still flagged via
+    # plan B, which does have curry.
+    result = triage_player("curry", snaps, owned_keys=frozenset(), value_lookup={"curry": 13.0})
+    assert result.in_plans == (plan_id_for(cfg_b),)
+
+    # Now simulate curry already being on the user's own roster: even though
+    # cfg_b's cached roster still lists them, they're not a "target" anymore.
+    result_owned = triage_player("curry", snaps, owned_keys=frozenset({"curry"}), value_lookup={"curry": 13.0})
+    assert result_owned.in_plans == ()
+
+
+def test_triage_value_target_when_not_in_any_plan_but_high_value():
+    cfg = balanced_config()
+    snaps = build_initial_snapshot([_plan(cfg, ["jokic"])])
+    result = triage_player(
+        "sleeper_pick", snaps, owned_keys=frozenset(), value_lookup={"sleeper_pick": 9.0},
+        value_target_keys=frozenset({"sleeper_pick"}),
+    )
+    assert result.relevant is True
+    assert result.reason == "value_target"
+    assert result.in_plans == ()
+    assert result.max_bid == 9
+
+
+def test_triage_safe_to_pass_when_neither():
+    cfg = balanced_config()
+    snaps = build_initial_snapshot([_plan(cfg, ["jokic"])])
+    result = triage_player("nobody_cares", snaps, owned_keys=frozenset(), value_lookup={})
+    assert result.relevant is False
+    assert result.reason == "safe_to_pass"
+    assert result.max_bid is None

@@ -20,7 +20,7 @@ Aisha's next review, not a silent deviation from the approved spec.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Dict, FrozenSet, Optional, Sequence
 
 from draft_strategies import Plan, PlanConfig, SolveFn
 
@@ -96,3 +96,46 @@ def pick_fallback(plans: Sequence[PlanSnapshot]) -> Optional[PlanSnapshot]:
         if plan.health == "alive":
             return plan
     return None
+
+
+@dataclass(frozen=True)
+class Triage:
+    """Result of classifying a nominated player against the already-computed
+    portfolio (spec §2 criterion 3 / §4 ``POST /draft/triage``)."""
+
+    player_key: str
+    relevant: bool
+    in_plans: tuple[str, ...]
+    max_bid: Optional[float]
+    reason: str  # "in_plan" | "value_target" | "safe_to_pass"
+
+
+def triage_player(
+    player_key: str,
+    plans: Sequence[PlanSnapshot],
+    owned_keys: FrozenSet[str],
+    value_lookup: Dict[str, float],
+    value_target_keys: FrozenSet[str] = frozenset(),
+) -> Triage:
+    """On-the-block triage: **no solve** — just reads the portfolio the client
+    already has. Relevant if the player is an unowned target in >=1 still-Alive
+    plan (§2 criterion 3's "Relevant"), or if they're one of the best remaining
+    players by raw value regardless of plan (a "value target" worth grabbing
+    even if no saved plan happens to name them — the spec's "not a value
+    target" clause for the Safe-to-pass case implies this second check).
+    Otherwise Safe to pass, so the user can ignore the clock (§2 criterion 3).
+    """
+    in_plans = tuple(
+        p.plan_id
+        for p in plans
+        if p.health == "alive" and player_key in p.roster and player_key not in owned_keys
+    )
+    if in_plans:
+        max_bid = value_lookup.get(player_key)
+        return Triage(player_key, True, in_plans, round(max_bid) if max_bid is not None else None, "in_plan")
+
+    if player_key in value_target_keys:
+        max_bid = value_lookup.get(player_key)
+        return Triage(player_key, True, (), round(max_bid) if max_bid is not None else None, "value_target")
+
+    return Triage(player_key, False, (), None, "safe_to_pass")
