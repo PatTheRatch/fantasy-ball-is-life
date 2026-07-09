@@ -5,8 +5,8 @@ import re
 
 import pytest
 
-from draft_engine import apply_pick, build_initial_snapshot, pick_fallback, plan_id_for, triage_player
-from draft_strategies import Plan, balanced_config, punt_config
+from draft_engine import apply_pick, build_initial_snapshot, pick_fallback, plan_id_for, relax_plan, triage_player
+from draft_strategies import CATEGORIES, Plan, balanced_config, punt_config
 
 
 def _plan(config, roster):
@@ -148,3 +148,52 @@ def test_triage_safe_to_pass_when_neither():
     assert result.relevant is False
     assert result.reason == "safe_to_pass"
     assert result.max_bid is None
+
+
+def test_relax_picks_the_candidate_with_the_best_objective():
+    cfg = balanced_config()  # all 9 categories constrained
+
+    # Only dropping BLK is feasible; the rest stay infeasible (None). Its
+    # score is what should come back.
+    def solve_with_score(candidate_cfg):
+        if "BLK" not in candidate_cfg.constrained_categories:
+            return (["a", "b", "c"], 42.0)
+        return None
+
+    proposal = relax_plan(cfg, solve_with_score)
+    assert proposal is not None
+    assert proposal.dropped_category == "BLK"
+    assert proposal.objective_score == 42.0
+    assert proposal.roster == ("a", "b", "c")
+    assert "BLK" not in proposal.config.constrained_categories
+    assert "BLK" in proposal.config.punts
+
+
+def test_relax_prefers_the_highest_scoring_feasible_candidate():
+    cfg = balanced_config()
+    scores = {"PTS": 10.0, "REB": 5.0, "AST": 99.0, "STL": 1.0}
+
+    def solve_with_score(candidate_cfg):
+        dropped = (set(cfg.constrained_categories) - set(candidate_cfg.constrained_categories)).pop()
+        if dropped in scores:
+            return ([dropped], scores[dropped])
+        return None
+
+    proposal = relax_plan(cfg, solve_with_score)
+    assert proposal is not None
+    assert proposal.dropped_category == "AST"  # highest score
+    assert proposal.objective_score == 99.0
+
+
+def test_relax_sweeps_every_category_when_needed():
+    cfg = balanced_config()
+    seen = []
+
+    def solve_with_score(candidate_cfg):
+        seen.append((set(cfg.constrained_categories) - set(candidate_cfg.constrained_categories)).pop())
+        return None  # nothing feasible
+
+    proposal = relax_plan(cfg, solve_with_score)
+    assert proposal is None
+    assert set(seen) == set(cfg.constrained_categories)  # every category was tried
+    assert len(seen) == len(CATEGORIES)  # exactly the 9-category sweep the spec describes
