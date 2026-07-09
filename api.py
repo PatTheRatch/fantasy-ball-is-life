@@ -18,7 +18,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
 import data_feed as feed
-from config import LEAGUE_ID, SEASON
+from config import BBM_PROJECTIONS_PATH, LEAGUE_ID, SEASON
 from fantasy import MyLeague
 from optimize_lineup import OptimizeLineup, generate_multiple_plans
 
@@ -1398,6 +1398,17 @@ async def optimizer_optimize(request: Request) -> List[dict[str, Any]]:
             raw = await up.read()
             if raw:
                 bbm_df = _read_excel_bytes(raw)
+        if bbm_df is None:
+            default_path = Path(BBM_PROJECTIONS_PATH)
+            if not default_path.exists():
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No `bbm_file` was uploaded and the default projections file "
+                        f"was not found at {BBM_PROJECTIONS_PATH}"
+                    ),
+                )
+            bbm_df = _read_excel_bytes(default_path.read_bytes())
     else:
         try:
             payload = await request.json()
