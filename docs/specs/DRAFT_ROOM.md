@@ -261,12 +261,31 @@ concrete knobs on `OptimizeLineup` / `generate_multiple_plans`:
 | Balanced | all 9 | ~0.65–0.75 | default `minimum_value_players`; rotate `stat_to_maximize` |
 | Punt one | 8 (drop the punted cat) | ~0.72–0.80 (higher — freed spend) | maximize a cat you're strong in |
 | Punt multiple | 6–7 (drop 2–3, e.g. FG%+TO or AST+3PM) | ~0.75–0.82 | — |
-| Stars & scrubs | all 9 at a low floor | ~0.55–0.65 | concentrate budget — fewer required value players, more min-priced fills |
-| Spread value | all 9 | ~0.68 | more value players; lift the top-price ban |
+| Stars & scrubs | all 9 at a low floor | ~0.55–0.65 | concentrate budget — **more** required $1 fills (many scrubs behind a few stars) |
+| Spread value | all 9 | ~0.68 | **fewer** $1 fills (more mid-tier players); lift the top-price ban |
 
-A "punt" is literally dropping that category from `set_requirements`. Exact bands
-and counts are tuned in implementation and pinned by the diversity test (§5); the
-map fixes *which* knob each shape turns.
+`minimum_value_players` is the optimizer's count of required **$1 roster slots**
+(players whose `Value == 1`): *more* $1 slots ⇒ top-heavy stars & scrubs, *fewer*
+⇒ a flatter spread build. (Correction found in implementation: an earlier draft of
+this table had the stars & scrubs / spread-value direction reversed.) A "punt" is
+literally dropping that category from `set_requirements`. Exact bands and counts
+are tuned in implementation and pinned by the diversity test (§5); the map fixes
+*which* knob each shape turns.
+
+**Empirical check (implemented — `draft_strategies.py`).** The strategy map and a
+dependency-injected diversity loop (`generate_portfolio`) are built and unit-tested
+offline; a gated integration test runs them through the **real** `OptimizeLineup`
+on the **real BBM pool** (`tests/test_plan_diversity_integration.py`). Findings on
+the live 564-player pool: all 10 configs solve feasibly; the objective + multi-punt
+variation alone already yields diverse rosters (avg overlap 4.2/13, many pairs at
+0 shared). **Single-category punts are no-ops unless category targets are active** —
+with targets bypassed, `Punt FT%` and `Punt TO` collapsed onto `Balanced` (13/13
+shared). Two consequences, now load-bearing in the design: (1) portfolio generation
+**must** set category requirements (whose targets come from `get_universe_wins`),
+and (2) the `generate_portfolio` **≤8/13 dedup** is what guarantees the final saved
+set is distinct even when raw configs collapse. Note: the full target-setting path
+needs live ESPN access, which the web sandbox's network policy blocks — that leg
+runs in an ESPN-allowlisted environment (per Aisha's benchmark setup).
 
 **Health classification (`SavedPlan.health`).**
 - **Broken** — infeasible given `picks` (a `_validate_pool_feasibility` cause
@@ -304,7 +323,9 @@ token theme; responsive collapse to the phone live-companion (D4).
 - **Portfolio & diversity.** Each D8 strategy shape produces the expected solver
   parameterization (punt = category absent from `set_requirements`, etc.); the
   resulting plans are *distinct* (assert roster overlap below a threshold, e.g.
-  ≤8/13 shared), individually feasible, up to 10.
+  ≤8/13 shared), individually feasible, up to 10. *(Implemented —
+  `tests/test_draft_strategies.py` unit + `tests/test_plan_diversity_integration.py`
+  real-pool integration; both green.)*
 - **Health classification.** Construct pool states that exercise Alive / At-risk
   (load-bearing + hard-to-replace player) / Broken; assert the right label and that
   `health_reason` names the scarce player.

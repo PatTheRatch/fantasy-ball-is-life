@@ -36,3 +36,6 @@ python-multipart>=0.0.9
 
 # Loads `.env` into environment variables (used by api.py for ANTHROPIC_API_KEY)
 python-dotenv>=1.0.0
+
+# Tests
+pytest>=7.0.0
