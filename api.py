@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 import data_feed as feed
 from config import BBM_PROJECTIONS_PATH, LEAGUE_ID, SEASON
-from draft_engine import PlanSnapshot, apply_pick, build_initial_snapshot, pick_fallback
+from draft_engine import PlanSnapshot, apply_pick, build_initial_snapshot, pick_fallback, triage_player
 from draft_strategies import PlanConfig, SolveFn, build_plan_configs, generate_portfolio
 from fantasy import MyLeague
 from optimize_lineup import OptimizeLineup, generate_multiple_plans
@@ -1705,6 +1705,41 @@ def draft_pick(body: DraftPickBody) -> dict:
         "plans": public_plans,
         "fallback_next": _fallback_public(updated, public_plans),
         "value_board": _value_board(value_lookup, all_drafted_keys),
+    }
+
+
+class DraftTriageBody(DraftPoolParams):
+    picks: List[DraftPickEntry] = Field(default_factory=list)
+    prior_plans: List[dict]
+    player_key: str
+
+
+@app.post("/draft/triage")
+def draft_triage(body: DraftTriageBody) -> dict:
+    """On-the-block triage (spec §2 criterion 3 / §4). Classifies the player
+    the user set as "on the block" against the portfolio the client already
+    has — Relevant (in >=1 still-Alive plan, or a top-of-board value target)
+    vs. Safe to pass. No solve; reads the already-computed snapshot, same as
+    the spec's "<1s, no fresh solve" requirement."""
+    _, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+
+    try:
+        prior = [_snapshot_from_public(d) for d in body.prior_plans]
+    except (KeyError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=f"malformed prior_plans entry: {e}") from e
+
+    # "Not a value target" (spec §2 criterion 3's Safe-to-pass clause) is
+    # defined as: not among the best remaining players by raw value, using
+    # the same solver-free value board shown elsewhere in the UI.
+    value_target_keys = frozenset(p["player_key"] for p in _value_board(value_lookup, all_drafted_keys, limit=10))
+
+    result = triage_player(body.player_key, prior, frozenset(owned_keys), value_lookup, value_target_keys)
+    return {
+        "player_key": result.player_key,
+        "relevant": result.relevant,
+        "in_plans": list(result.in_plans),
+        "max_bid": result.max_bid,
+        "reason": result.reason,
     }
 
 

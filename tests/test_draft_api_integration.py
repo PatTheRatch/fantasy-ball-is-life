@@ -107,3 +107,36 @@ def test_draft_plans_then_pick_round_trip(monkeypatch):
     # the value board (drafted-by-anyone is excluded from the floor too).
     assert updated["fallback_next"] is not None
     assert sniped not in {pl["player_key"] for pl in updated["value_board"]}
+
+    # --- triage: someone new gets nominated ---
+    # A player who's still a live target in some plan -> Relevant.
+    still_wanted = next(
+        p for p in updated["plans"]
+        if p["health"] == "alive" and p["next_target"]
+    )["next_target"]["player_key"]
+    triage_relevant = client.post(
+        "/draft/triage",
+        json={"n_plans": 6, "picks": [], "prior_plans": updated["plans"], "player_key": still_wanted},
+    )
+    assert triage_relevant.status_code == 200, triage_relevant.text
+    t = triage_relevant.json()
+    assert t["relevant"] is True
+    assert t["reason"] == "in_plan"
+    assert len(t["in_plans"]) > 0
+    assert t["max_bid"] > 0
+
+    # A name that's in no plan and not on the value board -> Safe to pass.
+    triage_pass = client.post(
+        "/draft/triage",
+        json={
+            "n_plans": 6,
+            "picks": [],
+            "prior_plans": updated["plans"],
+            "player_key": "definitely_not_a_real_player_xyz",
+        },
+    )
+    assert triage_pass.status_code == 200, triage_pass.text
+    p = triage_pass.json()
+    assert p["relevant"] is False
+    assert p["reason"] == "safe_to_pass"
+    assert p["max_bid"] is None
