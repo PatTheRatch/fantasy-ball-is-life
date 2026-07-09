@@ -1972,6 +1972,31 @@ def draft_relax(body: DraftRelaxBody) -> dict:
     }
 
 
+@app.get("/draft/players")
+def draft_players_search(q: str = "") -> List[dict]:
+    """Autocomplete for the Draft Room's player inputs. Same `OptimizeLineup`
+    + projections pattern as `_build_pool_context`, but no picks/targets, no
+    `set_requirements`/solve — just a case-insensitive substring filter over
+    the projected pool's Name column, so it stays fast."""
+    q = q.strip().lower()
+    if len(q) < 2:
+        return []
+    try:
+        df = OptimizeLineup(value_col="Value").player_data_df
+    except Exception:
+        return []
+    matches = df[df["Name"].str.lower().str.contains(q, na=False)]
+    return [
+        {
+            "player_key": str(row["Name"]).lower(),
+            "pos": row.get("Pos"),
+            "team": row.get("Team"),
+            "value": round(float(row["$"]), 1) if pd.notna(row["$"]) else None,
+        }
+        for _, row in matches.head(15).iterrows()
+    ]
+
+
 @app.get("/projected-scoreboard")
 def projected_scoreboard(
     week_end_date: Optional[str] = None,

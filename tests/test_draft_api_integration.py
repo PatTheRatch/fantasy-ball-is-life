@@ -384,3 +384,48 @@ def test_target_categories_validation_error_returns_422():
         json={"n_plans": 2, "picks": [], "target_categories": ["PTS"], "stat_to_maximize": "REB"},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_draft_players_search_matches_by_substring(monkeypatch):
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.get("/draft/players", params={"q": "maxey"})
+    assert resp.status_code == 200, resp.text
+    results = resp.json()
+    assert any(r["player_key"] == "tyrese maxey" for r in results)
+    for r in results:
+        assert set(r.keys()) == {"player_key", "pos", "team", "value"}
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_draft_players_search_requires_two_chars(monkeypatch):
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.get("/draft/players", params={"q": "m"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_draft_players_search_no_match_returns_empty(monkeypatch):
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.get("/draft/players", params={"q": "zzzznotarealplayerzzzz"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []

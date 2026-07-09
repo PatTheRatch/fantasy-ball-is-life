@@ -560,6 +560,19 @@ export async function postDraftRelax(
   return data
 }
 
+export interface DraftPlayerResult {
+  player_key: string
+  pos: string | null
+  team: string | null
+  value: number | null
+}
+
+export async function getDraftPlayers(q: string): Promise<DraftPlayerResult[]> {
+  if (q.length < 2) return []
+  const { data } = await client.get<DraftPlayerResult[]>('/draft/players', { params: { q } })
+  return data
+}
+
 export async function getProjectedScoreboard(params?: {
   week_end_date?: string
   current_matchup_period?: number
