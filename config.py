@@ -27,3 +27,11 @@ WEEKLY_PROJECTIONS_DEFAULT_PATH = str(PLAYER_RANKINGS_DIR / WEEKLY_PROJECTIONS_F
 
 # Default season year for `MyLeague` in the draft optimizer (may differ from ESPN_SEASON)
 DRAFT_LEAGUE_YEAR_DEFAULT = int(os.getenv("DRAFT_LEAGUE_YEAR", "2025"))
+
+# Average NBA games a team plays in a typical *playable* fantasy week.
+# Scales per-game projections to per-week for draft targets and the optimizer's
+# roster constraints. Derivation (see docs/specs/MC_DRAFT_TARGETS.md): 82 games /
+# ~23.4 playable weeks (regular season minus the All-Star break) ~= 3.5,
+# consistent with the fantasy-standard 3-4 games/week. One tunable constant;
+# override via env if a league's cadence differs.
+GAMES_PER_WEEK: float = float(os.getenv("GAMES_PER_WEEK", "3.5"))
