@@ -6,12 +6,14 @@ from __future__ import annotations
 import io
 import math
 import os
+from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+import auction_values_mc as auction_mc
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
@@ -1533,6 +1535,24 @@ class DraftPlansBody(DraftPoolParams):
     picks: List[DraftPickEntry] = Field(default_factory=list)
 
 
+class AuctionSimulationBody(DraftPoolParams):
+    """Monte Carlo auction-value simulation request.
+
+    ``players`` is optional so callers can either provide a normalized projection
+    pool directly or let the backend use the same optimizer pool as /draft/plans.
+    """
+
+    picks: List[DraftPickEntry] = Field(default_factory=list)
+    players: Optional[List[dict[str, Any]]] = None
+    managers: Optional[List[dict[str, Any]]] = None
+    n_managers: int = Field(default=12, ge=2, le=20)
+    n_simulations: int = Field(default=500, ge=1, le=5000)
+    seed: int = 7
+    max_centers: int = Field(default=3, ge=1, le=8)
+    return_sales: bool = False
+    sales_limit: int = Field(default=500, ge=0, le=10000)
+
+
 class DraftPickBody(DraftPoolParams):
     picks: List[DraftPickEntry]  # full updated list, including the new pick (undo-safe; §6)
     new_pick: DraftPickEntry
@@ -1680,6 +1700,70 @@ def _fallback_public(plans: List[PlanSnapshot], public_plans: List[dict]) -> Opt
         "label": fb.config.label,
         "player_key": target["player_key"] if target else None,
         "max_bid": target["max_bid"] if target else None,
+    }
+
+
+@app.post("/draft/auction-sim")
+def draft_auction_sim(body: AuctionSimulationBody) -> dict:
+    """Monte Carlo auction-price distributions.
+
+    This is backend-only scaffolding for now: simulate the room with generic or
+    caller-provided manager philosophies, then return each player's sale-price
+    distribution and likely buyer archetype.
+    """
+    try:
+        if body.players is not None:
+            pool_df = pd.DataFrame(body.players)
+        else:
+            drafted_keys = [p.player_key for p in body.picks]
+            opt = OptimizeLineup(
+                exclude_players=drafted_keys,
+                games_per_week=body.games_per_week,
+                initial_budget=body.initial_budget,
+                year=body.year,
+                roster_size=body.roster_size,
+                minimum_value_players=body.minimum_value_players,
+                minimum_game_threshold=body.minimum_game_threshold,
+                value_col="Value",
+            )
+            pool_df = opt._mc_pool_df()
+
+        if body.managers is None:
+            profiles = auction_mc.default_manager_profiles(body.n_managers)
+        else:
+            profiles = [
+                auction_mc.ManagerProfile.from_mapping(raw, idx)
+                for idx, raw in enumerate(body.managers)
+            ]
+
+        summary, sales = auction_mc.simulate_auction_prices(
+            pool_df,
+            manager_profiles=profiles,
+            n_simulations=body.n_simulations,
+            budget=body.initial_budget,
+            roster_size=body.roster_size,
+            max_centers=body.max_centers,
+            rng_seed=body.seed,
+            return_sales=body.return_sales,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    sales_out = []
+    if body.return_sales and sales is not None:
+        sales_out = _df_records(sales.head(body.sales_limit))
+
+    return {
+        "settings": {
+            "n_simulations": body.n_simulations,
+            "n_managers": len(profiles),
+            "budget": body.initial_budget,
+            "roster_size": body.roster_size,
+            "seed": body.seed,
+        },
+        "manager_profiles": [asdict(p) for p in profiles],
+        "summary": _df_records(summary),
+        "sales": sales_out,
     }
 
 
