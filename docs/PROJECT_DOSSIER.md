@@ -136,7 +136,8 @@ wrap for mobile only if there's real pull.
 - [ ] Restructure the flat backend (`api.py`, `data_feed.py`) into a package.
 - [ ] Implement the projection-source framework (after Aisha's review).
 - [ ] Close the loop: schedule + deliver weekly recaps to the group chat.
-- [ ] Finish the Draft page in the React app.
+- [ ] Finish the Draft page in the React app — design locked & spec written
+      ([`docs/specs/DRAFT_ROOM.md`](specs/DRAFT_ROOM.md)); pending Aisha's review.
 
 ---
 
