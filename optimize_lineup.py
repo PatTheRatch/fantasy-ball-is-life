@@ -23,7 +23,7 @@ class OptimizeLineup:
         minimum_value_players=3,
         favorite_team=None,
         favorite_team_representation=1,
-        minimum_game_threshold=55,
+        minimum_game_threshold=20,
         value_col='$',
         projections_df: Optional[pd.DataFrame] = None,
     ):
@@ -42,6 +42,9 @@ class OptimizeLineup:
         self.requirements = {}
         self.favorite_team = favorite_team
         self.favorite_team_representation = favorite_team_representation
+        max_g = self.player_data_df["g"].max()
+        if minimum_game_threshold >= max_g:
+            minimum_game_threshold = max(1, int(max_g * 0.5))
         self.minimum_game_threshold = minimum_game_threshold
         self.value_col = value_col
 
@@ -173,6 +176,54 @@ class OptimizeLineup:
 
         return df
 
+    def _validate_pool_feasibility(self, player_data_df, current_roster, player_data_df_original):
+        """
+        Sanity-check the filtered player pool before handing it to the solver, so obviously
+        infeasible setups (e.g. a `minimum_game_threshold` that filters out every player) raise a
+        clear, actionable error instead of cvxpy's opaque "Cannot unpack invalid solution".
+        """
+        needed = self.roster_size - len(current_roster)
+
+        if player_data_df.empty:
+            max_games = player_data_df_original['g'].max() if not player_data_df_original.empty else 0
+            raise ValueError(
+                f"No players remain after filtering on minimum_game_threshold="
+                f"{self.minimum_game_threshold} (max games in the loaded projections data is "
+                f"{max_games}). Lower `minimum_game_threshold` and try again."
+            )
+
+        if needed < 0:
+            raise ValueError(
+                f"Current roster already has {len(current_roster)} players, which exceeds "
+                f"roster_size={self.roster_size}."
+            )
+
+        if needed > len(player_data_df):
+            raise ValueError(
+                f"Need {needed} more player(s) to fill the roster, but only "
+                f"{len(player_data_df)} eligible player(s) remain after filtering "
+                f"(minimum_game_threshold={self.minimum_game_threshold}). Lower "
+                f"`minimum_game_threshold` or exclude fewer players."
+            )
+
+        value_players = int((player_data_df[self.value_col] == 1).sum())
+        if value_players < self.minimum_value_players:
+            raise ValueError(
+                f"`minimum_value_players`={self.minimum_value_players} but only {value_players} "
+                f"player(s) with {self.value_col}==1 remain after filtering "
+                f"(minimum_game_threshold={self.minimum_game_threshold}). Lower "
+                f"`minimum_value_players` or `minimum_game_threshold`."
+            )
+
+        for position in ('C', 'PG', 'SG', 'SF', 'PF'):
+            available = int(player_data_df['Pos'].str.contains(position).sum())
+            if available < 1:
+                raise ValueError(
+                    f"No eligible players remain at position '{position}' after filtering "
+                    f"(minimum_game_threshold={self.minimum_game_threshold}). Lower "
+                    f"`minimum_game_threshold` or exclude fewer players."
+                )
+
     def optimize_roster(self, stat_to_maximize):
         # Core constraints
         player_data_df = self.player_data_df.copy()
@@ -185,6 +236,8 @@ class OptimizeLineup:
             (~player_data_df['Name'].str.lower().isin(current_roster['Name'])) &
             (player_data_df['g'] > self.minimum_game_threshold)
         ]
+
+        self._validate_pool_feasibility(player_data_df, current_roster, player_data_df_original)
 
         player_vars = cp.Variable(len(player_data_df), boolean=True)
 
@@ -253,7 +306,26 @@ class OptimizeLineup:
 
         objective = cp.Maximize(player_data_df[f'{stat_to_maximize} PW'].values @ player_vars)
         prob = cp.Problem(objective, constraints)
-        prob.solve()
+        try:
+            prob.solve()
+        except ValueError as e:
+            raise ValueError(
+                f"Solver failed to find a solution (status={prob.status}). This usually means the "
+                f"constraints are infeasible for the current player pool of {len(player_data_df)} "
+                f"player(s) and remaining budget of {remaining_budget}. Try lowering "
+                f"`minimum_game_threshold` (currently {self.minimum_game_threshold}), reducing "
+                f"`minimum_value_players` (currently {self.minimum_value_players}), or relaxing "
+                f"the stat requirement percentile."
+            ) from e
+
+        if prob.status not in ('optimal', 'optimal_inaccurate') or player_vars.value is None:
+            raise ValueError(
+                f"No feasible roster found (solver status={prob.status}) for a player pool of "
+                f"{len(player_data_df)} player(s) and remaining budget of {remaining_budget}. Try "
+                f"lowering `minimum_game_threshold` (currently {self.minimum_game_threshold}), "
+                f"reducing `minimum_value_players` (currently {self.minimum_value_players}), or "
+                f"relaxing the stat requirement percentile."
+            )
 
         results = player_data_df[(player_vars.value.round().astype(bool))]
         results = pd.concat([results, player_data_df_original[

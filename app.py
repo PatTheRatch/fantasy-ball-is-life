@@ -8,11 +8,14 @@ import io
 import json
 import html as html_lib
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import pandas as pd
 import streamlit as st
+
+from config import BBM_PROJECTIONS_PATH
 
 API_BASE = "http://localhost:8000"
 
@@ -210,14 +213,27 @@ def tab_draft_optimizer() -> None:
     st.header("Draft Optimizer")
 
     uploaded = st.file_uploader(
-        "Season BBM projections (.xls / .xlsx)",
+        "Season BBM projections (.xls / .xlsx) — optional, overrides the default projections",
         type=["xls", "xlsx"],
         key="bbm_season_file",
     )
 
     if uploaded is None:
-        st.session_state.draft_projection_names = None
-        st.session_state.draft_names_file_id = None
+        if st.session_state.get("draft_names_file_id") != "__default__":
+            default_path = Path(BBM_PROJECTIONS_PATH)
+            if default_path.exists():
+                try:
+                    st.session_state.draft_projection_names = _player_names_from_projection_bytes(
+                        default_path.read_bytes(), default_path.name
+                    )
+                    st.session_state.draft_names_file_id = "__default__"
+                except Exception as e:
+                    st.session_state.draft_projection_names = None
+                    st.session_state.draft_names_file_id = None
+                    st.warning(f"Could not read player names for autocomplete: {e}")
+            else:
+                st.session_state.draft_projection_names = None
+                st.session_state.draft_names_file_id = None
     else:
         raw = uploaded.getvalue()
         fid = getattr(uploaded, "file_id", None) or hashlib.sha256(raw).hexdigest()
@@ -319,7 +335,7 @@ def tab_draft_optimizer() -> None:
             if manual.strip():
                 new_name = manual.strip()
     else:
-        st.caption("Upload a BBM projections file above to enable the player picker and autocomplete.")
+        st.caption("Player name autocomplete is unavailable — enter names manually below.")
         c1, c2, c3 = st.columns([2, 1, 1])
         with c1:
             new_name = st.text_input("Player name", key="draft_new_name", label_visibility="collapsed")
@@ -353,9 +369,7 @@ def tab_draft_optimizer() -> None:
         optimize = st.button("🔍 Optimize", type="primary")
 
     if optimize:
-        if uploaded is None:
-            st.warning("Upload a season BBM projections file before optimizing.")
-        elif not categories:
+        if not categories:
             st.warning("Select at least one constraint category.")
         else:
             payload = {
@@ -378,12 +392,11 @@ def tab_draft_optimizer() -> None:
                 ],
             }
             try:
-                file_body = uploaded.getvalue()
-                fname = uploaded.name or "bbm.xlsx"
-                files = {
-                    "data": (None, json.dumps(payload)),
-                    "bbm_file": (fname, file_body, "application/octet-stream"),
-                }
+                files: Dict[str, Any] = {"data": (None, json.dumps(payload))}
+                if uploaded is not None:
+                    file_body = uploaded.getvalue()
+                    fname = uploaded.name or "bbm.xlsx"
+                    files["bbm_file"] = (fname, file_body, "application/octet-stream")
                 with _http_client() as client:
                     r = client.post("/optimizer/optimize", files=files)
                 r.raise_for_status()
