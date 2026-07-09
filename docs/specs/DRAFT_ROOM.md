@@ -28,10 +28,11 @@ Captured from the 2026-07-09 review so implementation doesn't relitigate them:
 | D5 | Per-player data | Projected $ value · your max bid · value-over-replacement/rank · all 9 category contributions |
 | D6 | Pick logging | **Manual-first** (source of truth). Team **dropdown** (all league teams). **Undo** — global "last pick" and per-pick |
 | D7 | On-the-block player | **User sets it manually**; no dependency on a live ESPN feed. Tool triages relevant / safe-to-pass + shows your max |
-| D8 | Plan portfolio | Save **5–10** diverse plans. **Auto-generate the set, then hand-tune.** Each shows live health |
+| D8 | Plan portfolio | **Auto-generate, then hand-tune**, up to **10** plans (target 10 — validate against solve time in testing; may reduce). Strategy shapes are **user-selectable**: balanced, punt one/more cats, spread value, stars & scrubs. All are the same engine mechanic — constrain a set of categories, maximize one — just parameterized differently |
 | D9 | When a plan breaks | **Auto-advance** to the next live plan (instant). Re-solve with relaxation only if *all* break |
 | D10 | Relaxation control | **Auto-propose, one-tap confirm** before it becomes active |
 | D11 | Live ESPN sync | **Optional future accelerator only** — never a dependency (see §6) |
+| D12 | Draft persistence | **v1: same-device autosave** — survives an accidental refresh or crash (browser local storage). **Resume-anywhere** (server-side, cross-device) is a known future upgrade, not v1 |
 
 **Deferred to a later spec (explicitly out of scope here):** the "League
 landscape" panel — most-similar build, your kryptonite, league-wide budget/
@@ -92,9 +93,13 @@ day is execution, not improvisation.
 
 ## 3. Data model impact
 
-No database (consistent with the rest of the app — on-disk / session state).
-Three new structures, held in a **server-side draft session** (see §4 note on why
-the portfolio can't live only in the browser):
+No database (consistent with the rest of the app). Three new structures. **In v1
+the draft state is client-authoritative and persisted to browser local storage**
+(D12), so an accidental refresh or crash mid-draft loses nothing on the same
+device. The backend stays **stateless per request** and only *computes* plans on
+demand (cvxpy is Python-only — see §4). A durable **server-side** `DraftSession`
+arrives later with the resume-anywhere upgrade; the shape below is the same either
+way.
 
 **`DraftSession`** — one active draft.
 
@@ -161,14 +166,17 @@ This builds directly on the merged `_validate_pool_feasibility`. Required:
 - surface an infeasibility certificate / irreducible infeasible subset so we
   relax only the constraints actually at fault.
 
-**Warm pivot cache (the "never freeze" mechanism).** After each `POST .../pick`,
-the backend recomputes the plan portfolio in the background so that "if the
-current target is sniped, the next move is X" is **precomputed before the miss**.
-Between picks there is normally ample wall-clock time (other managers nominating
-players the user doesn't want). This is why the portfolio lives server-side — the
-browser can't run cvxpy. **Open architecture question for Aisha:** where/how the
-background recompute runs (async task in-process vs a small worker), and whether
-warm-start between solves is feasible with the current solver.
+**Warm pivot cache (the "never freeze" mechanism).** The client posts each pick
+and gets back a freshly recomputed portfolio, which it stores. The "warmth" comes
+from doing that recompute **at pick time** — when there's slack (other managers
+nominating players the user doesn't want) — rather than at panic time. So "if the
+current target is sniped, the next move is X" is already computed before the miss.
+In v1 this needs **no durable server session**: state is client-held (D12) and
+each pick POST triggers a stateless recompute. Compute stays on the backend
+because cvxpy is Python-only. **Remaining question for Aisha:** the recompute
+execution model (does a single pick POST synchronously return all ~10 plans in
+the between-pick window, or does it need to stream / run async?), and whether the
+solver warm-starts from the prior solution when one player is removed.
 
 **UI (React) — the `DraftPage` rebuild** (per mockup; components):
 `OnTheBlockBar` (manual player set + triage + max + Sold-to actions) ·
@@ -228,15 +236,22 @@ token theme; responsive collapse to the phone live-companion (D4).
 
 ## Open questions for Aisha (technical review)
 
-1. **Where does the warm recompute run?** In-process async vs a worker; is a
-   persistent server-side `DraftSession` acceptable, or should state be
-   client-held and posted each solve? (§4)
-2. **Solver performance.** Is cvxpy fast enough to recompute a 5–10-plan
-   portfolio within a typical between-pick gap? Does it warm-start from the prior
-   solution when one player is removed? Benchmark needed before committing to the
-   "warm cache" promise.
-3. **Shadow prices / IIS.** Does the current solver backend expose dual values
-   and an infeasibility certificate we can read for constraint ranking, or do we
-   need to switch backends?
-4. **Diversity definition.** How `generate_multiple_plans` should parameterize
-   "diverse" (punt strategies, stars-and-scrubs vs balanced) for the portfolio.
+Resolved with Patrick 2026-07-09 (recorded here so they're not re-litigated):
+- **State & persistence** — v1 is client-authoritative state + local autosave
+  (D12); backend stays stateless and recomputes per pick. Durable server session
+  is deferred to the resume-anywhere upgrade. *Aisha still owns the recompute
+  execution model (sync vs async/stream) — see §4.*
+- **Plan diversity** — user-selectable strategy shapes (balanced, punt one/more,
+  spread value, stars & scrubs), all expressed as "constrain categories, maximize
+  one" (D8). Target 10 plans, validated against solve time.
+
+Remaining, genuinely for Aisha (engineering):
+
+1. **Solver performance & warm cache.** Is cvxpy fast enough to recompute up to
+   10 plans within a typical between-pick gap? Does it warm-start from the prior
+   solution when one player is removed? Can a single pick POST return them
+   synchronously, or is async/streaming needed? This benchmark decides whether the
+   "warm" promise (and the target of 10) holds, or if we trim the count.
+2. **Shadow prices / IIS.** Does the current solver backend expose dual values
+   and an infeasibility certificate we can read to rank constraint relaxations
+   (§4/§5), or do we need to switch backends?
