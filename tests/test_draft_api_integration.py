@@ -75,6 +75,23 @@ def test_draft_plans_then_pick_round_trip(monkeypatch):
             assert p["next_target"] is not None
             assert p["next_target"]["max_bid"] > 0
 
+    # D5 (spec §0): every roster row must carry the full per-player data —
+    # $ value, position, and all 9 category contributions — not just a bare
+    # name. `players` is the enriched parallel to the bare `roster` list.
+    first_alive = next(p for p in data["plans"] if p["roster"])
+    assert len(first_alive["players"]) == len(first_alive["roster"])
+    sample_player = first_alive["players"][0]
+    for field in ("player_key", "pos", "team", "value", "pts", "reb", "ast", "stl", "blk", "tpm", "fg_pct", "ft_pct", "to"):
+        assert field in sample_player, f"missing {field} on roster row"
+    assert sample_player["pos"]
+    assert sample_player["to"] >= 0  # re-negated back to a normal positive display value
+
+    # Value board entries carry the same enrichment (used for the rail's
+    # best-available list, not just plan rosters).
+    vb_entry = data["value_board"][0]
+    assert vb_entry["pos"]
+    assert vb_entry["value"] > 0
+
     # --- log a pick: draft away the first plan's next_target and confirm the
     # server does a *targeted* recompute, not a blind full re-solve ---
     target_plan = data["plans"][0]
