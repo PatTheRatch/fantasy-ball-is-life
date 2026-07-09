@@ -142,12 +142,27 @@ class OptimizeLineup:
     def get_target_stats(self, percentile=.75):
         print('getting target stats')
         weekly_stats = {cat: [] for cat in self.league.stat_categories}
-        for i in range(16):
-            if i not in [7, 8, 17, 18, 19, 20]:
-                weekly_scores = self.league.get_universe_wins(weeks=[i + 1])
-                # get the n percentile of each stat category
-                for category in self.league.stat_categories:
-                    weekly_stats[category].append(weekly_scores[category].quantile(percentile))
+
+        # Sample only weeks that have actually been played and fall within the
+        # regular season: playoff weeks involve a shrinking subset of teams and
+        # aren't a representative "typical week" for setting draft category
+        # targets. `reg_season_count` comes straight from ESPN's league settings
+        # (already relied on elsewhere, e.g. data_feed.py) rather than a
+        # hand-typed week count.
+        reg_season_weeks = int(getattr(self.league.settings, 'reg_season_count', 0) or 0)
+        reg_season_weeks = reg_season_weeks or int(self.league.length_of_schedule)
+        last_played_week = max(1, min(int(self.league.effective_current_week), reg_season_weeks))
+
+        for week in range(1, last_played_week + 1):
+            try:
+                weekly_scores = self.league.get_universe_wins(weeks=[week])
+            except ValueError:
+                # No matchup data for this week (e.g. a bye/All-Star week with no
+                # scheduled matchup) — skip it rather than corrupting the sample.
+                continue
+            # get the n percentile of each stat category
+            for category in self.league.stat_categories:
+                weekly_stats[category].append(weekly_scores[category].quantile(percentile))
         weekly_stats = pd.DataFrame(weekly_stats)
         # Get the average weekly stats for each category
         avg_weekly_stats = weekly_stats.mean()
