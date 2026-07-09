@@ -94,6 +94,8 @@ export function DraftPage() {
   const [params, setParams] = useState<DraftPoolParams>(() => loadStored().params)
 
   const [onBlockKey, setOnBlockKey] = useState('')
+  const [onBlockPrice, setOnBlockPrice] = useState('')
+  const [onBlockTeamId, setOnBlockTeamId] = useState('you')
   const [triageResult, setTriageResult] = useState<DraftTriageResponse | null>(null)
   const [relaxProposal, setRelaxProposal] = useState<DraftRelaxProposal | null>(null)
 
@@ -141,6 +143,9 @@ export function DraftPage() {
       setRelaxProposal(null)
       setPickName('')
       setPickPrice('')
+      setOnBlockKey('')
+      setOnBlockPrice('')
+      setTriageResult(null)
     },
   })
 
@@ -221,6 +226,17 @@ export function DraftPage() {
     logPickMutation.mutate({ player_key: key, price, team_id: pickTeamId, is_user: isUser })
   }
 
+  // The on-the-block player is about to be sold — you're always going to say
+  // who got them right after checking relevance, so logging the sale lives
+  // in the same card instead of a second "type the name again" form.
+  function submitOnBlockPick() {
+    const key = onBlockKey.trim().toLowerCase()
+    const price = Number(onBlockPrice)
+    if (!key || Number.isNaN(price)) return
+    const isUser = onBlockTeamId === 'you'
+    logPickMutation.mutate({ player_key: key, price, team_id: onBlockTeamId, is_user: isUser })
+  }
+
   return (
     <div className="space-y-4" style={{ fontVariantNumeric: 'tabular-nums' }}>
       <div>
@@ -248,8 +264,16 @@ export function DraftPage() {
                 onBlockKey={onBlockKey}
                 setOnBlockKey={setOnBlockKey}
                 onCheck={() => onBlockKey.trim() && triageMutation.mutate(onBlockKey.trim().toLowerCase())}
-                pending={triageMutation.isPending}
+                checkPending={triageMutation.isPending}
                 result={triageResult}
+                price={onBlockPrice}
+                setPrice={setOnBlockPrice}
+                teamId={onBlockTeamId}
+                setTeamId={setOnBlockTeamId}
+                teams={teamsQuery.data ?? []}
+                onLogPick={submitOnBlockPick}
+                logPending={logPickMutation.isPending}
+                logError={logPickMutation.isError ? formatApiError(logPickMutation.error) : null}
               />
 
               <AddPickCard
@@ -391,14 +415,30 @@ function OnBlockCard({
   onBlockKey,
   setOnBlockKey,
   onCheck,
-  pending,
+  checkPending,
   result,
+  price,
+  setPrice,
+  teamId,
+  setTeamId,
+  teams,
+  onLogPick,
+  logPending,
+  logError,
 }: {
   onBlockKey: string
   setOnBlockKey: (v: string) => void
   onCheck: () => void
-  pending: boolean
+  checkPending: boolean
   result: DraftTriageResponse | null
+  price: string
+  setPrice: (v: string) => void
+  teamId: string
+  setTeamId: (v: string) => void
+  teams: Record<string, unknown>[]
+  onLogPick: () => void
+  logPending: boolean
+  logError: string | null
 }) {
   return (
     <Card>
@@ -420,10 +460,10 @@ function OnBlockCard({
         <button
           type="button"
           onClick={onCheck}
-          disabled={pending || !onBlockKey.trim()}
+          disabled={checkPending || !onBlockKey.trim()}
           className="rounded-md border border-pg-border px-3 py-1.5 text-sm font-semibold text-slate-200 hover:border-slate-500 disabled:opacity-50"
         >
-          {pending ? '…' : 'Check'}
+          {checkPending ? '…' : 'Check'}
         </button>
       </div>
       {result && (
@@ -444,6 +484,49 @@ function OnBlockCard({
           )}
         </div>
       )}
+
+      {/* Whoever's on the block is about to be sold — log it right here,
+          same name, no retyping. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-pg-border pt-3">
+        <span className="text-xs text-slate-500">Sold to</span>
+        <div className="relative">
+          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">$</span>
+          <input
+            type="number"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && onLogPick()}
+            placeholder="0"
+            className="w-20 rounded-md border border-pg-border bg-black/30 py-1.5 pl-5 pr-2 text-sm text-white focus:outline-none"
+          />
+        </div>
+        <select
+          value={teamId}
+          onChange={(e) => setTeamId(e.target.value)}
+          className="rounded-md border border-pg-border bg-black/30 px-2 py-1.5 text-sm text-white focus:outline-none"
+        >
+          <option value="you">You — your roster</option>
+          {teams.map((t) => {
+            const id = String(t.team_id ?? t.team_name)
+            const name = String(t.team_name ?? id)
+            return (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            )
+          })}
+        </select>
+        <button
+          type="button"
+          onClick={onLogPick}
+          disabled={logPending || !onBlockKey.trim()}
+          className="rounded-md px-3 py-1.5 text-sm font-semibold text-black disabled:opacity-50"
+          style={{ backgroundColor: ACCENT }}
+        >
+          {logPending ? 'Logging…' : 'Log pick'}
+        </button>
+      </div>
+      {logError && <p className="mt-2 text-xs text-rose-400">{logError}</p>}
     </Card>
   )
 }
@@ -478,6 +561,9 @@ function AddPickCard({
   return (
     <Card>
       <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Add or correct a pick</p>
+      <p className="mt-0.5 text-xs text-slate-500">
+        For picks you missed or need to fix — use &ldquo;On the block&rdquo; above for the live flow.
+      </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <input
           type="text"
@@ -546,7 +632,7 @@ function NextMoveCard({
       </p>
       {target ? (
         <>
-          <p className="mt-1 text-lg font-bold text-white">Nominate {target.player_key}</p>
+          <p className="mt-1 text-lg font-bold uppercase text-white">Nominate {target.player_key}</p>
           <div className="mt-1 flex gap-6 text-sm">
             <span className="text-slate-400">
               Fair value <span className="ml-1 font-mono text-slate-200">{fmtBid(target.value)}</span>
@@ -563,7 +649,7 @@ function NextMoveCard({
         <div className="mt-3 flex items-center gap-2 border-t border-dashed border-pg-border pt-2 text-xs text-slate-400">
           <Redo2 className="h-3.5 w-3.5 flex-none" style={{ color: ACCENT }} />
           If you miss → <span className="font-semibold text-slate-200">{fallback.label}</span> has{' '}
-          <span className="font-semibold text-slate-200">{fallback.player_key}</span> ready · max{' '}
+          <span className="font-semibold uppercase text-slate-200">{fallback.player_key}</span> ready · max{' '}
           <span className="font-mono">{fmtBid(fallback.max_bid)}</span>
         </div>
       )}
@@ -715,7 +801,7 @@ function PlayerRowView({ player, owned }: { player: DraftPlayerRow; owned: boole
   return (
     <tr className="border-b border-pg-border/60 font-mono text-xs">
       <td className="py-1.5 pr-2 text-slate-400">{player.pos ?? '—'}</td>
-      <td className="py-1.5 pr-2 font-sans text-sm font-medium text-white">{player.player_key}</td>
+      <td className="py-1.5 pr-2 font-sans text-sm font-medium uppercase text-white">{player.player_key}</td>
       <td className="py-1.5 pr-2 text-right text-slate-300">{fmtBid(player.value)}</td>
       <td className="py-1.5 pr-2 text-right font-semibold" style={{ color: ACCENT }}>
         {fmtBid(player.max_bid)}
@@ -773,8 +859,8 @@ function ValueBoardCard({ rows }: { rows: DraftPlayerRow[] }) {
       <div className="divide-y divide-pg-border/60">
         {rows.slice(0, 8).map((r) => (
           <div key={r.player_key} className="flex items-center justify-between py-1.5 text-sm">
-            <span className="text-slate-200">
-              {r.player_key} <span className="ml-1 font-mono text-[10px] text-slate-500">{r.pos}</span>
+            <span className="uppercase text-slate-200">
+              {r.player_key} <span className="ml-1 font-mono text-[10px] normal-case text-slate-500">{r.pos}</span>
             </span>
             <span className="font-mono text-xs text-slate-400">{fmtBid(r.value)}</span>
           </div>
@@ -808,7 +894,7 @@ function PicksLogCard({
                 style={{ backgroundColor: p.is_user ? ACCENT : '#64748b' }}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold text-slate-200" title={p.player_key}>
+                <p className="truncate font-semibold uppercase text-slate-200" title={p.player_key}>
                   {p.player_key}
                 </p>
                 <p className="font-mono text-xs text-slate-500">
