@@ -19,6 +19,8 @@ from pydantic import BaseModel, Field
 
 import data_feed as feed
 from config import BBM_PROJECTIONS_PATH, LEAGUE_ID, SEASON
+from draft_engine import PlanSnapshot, apply_pick, build_initial_snapshot, pick_fallback
+from draft_strategies import PlanConfig, SolveFn, build_plan_configs, generate_portfolio
 from fantasy import MyLeague
 from optimize_lineup import OptimizeLineup, generate_multiple_plans
 
@@ -1490,6 +1492,220 @@ def optimizer_multiple_plans(body: MultiplePlansBody) -> List[dict[str, Any]]:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     return _df_records(summary)
+
+
+class DraftPickEntry(BaseModel):
+    player_key: str
+    price: float = 0
+    team_id: str = "you"
+    is_user: bool = False
+
+
+class DraftPoolParams(BaseModel):
+    """Optimizer knobs shared by /draft/plans and /draft/pick."""
+
+    # Capped at the spec's D8 target (docs/specs/DRAFT_ROOM.md) — the ESPN
+    # integration audit (docs/ESPN_INTEGRATION_AUDIT.md) flagged an existing
+    # endpoint's unbounded plan count as unbounded live-ESPN-call exposure;
+    # this is the same shape of parameter, bounded from the start.
+    n_plans: int = Field(default=10, ge=1, le=10)
+    initial_budget: float = 200
+    roster_size: int = 13
+    minimum_game_threshold: float = 20
+    games_per_week: float = 3.0
+    minimum_value_players: int = 3
+    year: Optional[int] = None
+
+
+class DraftPlansBody(DraftPoolParams):
+    picks: List[DraftPickEntry] = Field(default_factory=list)
+
+
+class DraftPickBody(DraftPoolParams):
+    picks: List[DraftPickEntry]  # full updated list, including the new pick (undo-safe; §6)
+    new_pick: DraftPickEntry
+    prior_plans: List[dict]  # the `plans` array from the last /draft/plans or /draft/pick response
+
+
+def _config_to_public(cfg: PlanConfig) -> dict:
+    return {
+        "label": cfg.label,
+        "shape": cfg.shape,
+        "constrained_categories": list(cfg.constrained_categories),
+        "percentile": cfg.percentile,
+        "minimum_value_players": cfg.minimum_value_players,
+        "stat_to_maximize": cfg.stat_to_maximize,
+        "ban_top_price": cfg.ban_top_price,
+        "punts": list(cfg.punts),
+    }
+
+
+def _config_from_public(d: dict) -> PlanConfig:
+    return PlanConfig(
+        label=d["label"],
+        shape=d["shape"],
+        constrained_categories=tuple(d["constrained_categories"]),
+        percentile=d["percentile"],
+        minimum_value_players=d["minimum_value_players"],
+        stat_to_maximize=d["stat_to_maximize"],
+        ban_top_price=bool(d.get("ban_top_price", False)),
+        punts=tuple(d.get("punts", ())),
+    )
+
+
+def _snapshot_from_public(d: dict) -> PlanSnapshot:
+    return PlanSnapshot(
+        plan_id=d["plan_id"],
+        config=_config_from_public(d["config"]),
+        roster=tuple(d["roster"]),
+        health=d["health"],
+        health_reason=d.get("health_reason"),
+    )
+
+
+def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
+    """Everything a plan solve or the value board needs about the current draft
+    state: who's off the board entirely (drafted by anyone) vs. who's on the
+    user's own roster (charges budget, doesn't shrink the pool differently).
+    """
+    rival_keys = [p.player_key for p in picks if not p.is_user]
+    user_picks = [p for p in picks if p.is_user]
+
+    def make_optimizer() -> OptimizeLineup:
+        opt = OptimizeLineup(
+            exclude_players=list(rival_keys),
+            games_per_week=params.games_per_week,
+            initial_budget=params.initial_budget,
+            year=params.year,
+            roster_size=params.roster_size,
+            minimum_value_players=params.minimum_value_players,
+            minimum_game_threshold=params.minimum_game_threshold,
+            value_col="Value",
+        )
+        for p in user_picks:
+            opt.draft_player(p.player_key, p.price)
+        return opt
+
+    def solve_fn(cfg: PlanConfig) -> Optional[list[str]]:
+        opt = make_optimizer()
+        # NOTE (spec §4 / DRAFT_ROOM_REVIEW.md Gate 2 context): set_requirements
+        # pulls category targets from live ESPN history (get_universe_wins).
+        # That call needs a real MyLeague/ESPN connection which this sandbox
+        # can't reach; production always sets requirements before solving.
+        opt.set_requirements(list(cfg.constrained_categories), percentile=cfg.percentile)
+        try:
+            res = opt.optimize_roster(cfg.stat_to_maximize)
+        except ValueError:
+            return None
+        return list(res["Name"].str.lower())
+
+    # A template pool (no solve) purely to read each player's fair "$" value
+    # for the value board / next_target — the "solver-free floor" from §4/§6.
+    value_lookup: Dict[str, float] = {}
+    try:
+        template = make_optimizer()
+        value_lookup = dict(zip(template.player_data_df["Name"].str.lower(), template.player_data_df["$"]))
+    except Exception:
+        pass  # value board degrades to empty rather than failing the whole request
+
+    owned_keys = {p.player_key for p in user_picks}
+    all_drafted_keys = owned_keys | set(rival_keys)
+    return solve_fn, value_lookup, owned_keys, all_drafted_keys
+
+
+def _value_board(value_lookup: Dict[str, float], all_drafted_keys: set, limit: int = 20) -> List[dict]:
+    available = [(k, v) for k, v in value_lookup.items() if k not in all_drafted_keys]
+    available.sort(key=lambda kv: kv[1], reverse=True)
+    return [{"player_key": k, "value": round(float(v), 1), "max_bid": round(float(v))} for k, v in available[:limit]]
+
+
+def _snapshot_to_public(snap: PlanSnapshot, owned_keys: set, value_lookup: Dict[str, float]) -> dict:
+    next_target = None
+    if snap.health == "alive":
+        candidates = [p for p in snap.roster if p not in owned_keys]
+        if candidates:
+            best = max(candidates, key=lambda p: value_lookup.get(p, 0.0))
+            next_target = {"player_key": best, "max_bid": round(value_lookup.get(best, 0.0))}
+    return {
+        "plan_id": snap.plan_id,
+        "label": snap.config.label,
+        "shape": snap.config.shape,
+        "config": _config_to_public(snap.config),
+        "roster": list(snap.roster),
+        "health": snap.health,
+        "health_reason": snap.health_reason,
+        "next_target": next_target,
+    }
+
+
+def _fallback_public(plans: List[PlanSnapshot], public_plans: List[dict]) -> Optional[dict]:
+    """The top still-Alive plan's recommended nomination (spec §4 warm-cache
+    `fallback_next`) — reuses each plan's already-computed `next_target` rather
+    than recomputing it, so this always agrees with what `plans` shows."""
+    fb = pick_fallback(plans)
+    if fb is None:
+        return None
+    fb_public = next(p for p in public_plans if p["plan_id"] == fb.plan_id)
+    target = fb_public["next_target"]
+    return {
+        "plan_id": fb.plan_id,
+        "label": fb.config.label,
+        "player_key": target["player_key"] if target else None,
+        "max_bid": target["max_bid"] if target else None,
+    }
+
+
+@app.post("/draft/plans")
+def draft_plans(body: DraftPlansBody) -> dict:
+    """Generate the initial saved-plan portfolio (spec §2 criterion 4 / §4).
+    Solves each strategy config (draft_strategies.build_plan_configs) against
+    the current pool, keeps only the diverse, feasible subset
+    (draft_strategies.generate_portfolio), and returns the full snapshot the
+    client renders from — including the solver-free value-board floor."""
+    solve_fn, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+
+    try:
+        configs = build_plan_configs(body.n_plans)
+        plans = generate_portfolio(configs, solve_fn, limit=body.n_plans)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    snapshots = build_initial_snapshot(plans)
+    public_plans = [_snapshot_to_public(s, owned_keys, value_lookup) for s in snapshots]
+
+    return {
+        "plans": public_plans,
+        "fallback_next": _fallback_public(snapshots, public_plans),
+        "value_board": _value_board(value_lookup, all_drafted_keys),
+    }
+
+
+@app.post("/draft/pick")
+def draft_pick(body: DraftPickBody) -> dict:
+    """Log a pick and recompute (spec §4 per-pick execution model): O(1)
+    health check on every saved plan, targeted re-solve only for the plans the
+    pick broke (normally 0-2, not all `n_plans`). This is the "warm cache" that
+    makes auto-advance (§2 criterion 5) instant and keeps the recommendation
+    surface from ever going empty (§2 criterion 2)."""
+    solve_fn, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+
+    try:
+        prior = [_snapshot_from_public(d) for d in body.prior_plans]
+    except (KeyError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=f"malformed prior_plans entry: {e}") from e
+
+    try:
+        updated = apply_pick(prior, body.new_pick.player_key, solve_fn)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    public_plans = [_snapshot_to_public(s, owned_keys, value_lookup) for s in updated]
+
+    return {
+        "plans": public_plans,
+        "fallback_next": _fallback_public(updated, public_plans),
+        "value_board": _value_board(value_lookup, all_drafted_keys),
+    }
 
 
 @app.get("/projected-scoreboard")
