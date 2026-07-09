@@ -44,9 +44,10 @@ on day one for a new league or new user (Decision A — wider launch).
 ## 2. Acceptance criteria
 
 1. The optimizer can source its `requirements` from **either** method, selected
-   by a parameter (`target_method="historical" | "monte_carlo"`), defaulting to
-   `monte_carlo` when no league history is available and `historical` otherwise
-   (final default is Aisha's/Patrick's call — see §Open questions).
+   by a parameter (`target_method="historical" | "monte_carlo"`). **Default is
+   `monte_carlo`** (Patrick, 2026-07-09) — it's history-independent, so it works
+   for every league including brand-new ones. `historical` remains available as
+   an explicit opt-in.
 2. `mc_targets_from_percentile()` output plugs into the existing
    `set_requirements()` path with **no change to `optimize_roster()`**.
 3. MC runs on the same projected player pool the optimizer already loads (one
@@ -56,6 +57,12 @@ on day one for a new league or new user (Decision A — wider launch).
 5. A given category set + percentile returns targets in < a few seconds for
    n_teams=1000 (validate; expose `n_teams` if we need to trade accuracy for
    speed).
+7. Per-game projections are scaled to per-week by a single documented constant
+   **`GAMES_PER_WEEK = 3.5`**, not the old hardcoded 3.6 and not a per-player
+   schedule derivation (Patrick, 2026-07-09 — a blanket season-average is the
+   right precision for target-setting). Derivation: 82 games ÷ ~23.4 *playable*
+   weeks (regular season minus the All-Star break) ≈ 3.5, consistent with the
+   fantasy-standard 3–4 games/week. Lives in `config.py` as one tunable value.
 6. TO is handled with the correct sign convention (lower is better) consistently
    with the optimizer and the projection framework — asserted by a test.
 
@@ -114,16 +121,18 @@ distributions, that's a follow-up — not in scope.)
 
 ---
 
-## Open questions for Aisha / Patrick
+## Resolved by Patrick (2026-07-09)
 
-1. **Default method:** auto (MC when no history, else historical) as proposed, or
-   make MC the outright default now that we're building for new leagues too?
-2. **Where MC lives long-term:** ship `draft/targets_mc.py` now as a standalone
+- **Default method:** Monte Carlo, outright (see §2.1).
+- **Games per week:** single documented constant `GAMES_PER_WEEK = 3.5` in
+  `config.py` (see §2.7); no per-player schedule derivation.
+
+## Open questions for Aisha
+
+1. **Where MC lives long-term:** ship `draft/targets_mc.py` now as a standalone
    port, or hold until the backend package restructure so it lands in its final
    home? (Aisha flagged restructure-first in the projection review.)
-3. **`avg_games_per_week`** is a hardcoded 3.6 knob in the v1 code. Keep as a
-   constant, or derive per-player from the schedule (better, but more work)?
-4. Coordinate with the **projection-source framework**: MC wants normalized
+2. Coordinate with the **projection-source framework**: MC wants normalized
    per-game stats + price/value, which is exactly `PlayerProjection`. Should the
    MC adapter consume `PlayerProjection` directly once that framework lands,
    retiring the column-mapping shim?
