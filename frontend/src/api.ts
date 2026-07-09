@@ -385,6 +385,181 @@ export async function postOptimizerMultiplePlans(
   return data
 }
 
+/* -------------------------------------------------------------------------- */
+/* Draft Room — docs/specs/DRAFT_ROOM.md                                      */
+/* -------------------------------------------------------------------------- */
+
+export interface DraftPickEntry {
+  player_key: string
+  price: number
+  team_id: string
+  is_user: boolean
+}
+
+/** A "make sure I get this player" prep-time favorite — not a real pick, so
+ * it doesn't touch the real picks log or budget. Every generated plan is
+ * built as if this player is already owned, at expected_price if given, else
+ * their own projected $ value. Ignored once the same player is won or lost
+ * for real. */
+export interface DraftTargetPlayer {
+  player_key: string
+  expected_price?: number | null
+}
+
+export interface DraftPoolParams {
+  n_plans?: number
+  initial_budget?: number
+  roster_size?: number
+  minimum_game_threshold?: number
+  games_per_week?: number
+  minimum_value_players?: number
+  year?: number | null
+
+  // Team construction.
+  exclude_players?: string[]
+  favorite_team?: string | null
+  favorite_team_representation?: number
+  target_players?: DraftTargetPlayer[]
+
+  // What to optimize for.
+  target_categories?: string[] | null
+  base_percentile?: number | null
+  stat_to_maximize?: string | null
+}
+
+export interface DraftPlanConfig {
+  label: string
+  shape: string
+  constrained_categories: string[]
+  percentile: number
+  minimum_value_players: number
+  stat_to_maximize: string
+  ban_top_price: boolean
+  punts: string[]
+}
+
+/** Per-player row shared by roster entries, next_target, and the value board —
+ * D5's locked decision: $ value, position, and all 9 category contributions. */
+export interface DraftPlayerRow {
+  player_key: string
+  max_bid: number
+  pos?: string | null
+  team?: string | null
+  value?: number | null
+  pts?: number | null
+  reb?: number | null
+  ast?: number | null
+  stl?: number | null
+  blk?: number | null
+  tpm?: number | null
+  fg_pct?: number | null
+  ft_pct?: number | null
+  to?: number | null
+}
+
+export type DraftPlanHealth = 'alive' | 'broken'
+
+export interface DraftPlanSnapshot {
+  plan_id: string
+  label: string
+  shape: string
+  config: DraftPlanConfig
+  roster: string[]
+  players: DraftPlayerRow[]
+  health: DraftPlanHealth
+  health_reason: string | null
+  next_target: DraftPlayerRow | null
+}
+
+export interface DraftFallbackNext {
+  plan_id: string
+  label: string
+  player_key: string | null
+  max_bid: number | null
+}
+
+export type DraftValueBoardEntry = DraftPlayerRow
+
+export interface DraftPortfolioResponse {
+  plans: DraftPlanSnapshot[]
+  fallback_next: DraftFallbackNext | null
+  value_board: DraftValueBoardEntry[]
+  /** target_players that couldn't be locked in (below the games threshold,
+   * excluded, a typo) — degrades gracefully rather than failing the request. */
+  skipped_targets?: string[]
+}
+
+export interface DraftPlansBody extends DraftPoolParams {
+  picks: DraftPickEntry[]
+}
+
+export interface DraftPickBody extends DraftPoolParams {
+  picks: DraftPickEntry[]
+  new_pick: DraftPickEntry
+  prior_plans: DraftPlanSnapshot[]
+}
+
+export interface DraftTriageBody extends DraftPoolParams {
+  picks: DraftPickEntry[]
+  prior_plans: DraftPlanSnapshot[]
+  player_key: string
+}
+
+export type DraftTriageReason = 'in_plan' | 'value_target' | 'safe_to_pass'
+
+export interface DraftTriageResponse {
+  player_key: string
+  relevant: boolean
+  in_plans: string[]
+  max_bid: number | null
+  reason: DraftTriageReason
+}
+
+export interface DraftRelaxBody extends DraftPoolParams {
+  picks: DraftPickEntry[]
+  prior_plans: DraftPlanSnapshot[]
+  plan_id?: string | null
+}
+
+export interface DraftRelaxProposal extends DraftPlanSnapshot {
+  dropped_category: string
+  objective_score: number
+  relaxed_from_plan_id: string
+}
+
+export interface DraftRelaxResponse {
+  proposal: DraftRelaxProposal | null
+  value_board: DraftValueBoardEntry[]
+}
+
+export async function postDraftPlans(
+  body: DraftPlansBody,
+): Promise<DraftPortfolioResponse> {
+  const { data } = await client.post<DraftPortfolioResponse>('/draft/plans', body)
+  return data
+}
+
+export async function postDraftPick(
+  body: DraftPickBody,
+): Promise<DraftPortfolioResponse> {
+  const { data } = await client.post<DraftPortfolioResponse>('/draft/pick', body)
+  return data
+}
+
+export async function postDraftTriage(
+  body: DraftTriageBody,
+): Promise<DraftTriageResponse> {
+  const { data } = await client.post<DraftTriageResponse>('/draft/triage', body)
+  return data
+}
+
+export async function postDraftRelax(
+  body: DraftRelaxBody,
+): Promise<DraftRelaxResponse> {
+  const { data } = await client.post<DraftRelaxResponse>('/draft/relax', body)
+  return data
+}
+
 export async function getProjectedScoreboard(params?: {
   week_end_date?: string
   current_matchup_period?: number

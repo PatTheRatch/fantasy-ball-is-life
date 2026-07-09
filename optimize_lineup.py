@@ -306,6 +306,17 @@ class OptimizeLineup:
                     f"`minimum_game_threshold` or exclude fewer players."
                 )
 
+        if self.favorite_team:
+            fav_team_available = int((player_data_df['Team'] == self.favorite_team).sum())
+            if fav_team_available < self.favorite_team_representation:
+                raise ValueError(
+                    f"favorite_team_representation={self.favorite_team_representation} requires that "
+                    f"many {self.favorite_team} player(s), but only {fav_team_available} remain "
+                    f"after filtering (minimum_game_threshold={self.minimum_game_threshold}, "
+                    f"exclude_players, and anyone already drafted). Lower `favorite_team_representation` "
+                    f"or `minimum_game_threshold`, or exclude fewer players."
+                )
+
     def optimize_roster(self, stat_to_maximize):
         # Core constraints
         player_data_df = self.player_data_df.copy()

@@ -201,3 +201,78 @@ def test_generate_portfolio_respects_limit():
         limit=4,
     )
     assert len(plans) == 4
+
+
+# --- user-facing knobs: target_categories, base_percentile, stat_to_maximize ---
+
+
+def test_target_categories_excludes_a_category_from_every_generated_plan():
+    # User wants to never compete in FT% at all -- it must not appear in any
+    # plan's constrained_categories, and "Punt FT%" (redundant given the
+    # exclusion) must not be generated.
+    configs = build_plan_configs(10, target_categories=[c for c in CATEGORIES if c != "FT%"])
+    for cfg in configs:
+        assert "FT%" not in cfg.constrained_categories
+        assert "FT%" not in cfg.punts  # a punt of an already-excluded cat is redundant, not generated
+
+
+def test_target_categories_rejects_unknown_category():
+    with pytest.raises(ValueError):
+        build_plan_configs(5, target_categories=["PTS", "NOT_A_CATEGORY"])
+
+
+def test_target_categories_rejects_empty_selection():
+    with pytest.raises(ValueError):
+        build_plan_configs(5, target_categories=[])
+
+
+def test_stat_to_maximize_override_applies_to_every_plan():
+    configs = build_plan_configs(10, stat_to_maximize="STL")
+    assert configs  # sanity: still produced plans
+    assert all(cfg.stat_to_maximize == "STL" for cfg in configs)
+
+
+def test_stat_to_maximize_must_be_within_target_categories():
+    with pytest.raises(ValueError):
+        build_plan_configs(5, target_categories=["REB", "AST"], stat_to_maximize="PTS")
+
+
+def test_stat_to_maximize_must_be_a_counting_category():
+    with pytest.raises(ValueError):
+        build_plan_configs(5, stat_to_maximize="FG%")
+
+
+def test_base_percentile_recenters_every_shape_while_preserving_order():
+    low = {c.shape: c.percentile for c in build_plan_configs(10, base_percentile=0.55)}
+    high = {c.shape: c.percentile for c in build_plan_configs(10, base_percentile=0.85)}
+    # Every shape actually moved with the base.
+    for shape in low:
+        assert high[shape] > low[shape]
+    # Relative aggressiveness across shapes is preserved at both levels: a
+    # punt build still asks for more than balanced; stars & scrubs still less.
+    for percentiles in (low, high):
+        assert percentiles[PUNT_ONE] > percentiles[BALANCED]
+        assert percentiles[STARS_AND_SCRUBS] < percentiles[BALANCED]
+
+
+def test_base_percentile_is_clamped_to_valid_range():
+    configs = build_plan_configs(10, base_percentile=0.99)
+    assert all(0.50 <= c.percentile <= 0.95 for c in configs)
+    configs = build_plan_configs(10, base_percentile=0.01)
+    assert all(0.50 <= c.percentile <= 0.95 for c in configs)
+
+
+def test_stat_to_maximize_override_skips_punt_entries_that_would_punt_it():
+    # AST is punted by one of the default recipe's punt entries. Forcing
+    # stat_to_maximize="AST" must silently skip that one entry (invalid: can't
+    # maximize what you're punting) rather than let it fall through to
+    # punt_config() and raise.
+    configs = build_plan_configs(10, stat_to_maximize="AST")
+    for cfg in configs:
+        assert "AST" not in cfg.punts
+
+
+def test_no_overrides_matches_unrestricted_default_behavior():
+    # None/None/None must be byte-identical to the pre-existing call shape,
+    # so this is a strictly additive change for every current caller.
+    assert build_plan_configs(10) == build_plan_configs(10, None, None, None)

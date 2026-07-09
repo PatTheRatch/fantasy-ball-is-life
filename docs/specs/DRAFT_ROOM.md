@@ -41,6 +41,13 @@ Captured from the 2026-07-09 review so implementation doesn't relitigate them:
 landscape" panel — most-similar build, your kryptonite, league-wide budget/
 inflation. Shown as a `Planned` placeholder in the mockup; no implementation now.
 
+**Future idea, not yet scoped (Patrick, 2026-07-09):** a player lookup that
+does more than resolve a name — pull recent headlines/news for context at
+draft time (traded to a new team, out until midseason, role change). Framed
+explicitly as future state; the "how" (news source, matching, what counts as
+draft-relevant) isn't decided. Needs its own design pass before it becomes a
+spec item.
+
 ---
 
 ## 1. User story

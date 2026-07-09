@@ -1513,8 +1513,20 @@ class DraftPickEntry(BaseModel):
     is_user: bool = False
 
 
+class DraftTargetPlayer(BaseModel):
+    """A "make sure I get this player" prep-time favorite (not a real pick —
+    doesn't touch the real picks log or budget). Every generated plan is built
+    as if this player is already on the user's roster, at `expected_price` if
+    given, else their own projected $ value. Ignored once the same player_key
+    shows up for real in `picks` (won or lost) — the real outcome wins."""
+
+    player_key: str
+    expected_price: Optional[float] = None
+
+
 class DraftPoolParams(BaseModel):
-    """Optimizer knobs shared by /draft/plans and /draft/pick."""
+    """Optimizer knobs shared by /draft/plans, /draft/pick, /draft/triage, and
+    /draft/relax — this is the "what am I actually optimizing for" surface."""
 
     # Capped at the spec's D8 target (docs/specs/DRAFT_ROOM.md) — the ESPN
     # integration audit (docs/ESPN_INTEGRATION_AUDIT.md) flagged an existing
@@ -1527,6 +1539,18 @@ class DraftPoolParams(BaseModel):
     games_per_week: float = 3.0
     minimum_value_players: int = 3
     year: Optional[int] = None
+
+    # Team construction (engine support already existed; this is the plumbing
+    # that was missing to actually drive it).
+    exclude_players: List[str] = Field(default_factory=list)
+    favorite_team: Optional[str] = None
+    favorite_team_representation: int = 1
+    target_players: List[DraftTargetPlayer] = Field(default_factory=list)
+
+    # What to optimize for (draft_strategies.build_plan_configs' user knobs).
+    target_categories: Optional[List[str]] = None
+    base_percentile: Optional[float] = None
+    stat_to_maximize: Optional[str] = None
 
 
 class DraftPlansBody(DraftPoolParams):
@@ -1582,20 +1606,61 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
     """
     rival_keys = [p.player_key for p in picks if not p.is_user]
     user_picks = [p for p in picks if p.is_user]
+    picked_keys = {p.player_key for p in user_picks}
+    # Once a target player shows up for real (won or lost), the real pick wins —
+    # applying the target on top would double-charge budget or fight the
+    # exclude list. Only still-undecided targets get pre-locked into plans.
+    decided_keys = picked_keys | set(rival_keys)
+    candidate_targets = [t for t in params.target_players if t.player_key not in decided_keys]
 
-    def make_optimizer() -> OptimizeLineup:
+    def make_base_optimizer() -> OptimizeLineup:
+        """No target_players applied — the pool as constrained by exclude/
+        favorite-team/real picks only. Used both to resolve target validity/
+        default price and to build the value board (draft_player never mutates
+        player_data_df, so it's identical whichever way it's used for that)."""
         opt = OptimizeLineup(
-            exclude_players=list(rival_keys),
+            exclude_players=list(rival_keys) + list(params.exclude_players),
             games_per_week=params.games_per_week,
             initial_budget=params.initial_budget,
             year=params.year,
             roster_size=params.roster_size,
             minimum_value_players=params.minimum_value_players,
             minimum_game_threshold=params.minimum_game_threshold,
+            favorite_team=params.favorite_team,
+            favorite_team_representation=params.favorite_team_representation,
             value_col="Value",
         )
         for p in user_picks:
             opt.draft_player(p.player_key, p.price)
+        return opt
+
+    # Resolve target validity + default price ONCE against the pool. A target
+    # can legitimately not exist in player_data_df (below the games threshold,
+    # the engine's own hardcoded do-not-draft list, a typo) — skip it and
+    # report it rather than crash every solve with an unhelpful pandas index
+    # error, matching this app's "never freeze on a bad input" principle.
+    resolved_targets: List[tuple] = []
+    skipped_target_keys: List[str] = []
+    template: Optional[OptimizeLineup] = None
+    try:
+        template = make_base_optimizer()
+        pool_names = template.player_data_df["Name"].str.lower()
+        for t in candidate_targets:
+            match = template.player_data_df.loc[pool_names == t.player_key]
+            if match.empty:
+                skipped_target_keys.append(t.player_key)
+                continue
+            price = t.expected_price if t.expected_price is not None else float(match["$"].iloc[0])
+            resolved_targets.append((t.player_key, price))
+    except Exception:
+        skipped_target_keys.extend(t.player_key for t in candidate_targets)
+
+    owned_keys = picked_keys | {key for key, _ in resolved_targets}
+
+    def make_optimizer() -> OptimizeLineup:
+        opt = make_base_optimizer()
+        for key, price in resolved_targets:
+            opt.draft_player(key, price)
         return opt
 
     def _solve(cfg: PlanConfig):
@@ -1627,39 +1692,86 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
         score = float(res[f"{cfg.stat_to_maximize} PW"].sum())
         return list(res["Name"].str.lower()), score
 
-    # A template pool (no solve) purely to read each player's fair "$" value
-    # for the value board / next_target — the "solver-free floor" from §4/§6.
+    # Reuse the template pool (no solve) from target-resolution above to read
+    # each player's fair "$" value and full stat line for the value board /
+    # roster rows / next_target — the "solver-free floor" from §4/§6, and the
+    # per-player data D5 locks in (Projected $ value, VOR/rank, all 9 category
+    # contributions).
     value_lookup: Dict[str, float] = {}
+    player_row_lookup: Dict[str, dict] = {}
     try:
-        template = make_optimizer()
-        value_lookup = dict(zip(template.player_data_df["Name"].str.lower(), template.player_data_df["$"]))
+        if template is None:
+            template = make_base_optimizer()
+        df = template.player_data_df
+        value_lookup = dict(zip(df["Name"].str.lower(), df["$"]))
+        for _, row in df.iterrows():
+            key = str(row["Name"]).lower()
+            player_row_lookup[key] = {
+                "pos": row.get("Pos"),
+                "team": row.get("Team"),
+                "value": round(float(row["$"]), 1),
+                "pts": round(float(row["PTS"]), 1),
+                "reb": round(float(row["REB"]), 1),
+                "ast": round(float(row["AST"]), 1),
+                "stl": round(float(row["STL"]), 1),
+                "blk": round(float(row["BLK"]), 1),
+                "tpm": round(float(row["3PM"]), 1),
+                "fg_pct": round(float(row["FG%"]), 3),
+                "ft_pct": round(float(row["FT%"]), 3),
+                # calculate_stats() negates TO (lower-is-better in the solver's
+                # objective math); re-negate for a normal positive display value.
+                "to": round(float(-row["TO"]), 1),
+            }
     except Exception:
-        pass  # value board degrades to empty rather than failing the whole request
+        pass  # value board / roster enrichment degrades to bare keys rather than failing the whole request
 
-    owned_keys = {p.player_key for p in user_picks}
     all_drafted_keys = owned_keys | set(rival_keys)
-    return solve_fn, solve_with_score_fn, value_lookup, owned_keys, all_drafted_keys
+    return (
+        solve_fn,
+        solve_with_score_fn,
+        value_lookup,
+        player_row_lookup,
+        owned_keys,
+        all_drafted_keys,
+        skipped_target_keys,
+    )
 
 
-def _value_board(value_lookup: Dict[str, float], all_drafted_keys: set, limit: int = 20) -> List[dict]:
+def _player_public(key: str, value_lookup: Dict[str, float], player_row_lookup: Dict[str, dict]) -> dict:
+    row = player_row_lookup.get(key, {})
+    return {"player_key": key, "max_bid": round(value_lookup.get(key, 0.0)), **row}
+
+
+def _value_board(
+    value_lookup: Dict[str, float],
+    player_row_lookup: Dict[str, dict],
+    all_drafted_keys: set,
+    limit: int = 20,
+) -> List[dict]:
     available = [(k, v) for k, v in value_lookup.items() if k not in all_drafted_keys]
     available.sort(key=lambda kv: kv[1], reverse=True)
-    return [{"player_key": k, "value": round(float(v), 1), "max_bid": round(float(v))} for k, v in available[:limit]]
+    return [_player_public(k, value_lookup, player_row_lookup) for k, _ in available[:limit]]
 
 
-def _snapshot_to_public(snap: PlanSnapshot, owned_keys: set, value_lookup: Dict[str, float]) -> dict:
+def _snapshot_to_public(
+    snap: PlanSnapshot,
+    owned_keys: set,
+    value_lookup: Dict[str, float],
+    player_row_lookup: Dict[str, dict],
+) -> dict:
     next_target = None
     if snap.health == "alive":
         candidates = [p for p in snap.roster if p not in owned_keys]
         if candidates:
             best = max(candidates, key=lambda p: value_lookup.get(p, 0.0))
-            next_target = {"player_key": best, "max_bid": round(value_lookup.get(best, 0.0))}
+            next_target = _player_public(best, value_lookup, player_row_lookup)
     return {
         "plan_id": snap.plan_id,
         "label": snap.config.label,
         "shape": snap.config.shape,
         "config": _config_to_public(snap.config),
         "roster": list(snap.roster),
+        "players": [_player_public(p, value_lookup, player_row_lookup) for p in snap.roster],
         "health": snap.health,
         "health_reason": snap.health_reason,
         "next_target": next_target,
@@ -1690,21 +1802,33 @@ def draft_plans(body: DraftPlansBody) -> dict:
     the current pool, keeps only the diverse, feasible subset
     (draft_strategies.generate_portfolio), and returns the full snapshot the
     client renders from — including the solver-free value-board floor."""
-    solve_fn, _, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+    solve_fn, _, value_lookup, player_row_lookup, owned_keys, all_drafted_keys, skipped_targets = _build_pool_context(
+        body.picks, body
+    )
 
     try:
-        configs = build_plan_configs(body.n_plans)
+        configs = build_plan_configs(
+            body.n_plans,
+            target_categories=body.target_categories,
+            base_percentile=body.base_percentile,
+            stat_to_maximize=body.stat_to_maximize,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    try:
         plans = generate_portfolio(configs, solve_fn, limit=body.n_plans)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     snapshots = build_initial_snapshot(plans)
-    public_plans = [_snapshot_to_public(s, owned_keys, value_lookup) for s in snapshots]
+    public_plans = [_snapshot_to_public(s, owned_keys, value_lookup, player_row_lookup) for s in snapshots]
 
     return {
         "plans": public_plans,
         "fallback_next": _fallback_public(snapshots, public_plans),
-        "value_board": _value_board(value_lookup, all_drafted_keys),
+        "value_board": _value_board(value_lookup, player_row_lookup, all_drafted_keys),
+        "skipped_targets": skipped_targets,
     }
 
 
@@ -1715,7 +1839,9 @@ def draft_pick(body: DraftPickBody) -> dict:
     pick broke (normally 0-2, not all `n_plans`). This is the "warm cache" that
     makes auto-advance (§2 criterion 5) instant and keeps the recommendation
     surface from ever going empty (§2 criterion 2)."""
-    solve_fn, _, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+    solve_fn, _, value_lookup, player_row_lookup, owned_keys, all_drafted_keys, skipped_targets = _build_pool_context(
+        body.picks, body
+    )
 
     try:
         prior = [_snapshot_from_public(d) for d in body.prior_plans]
@@ -1727,12 +1853,13 @@ def draft_pick(body: DraftPickBody) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    public_plans = [_snapshot_to_public(s, owned_keys, value_lookup) for s in updated]
+    public_plans = [_snapshot_to_public(s, owned_keys, value_lookup, player_row_lookup) for s in updated]
 
     return {
         "plans": public_plans,
         "fallback_next": _fallback_public(updated, public_plans),
-        "value_board": _value_board(value_lookup, all_drafted_keys),
+        "value_board": _value_board(value_lookup, player_row_lookup, all_drafted_keys),
+        "skipped_targets": skipped_targets,
     }
 
 
@@ -1749,7 +1876,7 @@ def draft_triage(body: DraftTriageBody) -> dict:
     has — Relevant (in >=1 still-Alive plan, or a top-of-board value target)
     vs. Safe to pass. No solve; reads the already-computed snapshot, same as
     the spec's "<1s, no fresh solve" requirement."""
-    _, _, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+    _, _, value_lookup, player_row_lookup, owned_keys, all_drafted_keys, _ = _build_pool_context(body.picks, body)
 
     try:
         prior = [_snapshot_from_public(d) for d in body.prior_plans]
@@ -1759,7 +1886,9 @@ def draft_triage(body: DraftTriageBody) -> dict:
     # "Not a value target" (spec §2 criterion 3's Safe-to-pass clause) is
     # defined as: not among the best remaining players by raw value, using
     # the same solver-free value board shown elsewhere in the UI.
-    value_target_keys = frozenset(p["player_key"] for p in _value_board(value_lookup, all_drafted_keys, limit=10))
+    value_target_keys = frozenset(
+        p["player_key"] for p in _value_board(value_lookup, player_row_lookup, all_drafted_keys, limit=10)
+    )
 
     result = triage_player(body.player_key, prior, frozenset(owned_keys), value_lookup, value_target_keys)
     return {
@@ -1809,7 +1938,9 @@ def draft_relax(body: DraftRelaxBody) -> dict:
     if base is None:
         raise HTTPException(status_code=404, detail=f"no plan found for plan_id={body.plan_id!r}")
 
-    _, solve_with_score_fn, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+    _, solve_with_score_fn, value_lookup, player_row_lookup, owned_keys, all_drafted_keys, _ = _build_pool_context(
+        body.picks, body
+    )
 
     try:
         proposal = relax_plan(base.config, solve_with_score_fn)
@@ -1821,7 +1952,7 @@ def draft_relax(body: DraftRelaxBody) -> dict:
         # value board floor (§6) is still available, this just can't help.
         return {
             "proposal": None,
-            "value_board": _value_board(value_lookup, all_drafted_keys),
+            "value_board": _value_board(value_lookup, player_row_lookup, all_drafted_keys),
         }
 
     snap = PlanSnapshot(
@@ -1830,14 +1961,14 @@ def draft_relax(body: DraftRelaxBody) -> dict:
         roster=proposal.roster,
         health="alive",
     )
-    public = _snapshot_to_public(snap, owned_keys, value_lookup)
+    public = _snapshot_to_public(snap, owned_keys, value_lookup, player_row_lookup)
     public["dropped_category"] = proposal.dropped_category
     public["objective_score"] = round(proposal.objective_score, 1)
     public["relaxed_from_plan_id"] = base.plan_id
 
     return {
         "proposal": public,
-        "value_board": _value_board(value_lookup, all_drafted_keys),
+        "value_board": _value_board(value_lookup, player_row_lookup, all_drafted_keys),
     }
 
 
