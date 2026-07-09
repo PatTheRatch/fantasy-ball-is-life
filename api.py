@@ -1364,7 +1364,7 @@ class DraftPick(BaseModel):
 
 class OptimizeBody(BaseModel):
     exclude_players: Optional[List[str]] = None
-    games_per_week: float = 3.0
+    games_per_week: Optional[float] = None  # None -> config.GAMES_PER_WEEK (3.5)
     initial_budget: float = 200
     year: Optional[int] = None
     roster_size: int = 13
@@ -1373,6 +1373,7 @@ class OptimizeBody(BaseModel):
     favorite_team_representation: int = 1
     minimum_game_threshold: float = 55
     value_col: str = "$"
+    target_method: str = "monte_carlo"  # 'monte_carlo' (default) | 'historical'
     categories: Optional[List[str]] = None
     percentile: float = 0.75
     stat_to_maximize: str = "PTS"
@@ -1446,7 +1447,9 @@ async def optimizer_optimize(request: Request) -> List[dict[str, Any]]:
         opt.draft_player(p.name, p.bid)
 
     if body.categories:
-        opt.set_requirements(body.categories, percentile=body.percentile)
+        opt.set_requirements(
+            body.categories, percentile=body.percentile, target_method=body.target_method,
+        )
 
     try:
         results = opt.optimize_roster(body.stat_to_maximize)
@@ -1471,6 +1474,7 @@ class MultiplePlansBody(BaseModel):
     sort_primary: str = "Price"
     out_prefix: str = "draft_plan_"
     objective_focus: str = "3PM"
+    target_method: str = "monte_carlo"  # 'monte_carlo' (default) | 'historical'
 
 
 @app.post("/optimizer/multiple-plans")
@@ -1494,6 +1498,7 @@ def optimizer_multiple_plans(body: MultiplePlansBody) -> List[dict[str, Any]]:
             sort_primary=body.sort_primary,
             out_prefix=body.out_prefix,
             objective_focus=body.objective_focus,
+            target_method=body.target_method,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -1595,10 +1600,12 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
 
     def _solve(cfg: PlanConfig):
         opt = make_optimizer()
-        # NOTE (spec §4 / DRAFT_ROOM_REVIEW.md Gate 2 context): set_requirements
-        # pulls category targets from live ESPN history (get_universe_wins).
-        # That call needs a real MyLeague/ESPN connection which this sandbox
-        # can't reach; production always sets requirements before solving.
+        # Category targets now default to Monte Carlo (simulated drafts of the
+        # current pool), which needs no ESPN league history — only the projected
+        # player pool the optimizer already holds. Constructing OptimizeLineup
+        # still needs a live MyLeague for the draft board, so this path remains
+        # unreachable from a no-network sandbox, but target-setting itself no
+        # longer depends on get_universe_wins.
         opt.set_requirements(list(cfg.constrained_categories), percentile=cfg.percentile)
         try:
             res = opt.optimize_roster(cfg.stat_to_maximize)

@@ -6,7 +6,8 @@ from fantasy import MyLeague
 import cvxpy as cp
 import shutup
 
-from config import BBM_PROJECTIONS_PATH, DRAFT_LEAGUE_YEAR_DEFAULT, LEAGUE_ID
+from config import BBM_PROJECTIONS_PATH, DRAFT_LEAGUE_YEAR_DEFAULT, GAMES_PER_WEEK, LEAGUE_ID
+import draft_targets_mc as mc
 
 shutup.please()
 
@@ -16,7 +17,7 @@ class OptimizeLineup:
         self,
         exclude_players=None,
         drafted_players=None,
-        games_per_week=3.00,
+        games_per_week=None,
         initial_budget=200,
         year=None,
         roster_size=13,
@@ -29,6 +30,8 @@ class OptimizeLineup:
     ):
         if year is None:
             year = DRAFT_LEAGUE_YEAR_DEFAULT
+        if games_per_week is None:
+            games_per_week = GAMES_PER_WEEK
         self.league = MyLeague(LEAGUE_ID, year)
         self.games_per_week = games_per_week
         self.excluded_players = exclude_players or []
@@ -168,13 +171,77 @@ class OptimizeLineup:
         avg_weekly_stats = weekly_stats.mean()
         return avg_weekly_stats
 
-    def set_requirements(self, categories, percentile=.75):
-        print('setting requirements')
-        avg_weekly_stats = self.get_target_stats(percentile)
-        requirements = {}
-        for category in categories:
-            requirements[category] = avg_weekly_stats.loc[category]
-        self.requirements = requirements
+    def _mc_pool_df(self):
+        """Map the optimizer's per-week player columns into the shape the Monte
+        Carlo engine expects. We feed the already-scaled ``* PW`` columns and run
+        the engine with ``avg_games_per_week=1.0`` so MC targets land on exactly
+        the same per-week scale as the roster constraints. Turnovers are passed in
+        the optimizer's internal negated convention, so the TO target comes back
+        directly usable."""
+        df = self.player_data_df
+        value_col = next(
+            (c for c in ('LeagV', 'League Value', 'Value') if c in df.columns),
+            '$',
+        )
+        return pd.DataFrame({
+            'Player': df['Name'],
+            'POS': df['Pos'],
+            'Price': df['$'],
+            'Value': df[value_col],
+            'PTS_PG': df['PTS PW'],
+            'REB_PG': df['REB PW'],
+            'AST_PG': df['AST PW'],
+            'STL_PG': df['STL PW'],
+            'BLK_PG': df['BLK PW'],
+            '3PM_PG': df['3PM PW'],
+            'TO_PG': df['TO PW'],          # already negated (higher is better)
+            'FGM_PG': df['fgm/g PW'],
+            'FGA_PG': df['fga/g PW'],
+            'FTM_PG': df['ftm/g PW'],
+            'FTA_PG': df['fta/g PW'],
+        })
+
+    def get_target_stats_mc(self, percentile=.80, n_teams=1000, seed=7):
+        """Monte Carlo targets: simulate ``n_teams`` realistic drafts of the current
+        pool and take the ``percentile``-th team per category. History-independent.
+        Returns a Series indexed by the league's stat categories (same shape as
+        :meth:`get_target_stats`)."""
+        print('getting target stats (monte carlo)')
+        teams_df, fg_pct, ft_pct, _ = mc.monte_carlo_drafts_13team_daily(
+            self._mc_pool_df(),
+            n_teams=n_teams,
+            budget=self.initial_budget,
+            avg_games_per_week=1.0,   # PW columns are already per-week
+            rng_seed=seed,
+        )
+        targets = mc.mc_targets_from_percentile(teams_df, fg_pct, ft_pct, pct=percentile)
+        return pd.Series({cat: targets[cat] for cat in self.league.stat_categories})
+
+    def set_requirements(self, categories, percentile=.75, target_method='monte_carlo',
+                         n_teams=1000, seed=7):
+        """Set per-category floor targets for the optimizer.
+
+        ``target_method='monte_carlo'`` (default) derives targets by simulating
+        drafts of the current player pool; ``'historical'`` uses past weekly
+        scores (needs league history). Monte Carlo falls back to historical if the
+        pool can't produce feasible teams."""
+        print(f'setting requirements ({target_method})')
+        if target_method == 'monte_carlo':
+            try:
+                avg_weekly_stats = self.get_target_stats_mc(
+                    percentile=percentile, n_teams=n_teams, seed=seed,
+                )
+            except (RuntimeError, KeyError, ValueError) as e:
+                print(f'monte carlo targets unavailable ({e}); falling back to historical')
+                avg_weekly_stats = self.get_target_stats(percentile)
+        elif target_method == 'historical':
+            avg_weekly_stats = self.get_target_stats(percentile)
+        else:
+            raise ValueError(
+                f"Unknown target_method={target_method!r}; expected "
+                f"'monte_carlo' or 'historical'."
+            )
+        self.requirements = {cat: avg_weekly_stats.loc[cat] for cat in categories}
 
     def calculate_stats(self, df):
         # Calculate additional statistics
@@ -434,6 +501,7 @@ def generate_multiple_plans(
     sort_primary='Price',  # how to choose “top player” to ban
     out_prefix='draft_plan_',  # files: draft_plan_A.csv, etc.
     objective_focus='3PM',  # what you pass to optimize_roster
+    target_method='monte_carlo',  # 'monte_carlo' (default) | 'historical'
 ):
     """
     Build n_plans varied rosters by (a) cycling percentile targets and (b) banning one 'top' player each iteration.
@@ -468,7 +536,7 @@ def generate_multiple_plans(
         )
 
         # set category targets at chosen percentile
-        draft_opt.set_requirements(list(categories), percentile=pct)
+        draft_opt.set_requirements(list(categories), percentile=pct, target_method=target_method)
 
         try:
             result = draft_opt.optimize_roster(objective_focus)

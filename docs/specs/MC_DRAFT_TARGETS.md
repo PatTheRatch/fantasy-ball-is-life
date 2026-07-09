@@ -1,8 +1,11 @@
 # Feature Spec: Monte Carlo draft category targets
 
-**Status:** DRAFT — pending Aisha's technical review before implementation
-(touches the approved Draft Room optimizer, so architecture sign-off per
-`docs/AISHA_OPERATING_MANUAL.md`).
+**Status:** IMPLEMENTED on branch `feat/mc-draft-targets`, pending Aisha's
+review of both spec and code (touches the approved Draft Room optimizer, so
+architecture sign-off per `docs/AISHA_OPERATING_MANUAL.md`). Engine ported to
+`draft_targets_mc.py`; wired into `OptimizeLineup.set_requirements` as the
+default; 12 engine tests pass (`tests/test_mc_draft_targets.py`). Optimizer
+integration test needs live ESPN and is not in the automated suite.
 **Author:** Claude Code (implementation engineer)
 **Date:** 2026-07-09
 **Decision basis:** Patrick asked to bring back his existing Monte Carlo work
