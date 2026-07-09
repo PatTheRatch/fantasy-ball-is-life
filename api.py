@@ -19,7 +19,14 @@ from pydantic import BaseModel, Field
 
 import data_feed as feed
 from config import BBM_PROJECTIONS_PATH, LEAGUE_ID, SEASON
-from draft_engine import PlanSnapshot, apply_pick, build_initial_snapshot, pick_fallback, triage_player
+from draft_engine import (
+    PlanSnapshot,
+    apply_pick,
+    build_initial_snapshot,
+    pick_fallback,
+    relax_plan,
+    triage_player,
+)
 from draft_strategies import PlanConfig, SolveFn, build_plan_configs, generate_portfolio
 from fantasy import MyLeague
 from optimize_lineup import OptimizeLineup, generate_multiple_plans
@@ -1586,7 +1593,7 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
             opt.draft_player(p.player_key, p.price)
         return opt
 
-    def solve_fn(cfg: PlanConfig) -> Optional[list[str]]:
+    def _solve(cfg: PlanConfig):
         opt = make_optimizer()
         # NOTE (spec §4 / DRAFT_ROOM_REVIEW.md Gate 2 context): set_requirements
         # pulls category targets from live ESPN history (get_universe_wins).
@@ -1597,7 +1604,21 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
             res = opt.optimize_roster(cfg.stat_to_maximize)
         except ValueError:
             return None
-        return list(res["Name"].str.lower())
+        return res
+
+    def solve_fn(cfg: PlanConfig) -> Optional[list[str]]:
+        res = _solve(cfg)
+        return list(res["Name"].str.lower()) if res is not None else None
+
+    def solve_with_score_fn(cfg: PlanConfig) -> Optional[tuple[list[str], float]]:
+        """Used only by /draft/relax's iterative sweep (draft_engine.relax_plan) —
+        same solve, plus the resulting objective so candidate relaxations can be
+        ranked without shadow prices (Gate 2)."""
+        res = _solve(cfg)
+        if res is None:
+            return None
+        score = float(res[f"{cfg.stat_to_maximize} PW"].sum())
+        return list(res["Name"].str.lower()), score
 
     # A template pool (no solve) purely to read each player's fair "$" value
     # for the value board / next_target — the "solver-free floor" from §4/§6.
@@ -1610,7 +1631,7 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
 
     owned_keys = {p.player_key for p in user_picks}
     all_drafted_keys = owned_keys | set(rival_keys)
-    return solve_fn, value_lookup, owned_keys, all_drafted_keys
+    return solve_fn, solve_with_score_fn, value_lookup, owned_keys, all_drafted_keys
 
 
 def _value_board(value_lookup: Dict[str, float], all_drafted_keys: set, limit: int = 20) -> List[dict]:
@@ -1662,7 +1683,7 @@ def draft_plans(body: DraftPlansBody) -> dict:
     the current pool, keeps only the diverse, feasible subset
     (draft_strategies.generate_portfolio), and returns the full snapshot the
     client renders from — including the solver-free value-board floor."""
-    solve_fn, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+    solve_fn, _, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
 
     try:
         configs = build_plan_configs(body.n_plans)
@@ -1687,7 +1708,7 @@ def draft_pick(body: DraftPickBody) -> dict:
     pick broke (normally 0-2, not all `n_plans`). This is the "warm cache" that
     makes auto-advance (§2 criterion 5) instant and keeps the recommendation
     surface from ever going empty (§2 criterion 2)."""
-    solve_fn, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+    solve_fn, _, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
 
     try:
         prior = [_snapshot_from_public(d) for d in body.prior_plans]
@@ -1721,7 +1742,7 @@ def draft_triage(body: DraftTriageBody) -> dict:
     has — Relevant (in >=1 still-Alive plan, or a top-of-board value target)
     vs. Safe to pass. No solve; reads the already-computed snapshot, same as
     the spec's "<1s, no fresh solve" requirement."""
-    _, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+    _, _, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
 
     try:
         prior = [_snapshot_from_public(d) for d in body.prior_plans]
@@ -1740,6 +1761,76 @@ def draft_triage(body: DraftTriageBody) -> dict:
         "in_plans": list(result.in_plans),
         "max_bid": result.max_bid,
         "reason": result.reason,
+    }
+
+
+class DraftRelaxBody(DraftPoolParams):
+    picks: List[DraftPickEntry] = Field(default_factory=list)
+    prior_plans: List[dict]  # must all be Broken — this endpoint won't run otherwise
+    plan_id: Optional[str] = None  # which saved plan to relax from; defaults to the first
+
+
+@app.post("/draft/relax")
+def draft_relax(body: DraftRelaxBody) -> dict:
+    """Graceful relaxation when every saved plan is Broken (spec §2 criterion
+    6). Runs the §4/§5 iterative sweep (Gate 2's resolved approach, since the
+    current solver stack exposes neither shadow prices nor an infeasibility
+    certificate — DRAFT_ROOM_REVIEW.md): re-solve `plan_id`'s config once per
+    category with that category dropped, up to 9 solves (~36s worst case),
+    and return the feasible candidate the solver could do the most with.
+
+    This only *proposes* — per D10 (one-tap confirm), the caller applies it
+    client-side rather than this endpoint mutating a server-held plan. No
+    server-side caching either: the client already holds (and can re-render)
+    the proposal it gets back, which is what the spec's "cached" note means
+    in this stateless design (see draft_engine.py's module docstring)."""
+    if not body.prior_plans:
+        raise HTTPException(status_code=422, detail="prior_plans is required to relax from")
+
+    try:
+        prior = [_snapshot_from_public(d) for d in body.prior_plans]
+    except (KeyError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=f"malformed prior_plans entry: {e}") from e
+
+    if pick_fallback(prior) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="at least one saved plan is still Alive; relax only applies when every plan is Broken",
+        )
+
+    base = next((p for p in prior if p.plan_id == body.plan_id), None) if body.plan_id else prior[0]
+    if base is None:
+        raise HTTPException(status_code=404, detail=f"no plan found for plan_id={body.plan_id!r}")
+
+    _, solve_with_score_fn, value_lookup, owned_keys, all_drafted_keys = _build_pool_context(body.picks, body)
+
+    try:
+        proposal = relax_plan(base.config, solve_with_score_fn)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    if proposal is None:
+        # The wall isn't category-driven (budget/position scarcity) — the
+        # value board floor (§6) is still available, this just can't help.
+        return {
+            "proposal": None,
+            "value_board": _value_board(value_lookup, all_drafted_keys),
+        }
+
+    snap = PlanSnapshot(
+        plan_id=base.plan_id + "_relaxed",
+        config=proposal.config,
+        roster=proposal.roster,
+        health="alive",
+    )
+    public = _snapshot_to_public(snap, owned_keys, value_lookup)
+    public["dropped_category"] = proposal.dropped_category
+    public["objective_score"] = round(proposal.objective_score, 1)
+    public["relaxed_from_plan_id"] = base.plan_id
+
+    return {
+        "proposal": public,
+        "value_board": _value_board(value_lookup, all_drafted_keys),
     }
 
 

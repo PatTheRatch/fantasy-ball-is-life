@@ -1,5 +1,6 @@
-"""End-to-end integration test for POST /draft/plans and POST /draft/pick,
-through the real FastAPI app + real optimizer + real BBM projections.
+"""End-to-end integration test for POST /draft/plans, POST /draft/pick,
+POST /draft/triage, and POST /draft/relax, through the real FastAPI app +
+real optimizer + real BBM projections.
 
 Same isolation pattern as tests/test_plan_diversity_integration.py: ESPN is
 stubbed (a fake empty-draft league) so this runs without network access, and
@@ -140,3 +141,79 @@ def test_draft_plans_then_pick_round_trip(monkeypatch):
     assert p["relevant"] is False
     assert p["reason"] == "safe_to_pass"
     assert p["max_bid"] is None
+
+
+_ALL_CATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
+
+
+def _synthetic_plan(plan_id="balanced", health="broken", roster=None):
+    """A hand-built plan snapshot in the API's public shape. /draft/relax only
+    needs *a* Broken plan's config to sweep from -- driving a real draft down
+    to genuine infeasibility would mean logging dozens of picks, so this
+    exercises the endpoint (and the real solver underneath it) against a
+    plan that's *declared* broken rather than one that got there organically."""
+    return {
+        "plan_id": plan_id,
+        "label": "Balanced",
+        "shape": "balanced",
+        "config": {
+            "label": "Balanced",
+            "shape": "balanced",
+            "constrained_categories": _ALL_CATS,
+            "percentile": 0.70,
+            "minimum_value_players": 3,
+            "stat_to_maximize": "PTS",
+            "ban_top_price": False,
+            "punts": [],
+        },
+        "roster": roster or [],
+        "health": health,
+        "health_reason": "synthetic: forced for this test" if health == "broken" else None,
+        "next_target": None,
+    }
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_draft_relax_runs_the_sweep_and_returns_a_feasible_proposal(monkeypatch):
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.post("/draft/relax", json={"n_plans": 1, "picks": [], "prior_plans": [_synthetic_plan()]})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    assert data["proposal"] is not None
+    proposal = data["proposal"]
+    assert proposal["health"] == "alive"
+    assert proposal["dropped_category"] in _ALL_CATS
+    assert proposal["relaxed_from_plan_id"] == "balanced"
+    assert len(proposal["roster"]) > 0
+    assert proposal["objective_score"] > 0
+    assert data["value_board"]  # criterion 6's floor is present alongside the proposal
+
+
+def test_draft_relax_rejects_when_a_plan_is_still_alive():
+    import api
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    plans = [_synthetic_plan("a", health="broken"), _synthetic_plan("b", health="alive", roster=["someone"])]
+    resp = client.post("/draft/relax", json={"n_plans": 1, "picks": [], "prior_plans": plans})
+    assert resp.status_code == 409
+
+
+def test_draft_relax_requires_prior_plans():
+    import api
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.post("/draft/relax", json={"n_plans": 1, "picks": [], "prior_plans": []})
+    assert resp.status_code == 422

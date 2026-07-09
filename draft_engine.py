@@ -20,7 +20,7 @@ Aisha's next review, not a silent deviation from the approved spec.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, Optional, Sequence
+from typing import Callable, Dict, FrozenSet, Optional, Sequence, Tuple
 
 from draft_strategies import Plan, PlanConfig, SolveFn
 
@@ -139,3 +139,59 @@ def triage_player(
         return Triage(player_key, True, (), round(max_bid) if max_bid is not None else None, "value_target")
 
     return Triage(player_key, False, (), None, "safe_to_pass")
+
+
+# Scored solve: like SolveFn, but also returns the resulting objective value
+# (the sum of `f"{stat_to_maximize} PW"` on the chosen roster) so relax_plan
+# can rank candidate relaxations without needing shadow prices/an IIS, which
+# the current solver stack doesn't expose (DRAFT_ROOM_REVIEW.md Gate 2).
+ScoredSolveFn = Callable[[PlanConfig], Optional[Tuple[Sequence[str], float]]]
+
+
+@dataclass(frozen=True)
+class RelaxProposal:
+    """The single best relaxation found by the sweep — spec §4/§5's "propose
+    the lowest-cost feasible one"."""
+
+    dropped_category: str
+    config: PlanConfig
+    roster: tuple[str, ...]
+    objective_score: float
+
+
+def relax_plan(base_config: PlanConfig, solve_with_score: ScoredSolveFn) -> Optional[RelaxProposal]:
+    """The §4/§5 iterative-relaxation sweep — Gate 2's resolved approach on
+    the current cvxpy -> HiGHS stack, which exposes neither reliable dual
+    values nor an infeasibility certificate (DRAFT_ROOM_REVIEW.md). Runs only
+    when every saved plan is Broken (caller's job to check via
+    ``pick_fallback``). Re-solves ``base_config`` once per category with that
+    one category dropped from the constrained set — 9 categories, up to 9
+    solves (~36s worst case) — and returns the feasible candidate with the
+    *highest resulting objective*: the relaxation that let the solver do the
+    most with what's left, which is the honest, directly-computable proxy for
+    "lowest cost" available without shadow prices. Returns None only if
+    dropping every single category still leaves it infeasible (a real,
+    presumably budget- or position-driven wall, not a category problem).
+    """
+    best: Optional[RelaxProposal] = None
+    for dropped in base_config.constrained_categories:
+        kept = tuple(c for c in base_config.constrained_categories if c != dropped)
+        if not kept:
+            continue
+        candidate_cfg = PlanConfig(
+            label=f"{base_config.label} (punt {dropped})",
+            shape=base_config.shape,
+            constrained_categories=kept,
+            percentile=base_config.percentile,
+            minimum_value_players=base_config.minimum_value_players,
+            stat_to_maximize=base_config.stat_to_maximize,
+            ban_top_price=base_config.ban_top_price,
+            punts=base_config.punts + (dropped,),
+        )
+        result = solve_with_score(candidate_cfg)
+        if result is None:
+            continue
+        roster, score = result
+        if best is None or score > best.objective_score:
+            best = RelaxProposal(dropped, candidate_cfg, tuple(roster), score)
+    return best
