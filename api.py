@@ -1549,6 +1549,10 @@ class AuctionSimulationBody(DraftPoolParams):
     n_simulations: int = Field(default=500, ge=1, le=5000)
     seed: int = 7
     max_centers: int = Field(default=3, ge=1, le=8)
+    use_model_values: bool = True
+    dollar_one_players: Optional[int] = Field(default=None, ge=0)
+    category_weights: Optional[dict[str, float]] = None
+    star_exponent: float = Field(default=1.15, gt=0)
     return_sales: bool = False
     sales_limit: int = Field(default=500, ge=0, le=10000)
 
@@ -1744,6 +1748,10 @@ def draft_auction_sim(body: AuctionSimulationBody) -> dict:
             roster_size=body.roster_size,
             max_centers=body.max_centers,
             rng_seed=body.seed,
+            use_model_values=body.use_model_values,
+            dollar_one_players=body.dollar_one_players,
+            category_weights=body.category_weights,
+            star_exponent=body.star_exponent,
             return_sales=body.return_sales,
         )
     except Exception as e:
@@ -1760,6 +1768,9 @@ def draft_auction_sim(body: AuctionSimulationBody) -> dict:
             "budget": body.initial_budget,
             "roster_size": body.roster_size,
             "seed": body.seed,
+            "use_model_values": body.use_model_values,
+            "dollar_one_players": body.dollar_one_players,
+            "star_exponent": body.star_exponent,
         },
         "manager_profiles": [asdict(p) for p in profiles],
         "summary": _df_records(summary),

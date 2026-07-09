@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 import draft_targets_mc as target_mc
+import player_values
 
 
 CATEGORIES: Tuple[str, ...] = ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FG%", "FT%")
@@ -142,14 +143,38 @@ def default_manager_profiles(n_managers: int = 12) -> List[ManagerProfile]:
     return profiles
 
 
-def prepare_auction_pool(df_raw: pd.DataFrame) -> pd.DataFrame:
+def prepare_auction_pool(
+    df_raw: pd.DataFrame,
+    *,
+    use_model_values: bool = True,
+    n_teams: int = 12,
+    roster_size: int = 13,
+    budget: float = 200.0,
+    min_bid: float = 1.0,
+    dollar_one_players: Optional[int] = None,
+    category_weights: Optional[Mapping[str, float]] = None,
+    star_exponent: float = 1.15,
+) -> pd.DataFrame:
     """Normalize projection columns and add scoring helpers used by the room."""
 
-    df = target_mc.normalize_columns(df_raw)
-    df = target_mc.add_eligibility_flags(df)
-    df = df.reset_index(drop=True).copy()
+    if use_model_values:
+        df = player_values.calculate_player_values(
+            df_raw,
+            n_teams=n_teams,
+            roster_size=roster_size,
+            budget=budget,
+            min_bid=min_bid,
+            dollar_one_players=dollar_one_players,
+            category_weights=category_weights,
+            star_exponent=star_exponent,
+        )
+    else:
+        df = target_mc.normalize_columns(df_raw)
+        df = target_mc.add_eligibility_flags(df)
+        df = df.reset_index(drop=True).copy()
 
-    missing = [c for c in ("Player", "Price", "Value", "POS") if c not in df.columns]
+    required_identity_cols = ("Player", "Price", "POS") if use_model_values else ("Player", "Price", "Value", "POS")
+    missing = [c for c in required_identity_cols if c not in df.columns]
     missing.extend(c for c in _COUNTING_SOURCE.values() if c not in df.columns)
     if "FG%" not in df.columns and not {"FGM_PG", "FGA_PG"} <= set(df.columns):
         missing.append("FG% or FGM_PG/FGA_PG")
@@ -159,7 +184,14 @@ def prepare_auction_pool(df_raw: pd.DataFrame) -> pd.DataFrame:
         raise KeyError(f"Missing required auction columns after normalization: {missing}")
 
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(1.0).clip(lower=1.0)
-    df["Value"] = pd.to_numeric(df["Value"], errors="coerce").fillna(df["Price"]).clip(lower=0.0)
+    if use_model_values:
+        df["external_price"] = pd.to_numeric(df.get("external_price", df["Price"]), errors="coerce")
+        df["external_value"] = pd.to_numeric(df.get("external_value", np.nan), errors="coerce")
+        df["Value"] = pd.to_numeric(df["model_value"], errors="coerce").fillna(df["Price"]).clip(lower=min_bid)
+    else:
+        df["external_price"] = df["Price"]
+        df["external_value"] = pd.to_numeric(df["Value"], errors="coerce")
+        df["Value"] = pd.to_numeric(df["Value"], errors="coerce").fillna(df["Price"]).clip(lower=0.0)
 
     if "FG%" not in df.columns:
         df["FG%"] = pd.to_numeric(df["FGM_PG"], errors="coerce") / pd.to_numeric(df["FGA_PG"], errors="coerce")
@@ -170,10 +202,13 @@ def prepare_auction_pool(df_raw: pd.DataFrame) -> pd.DataFrame:
 
     for cat, col in _COUNTING_SOURCE.items():
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-        df[f"{cat}_score"] = _zscore(df[col].to_numpy(float))
-    df["FG%_score"] = _zscore(df["FG%"].to_numpy(float))
-    df["FT%_score"] = _zscore(df["FT%"].to_numpy(float))
-    df["star_score"] = _percent_rank(df["Price"].to_numpy(float))
+        if f"{cat}_score" not in df.columns:
+            df[f"{cat}_score"] = _zscore(df[col].to_numpy(float))
+    if "FG%_score" not in df.columns:
+        df["FG%_score"] = _zscore(df["FG%"].to_numpy(float))
+    if "FT%_score" not in df.columns:
+        df["FT%_score"] = _zscore(df["FT%"].to_numpy(float))
+    df["star_score"] = _percent_rank(df["Value"].to_numpy(float))
     df["mid_tier_score"] = 1.0 - np.minimum(np.abs(df["star_score"].to_numpy(float) - 0.55) / 0.55, 1.0)
     return df
 
@@ -189,6 +224,10 @@ def simulate_auction_prices(
     min_bid: float = 1.0,
     bid_increment: float = 1.0,
     rng_seed: int = 7,
+    use_model_values: bool = True,
+    dollar_one_players: Optional[int] = None,
+    category_weights: Optional[Mapping[str, float]] = None,
+    star_exponent: float = 1.15,
     return_sales: bool = False,
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
     """Run full-room auction simulations and summarize each player's price.
@@ -202,9 +241,19 @@ def simulate_auction_prices(
     if roster_size < 1:
         raise ValueError("roster_size must be >= 1")
 
-    pool = prepare_auction_pool(df_raw)
     profiles = _coerce_profiles(manager_profiles, n_managers=12)
     n_managers = len(profiles)
+    pool = prepare_auction_pool(
+        df_raw,
+        use_model_values=use_model_values,
+        n_teams=n_managers,
+        roster_size=roster_size,
+        budget=budget,
+        min_bid=min_bid,
+        dollar_one_players=dollar_one_players,
+        category_weights=category_weights,
+        star_exponent=star_exponent,
+    )
     if len(pool) < n_managers * roster_size:
         raise ValueError("player pool is too small for the requested managers and roster size")
 
@@ -236,8 +285,13 @@ def simulate_auction_prices(
         summary_rows.append({
             "player": player,
             "position": row.get("POS"),
-            "base_price": float(row["Price"]),
+            "base_price": float(row["Value"]),
             "base_value": float(row["Value"]),
+            "external_price": _nullable_float(row.get("external_price")),
+            "external_value": _nullable_float(row.get("external_value")),
+            "model_value": float(row["Value"]),
+            "value_score": _nullable_float(row.get("value_score")),
+            "replacement_adjusted_score": _nullable_float(row.get("replacement_adjusted_score")),
             "sale_probability": float(len(prices) / n_simulations),
             "avg_price": _nan_if_empty(prices, np.mean),
             "median_price": _nan_if_empty(prices, np.median),
@@ -249,7 +303,7 @@ def simulate_auction_prices(
         })
 
     summary = pd.DataFrame(summary_rows).sort_values(
-        ["sale_probability", "avg_price", "base_price"], ascending=[False, False, False]
+        ["sale_probability", "avg_price", "model_value"], ascending=[False, False, False]
     ).reset_index(drop=True)
     sales = pd.DataFrame(sales_rows) if return_sales else None
     return summary, sales
@@ -324,7 +378,8 @@ def _simulate_one_auction(
             "buyer_id": winner.profile.manager_id,
             "buyer_label": winner.profile.label,
             "buyer_archetype": winner.profile.archetype,
-            "base_price": float(pool.at[nomination, "Price"]),
+            "base_price": float(pool.at[nomination, "Value"]),
+            "external_price": _nullable_float(pool.at[nomination, "external_price"]),
             "room_inflation": float(round(room_state.inflation, 4)),
         })
 
@@ -346,7 +401,7 @@ def _room_state(
     money_left = sum(t.budget_left for t in teams)
     open_slots = sum(roster_size - len(t.roster) for t in teams)
     reserve = open_slots * min_bid
-    projected_room_cost = float(pool.loc[available, "Price"].nlargest(open_slots).sum()) if open_slots else 0.0
+    projected_room_cost = float(pool.loc[available, "Value"].nlargest(open_slots).sum()) if open_slots else 0.0
     fair_room_cost = max(projected_room_cost, reserve, 1.0)
     inflation = float(np.clip((money_left - reserve) / fair_room_cost, 0.65, 1.50))
 
@@ -401,7 +456,7 @@ def _manager_bid_ceiling(
         return 0.0
 
     profile = team.profile
-    base = max(float(row["Price"]), float(row["Value"]), room.min_bid)
+    base = max(float(row["Value"]), room.min_bid)
     category_fit = _need_adjusted_category_fit(row, team)
     need = profile.need_reactivity * category_fit
     scarcity = sum(
@@ -515,3 +570,13 @@ def _nan_if_empty(values: np.ndarray, fn) -> float:
     if values.size == 0:
         return float("nan")
     return float(fn(values))
+
+
+def _nullable_float(value: object) -> Optional[float]:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(out):
+        return None
+    return out

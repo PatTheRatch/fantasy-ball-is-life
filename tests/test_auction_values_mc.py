@@ -33,10 +33,14 @@ def make_pool(n=36, seed=0):
 
 
 def test_prepare_auction_pool_adds_scores_and_eligibility():
-    pool = auction.prepare_auction_pool(make_pool())
-    for col in ("Player", "Price", "Value", "is_PG", "is_C", "PTS_score", "REB_score", "FG%_score"):
+    pool = auction.prepare_auction_pool(make_pool(), n_teams=4, roster_size=3)
+    for col in (
+        "Player", "Price", "Value", "model_value", "external_price",
+        "is_PG", "is_C", "PTS_score", "REB_score", "FG%_score",
+    ):
         assert col in pool.columns
     assert pool["star_score"].between(0, 1).all()
+    assert (pool["model_value"] >= 1).all()
 
 
 def test_simulation_is_deterministic_for_same_seed():
@@ -60,8 +64,9 @@ def test_summary_contract_contains_price_distribution_columns():
     )
 
     expected = {
-        "player", "position", "base_price", "sale_probability", "avg_price",
-        "median_price", "p10_price", "p90_price", "likely_buyer_archetype",
+        "player", "position", "base_price", "external_price", "model_value",
+        "sale_probability", "avg_price", "median_price", "p10_price",
+        "p90_price", "likely_buyer_archetype",
     }
     assert expected <= set(summary.columns)
     assert len(summary) == 36
@@ -107,13 +112,27 @@ def test_category_build_profiles_change_likely_buyers():
     ]
 
     _, sales = auction.simulate_auction_prices(
-        pool, manager_profiles=profiles, n_simulations=40, roster_size=2, rng_seed=8, return_sales=True,
+        pool, manager_profiles=profiles, n_simulations=40, roster_size=2, rng_seed=8,
+        dollar_one_players=0, return_sales=True,
     )
 
     featured = sales[sales["player"].isin(["Block Center", "Three Guard"])]
     buyers = featured.groupby("player")["buyer_archetype"].agg(lambda s: s.value_counts().idxmax()).to_dict()
     assert buyers["Block Center"] == "big_man_build"
     assert buyers["Three Guard"] == "guard_stats_build"
+
+
+def test_model_value_can_override_bad_external_price():
+    pool = make_pool()
+    pool.loc[0, "Price"] = 1
+    pool.loc[0, "Value"] = 1
+    pool.loc[0, ["PTS_PG", "REB_PG", "AST_PG", "STL_PG", "BLK_PG", "3PM_PG"]] = [42, 16, 8, 2.5, 4.0, 3.5]
+    prepared = auction.prepare_auction_pool(pool, n_teams=4, roster_size=4, dollar_one_players=4)
+
+    elite = prepared.loc[prepared["Player"] == "Player0"].iloc[0]
+    assert elite["external_price"] == 1
+    assert elite["model_value"] > 1
+    assert elite["Value"] == elite["model_value"]
 
 
 def test_rejects_too_small_pool():
