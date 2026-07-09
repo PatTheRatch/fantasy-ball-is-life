@@ -396,6 +396,16 @@ export interface DraftPickEntry {
   is_user: boolean
 }
 
+/** A "make sure I get this player" prep-time favorite — not a real pick, so
+ * it doesn't touch the real picks log or budget. Every generated plan is
+ * built as if this player is already owned, at expected_price if given, else
+ * their own projected $ value. Ignored once the same player is won or lost
+ * for real. */
+export interface DraftTargetPlayer {
+  player_key: string
+  expected_price?: number | null
+}
+
 export interface DraftPoolParams {
   n_plans?: number
   initial_budget?: number
@@ -404,6 +414,17 @@ export interface DraftPoolParams {
   games_per_week?: number
   minimum_value_players?: number
   year?: number | null
+
+  // Team construction.
+  exclude_players?: string[]
+  favorite_team?: string | null
+  favorite_team_representation?: number
+  target_players?: DraftTargetPlayer[]
+
+  // What to optimize for.
+  target_categories?: string[] | null
+  base_percentile?: number | null
+  stat_to_maximize?: string | null
 }
 
 export interface DraftPlanConfig {
@@ -463,6 +484,9 @@ export interface DraftPortfolioResponse {
   plans: DraftPlanSnapshot[]
   fallback_next: DraftFallbackNext | null
   value_board: DraftValueBoardEntry[]
+  /** target_players that couldn't be locked in (below the games threshold,
+   * excluded, a typo) — degrades gracefully rather than failing the request. */
+  skipped_targets?: string[]
 }
 
 export interface DraftPlansBody extends DraftPoolParams {

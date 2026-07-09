@@ -234,3 +234,153 @@ def test_draft_relax_requires_prior_plans():
 
     resp = client.post("/draft/relax", json={"n_plans": 1, "picks": [], "prior_plans": []})
     assert resp.status_code == 422
+
+
+# --- "how do I define what I'm optimizing for" (exclude / favorite team /
+# target player / category+confidence picker) -----------------------------
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_exclude_players_never_appear_in_any_plan(monkeypatch):
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    proj = pd.read_excel(BBM_PROJECTIONS_PATH)
+    avoid = proj.sort_values("$", ascending=False)["Name"].iloc[0].lower()
+
+    resp = client.post("/draft/plans", json={"n_plans": 6, "picks": [], "exclude_players": [avoid]})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["plans"], "expected at least one plan"
+    for p in data["plans"]:
+        assert avoid not in p["roster"]
+    assert avoid not in {v["player_key"] for v in data["value_board"]}
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_favorite_team_representation_is_respected(monkeypatch):
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    # Count against the *actually filtered* pool (same games/exclude filters
+    # the solver sees), not the raw projections file — the raw file overcounts
+    # a team's real availability (e.g. injured/limited players get filtered
+    # out later), which previously picked an unsatisfiable representation
+    # count here and masked a real gap (see test_validate_pool_feasibility.py).
+    pool = ol.OptimizeLineup(minimum_game_threshold=20, value_col="Value").player_data_df
+    team_counts = pool[pool["Team"] != "FA"]["Team"].value_counts()  # "FA" = free agent, not a real team
+    fav_team = team_counts[team_counts >= 5].index[0]
+    representation = 2  # comfortably below any qualifying team's real availability
+
+    resp = client.post(
+        "/draft/plans",
+        json={
+            "n_plans": 4,
+            "picks": [],
+            "favorite_team": fav_team,
+            "favorite_team_representation": representation,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["plans"], "expected at least one plan"
+    team_by_name = dict(zip(pool["Name"].str.lower(), pool["Team"]))
+    for p in data["plans"]:
+        fav_count = sum(1 for name in p["roster"] if team_by_name.get(name) == fav_team)
+        assert fav_count >= representation, f"{p['label']} only has {fav_count} {fav_team} players"
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_target_player_is_pre_locked_onto_every_plan_at_projected_price(monkeypatch):
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    # Pick from the *actually filtered* pool (opt.player_data_df), not the raw
+    # projections file — a handful of highly-projected players (e.g. injured,
+    # limited-games-remaining) never make it past the engine's own filters, so
+    # reading the raw file can name someone who'd legitimately land in
+    # skipped_targets rather than get pre-locked.
+    pool = ol.OptimizeLineup(minimum_game_threshold=20, value_col="Value").player_data_df
+    row = pool.sort_values("$", ascending=False).iloc[10]
+    favorite = row["Name"].lower()
+    projected_price = round(float(row["$"]))
+
+    resp = client.post(
+        "/draft/plans",
+        json={"n_plans": 4, "picks": [], "target_players": [{"player_key": favorite}]},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["plans"], "expected at least one plan"
+    for p in data["plans"]:
+        assert favorite in p["roster"]
+        # a pre-locked target reads as "already owned" for planning purposes
+        assert p["next_target"] is None or p["next_target"]["player_key"] != favorite
+
+    # An explicit expected_price overrides the default projected price.
+    resp2 = client.post(
+        "/draft/plans",
+        json={
+            "n_plans": 2,
+            "picks": [],
+            "target_players": [{"player_key": favorite, "expected_price": projected_price + 15}],
+        },
+    )
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["plans"], "expected at least one plan even at an inflated expected price"
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_target_categories_and_stat_to_maximize_are_respected(monkeypatch):
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.post(
+        "/draft/plans",
+        json={
+            "n_plans": 6,
+            "picks": [],
+            "target_categories": ["PTS", "REB", "AST", "STL", "BLK", "3PM"],  # no FG%/FT%/TO
+            "stat_to_maximize": "AST",
+            "base_percentile": 0.6,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["plans"], "expected at least one plan"
+    for p in data["plans"]:
+        assert set(p["config"]["constrained_categories"]) <= {"PTS", "REB", "AST", "STL", "BLK", "3PM"}
+        assert p["config"]["stat_to_maximize"] == "AST"
+
+
+def test_target_categories_validation_error_returns_422():
+    import api
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.post(
+        "/draft/plans",
+        json={"n_plans": 2, "picks": [], "target_categories": ["PTS"], "stat_to_maximize": "REB"},
+    )
+    assert resp.status_code == 422

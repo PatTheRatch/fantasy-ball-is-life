@@ -8,6 +8,7 @@ import type {
   DraftPoolParams,
   DraftPortfolioResponse,
   DraftRelaxProposal,
+  DraftTargetPlayer,
   DraftTriageResponse,
 } from '../api'
 import {
@@ -28,6 +29,16 @@ import { Card } from '../components/Card'
 
 const ACCENT = '#e7a93c'
 const CATS = ['PTS', 'REB', 'AST', 'STL', 'BLK', '3PM', 'FG%', 'FT%', 'TO'] as const
+// Only counting categories are valid optimizer objectives (maximizing a
+// percentage or turnovers is undefined) — mirrors draft_strategies.COUNTING_CATS.
+const COUNTING_CATS = ['PTS', 'REB', 'AST', 'STL', 'BLK', '3PM'] as const
+// Static, not league-specific — "favorite NBA team" is independent of ESPN/
+// fantasy-league state, so no endpoint round-trip is needed for this dropdown.
+const NBA_TEAMS = [
+  'ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW',
+  'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NOP', 'NYK',
+  'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SAS', 'TOR', 'UTA', 'WAS',
+] as const
 
 const STORAGE_KEY = 'draft-room-v1'
 const SCHEMA_VERSION = 1
@@ -47,6 +58,13 @@ const DEFAULT_PARAMS: DraftPoolParams = {
   minimum_game_threshold: 20,
   games_per_week: 3,
   minimum_value_players: 3,
+  exclude_players: [],
+  favorite_team: null,
+  favorite_team_representation: 1,
+  target_players: [],
+  target_categories: null,
+  base_percentile: null,
+  stat_to_maximize: null,
 }
 
 function loadStored(): StoredState {
@@ -193,6 +211,10 @@ export function DraftPage() {
     () => new Set(picks.filter((p) => p.is_user).map((p) => p.player_key)),
     [picks],
   )
+  const targetKeys = useMemo(
+    () => new Set((params.target_players ?? []).map((t) => t.player_key)),
+    [params.target_players],
+  )
   const budgetSpent = useMemo(
     () => picks.filter((p) => p.is_user).reduce((sum, p) => sum + p.price, 0),
     [picks],
@@ -254,6 +276,7 @@ export function DraftPage() {
         error={generateMutation.isError ? formatApiError(generateMutation.error) : null}
         hasPortfolio={portfolio != null}
         pickCount={picks.length}
+        skippedTargets={portfolio?.skipped_targets ?? []}
       />
 
       {portfolio && (
@@ -303,7 +326,7 @@ export function DraftPage() {
 
               <PivotPlansStrip plans={portfolio.plans} activePlanId={activePlanId} onSelect={setActivePlanId} />
 
-              <RosterTable plan={activePlan} ownedKeys={ownedKeys} />
+              <RosterTable plan={activePlan} ownedKeys={ownedKeys} targetKeys={targetKeys} />
             </div>
 
             <div className="space-y-4">
@@ -330,6 +353,7 @@ function SetupPanel({
   error,
   hasPortfolio,
   pickCount,
+  skippedTargets,
 }: {
   params: DraftPoolParams
   onChange: (p: DraftPoolParams) => void
@@ -338,7 +362,24 @@ function SetupPanel({
   error: string | null
   hasPortfolio: boolean
   pickCount: number
+  skippedTargets: string[]
 }) {
+  const selectedCats = params.target_categories ?? [...CATS]
+  const percentile = params.base_percentile ?? 0.7
+  const availableObjectives = COUNTING_CATS.filter((c) => selectedCats.includes(c))
+
+  function toggleCategory(cat: string) {
+    const next = selectedCats.includes(cat) ? selectedCats.filter((c) => c !== cat) : [...selectedCats, cat]
+    if (next.length === 0) return // must keep at least one category selected
+    const patch: DraftPoolParams = { ...params, target_categories: next }
+    // The current objective may no longer be valid under the new selection —
+    // fall back to the recipe default rather than send an invalid combination.
+    if (params.stat_to_maximize && !next.includes(params.stat_to_maximize)) {
+      patch.stat_to_maximize = null
+    }
+    onChange(patch)
+  }
+
   return (
     <Card>
       <div className="flex flex-wrap items-end gap-3">
@@ -371,11 +412,275 @@ function SetupPanel({
           {pending ? 'Generating…' : hasPortfolio ? 'Regenerate portfolio' : 'Generate portfolio'}
         </button>
       </div>
+
+      <div className="mt-4 border-t border-pg-border pt-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">What to optimize for</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {CATS.map((cat) => {
+            const on = selectedCats.includes(cat)
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => toggleCategory(cat)}
+                title={on ? `Competing in ${cat} — click to punt it` : `Punting ${cat} — click to compete in it`}
+                className="rounded-md border px-2.5 py-1 font-mono text-xs font-semibold transition-colors"
+                style={
+                  on
+                    ? { borderColor: ACCENT, backgroundColor: `${ACCENT}1f`, color: '#fff' }
+                    : { borderColor: 'var(--color-pg-border)', color: '#64748b' }
+                }
+              >
+                {cat}
+              </button>
+            )
+          })}
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Unselected categories are always punted across every generated plan.
+        </p>
+
+        <div className="mt-3 flex flex-wrap items-center gap-5">
+          <label className="flex flex-1 min-w-[220px] flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Confidence — how likely to win a category: <span className="font-mono text-slate-300">{Math.round(percentile * 100)}%</span>
+            </span>
+            <input
+              type="range"
+              min={50}
+              max={95}
+              step={1}
+              value={Math.round(percentile * 100)}
+              onChange={(e) => onChange({ ...params, base_percentile: Number(e.target.value) / 100 })}
+              style={{ accentColor: ACCENT }}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Push hardest on</span>
+            <select
+              value={params.stat_to_maximize ?? ''}
+              onChange={(e) => onChange({ ...params, stat_to_maximize: e.target.value || null })}
+              className="rounded-md border border-pg-border bg-black/30 px-2 py-1.5 text-sm text-white focus:outline-none"
+            >
+              <option value="">Recipe default (varies by plan)</option>
+              {availableObjectives.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-pg-border pt-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Team construction</p>
+        <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <ExcludePlayersEditor
+            excluded={params.exclude_players ?? []}
+            onChange={(list) => onChange({ ...params, exclude_players: list })}
+          />
+          <FavoriteTeamEditor
+            team={params.favorite_team ?? ''}
+            representation={params.favorite_team_representation ?? 1}
+            onChange={(team, representation) =>
+              onChange({ ...params, favorite_team: team || null, favorite_team_representation: representation })
+            }
+          />
+          <TargetPlayersEditor
+            targets={params.target_players ?? []}
+            skipped={skippedTargets}
+            onChange={(list) => onChange({ ...params, target_players: list })}
+          />
+        </div>
+      </div>
+
       {pickCount > 0 && (
-        <p className="mt-2 text-xs text-slate-500">{pickCount} pick(s) logged so far will be applied.</p>
+        <p className="mt-3 text-xs text-slate-500">{pickCount} pick(s) logged so far will be applied.</p>
       )}
       {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
     </Card>
+  )
+}
+
+function ExcludePlayersEditor({
+  excluded,
+  onChange,
+}: {
+  excluded: string[]
+  onChange: (list: string[]) => void
+}) {
+  const [input, setInput] = useState('')
+  function add() {
+    const key = input.trim().toLowerCase()
+    if (!key || excluded.includes(key)) return
+    onChange([...excluded, key])
+    setInput('')
+  }
+  return (
+    <div>
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Avoid these players</span>
+      <div className="mt-1 flex gap-1.5">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+          placeholder="Player name…"
+          className="min-w-0 flex-1 rounded-md border border-pg-border bg-black/30 px-2 py-1.5 text-sm text-white focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={add}
+          className="rounded-md border border-pg-border px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:border-slate-500"
+        >
+          Add
+        </button>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {excluded.map((key) => (
+          <span
+            key={key}
+            className="flex items-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 text-xs uppercase text-rose-300"
+          >
+            {key}
+            <button
+              type="button"
+              onClick={() => onChange(excluded.filter((k) => k !== key))}
+              className="text-rose-400 hover:text-rose-200"
+              aria-label={`Stop avoiding ${key}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function FavoriteTeamEditor({
+  team,
+  representation,
+  onChange,
+}: {
+  team: string
+  representation: number
+  onChange: (team: string, representation: number) => void
+}) {
+  return (
+    <div>
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Favorite team</span>
+      <div className="mt-1 flex gap-1.5">
+        <select
+          value={team}
+          onChange={(e) => onChange(e.target.value, representation)}
+          className="min-w-0 flex-1 rounded-md border border-pg-border bg-black/30 px-2 py-1.5 text-sm text-white focus:outline-none"
+        >
+          <option value="">None</option>
+          {NBA_TEAMS.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        {team && (
+          <label className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">min</span>
+            <input
+              type="number"
+              min={1}
+              max={13}
+              value={representation}
+              onChange={(e) => onChange(team, Number(e.target.value))}
+              className="w-14 rounded-md border border-pg-border bg-black/30 px-2 py-1.5 text-sm text-white focus:outline-none"
+            />
+          </label>
+        )}
+      </div>
+      {team && (
+        <p className="mt-1.5 text-xs text-slate-500">
+          Every plan will include at least {representation} {team} player(s).
+        </p>
+      )}
+    </div>
+  )
+}
+
+function TargetPlayersEditor({
+  targets,
+  skipped,
+  onChange,
+}: {
+  targets: DraftTargetPlayer[]
+  skipped: string[]
+  onChange: (list: DraftTargetPlayer[]) => void
+}) {
+  const [name, setName] = useState('')
+  const [price, setPrice] = useState('')
+  function add() {
+    const key = name.trim().toLowerCase()
+    if (!key || targets.some((t) => t.player_key === key)) return
+    const expected = price.trim() ? Number(price) : null
+    onChange([...targets, { player_key: key, expected_price: Number.isFinite(expected) ? expected : null }])
+    setName('')
+    setPrice('')
+  }
+  return (
+    <div>
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        Target players <span className="normal-case text-slate-600">(pre-locked at projected $ unless set)</span>
+      </span>
+      <div className="mt-1 flex gap-1.5">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+          placeholder="Player name…"
+          className="min-w-0 flex-1 rounded-md border border-pg-border bg-black/30 px-2 py-1.5 text-sm text-white focus:outline-none"
+        />
+        <input
+          type="number"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          placeholder="$ (opt.)"
+          className="w-20 rounded-md border border-pg-border bg-black/30 px-2 py-1.5 text-sm text-white focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={add}
+          className="rounded-md border border-pg-border px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:border-slate-500"
+        >
+          Add
+        </button>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {targets.map((t) => (
+          <span
+            key={t.player_key}
+            className="flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs uppercase"
+            style={{ borderColor: ACCENT, backgroundColor: `${ACCENT}1a`, color: '#fbbf24' }}
+          >
+            {t.player_key}
+            {t.expected_price != null && <span className="font-mono">${t.expected_price}</span>}
+            <button
+              type="button"
+              onClick={() => onChange(targets.filter((x) => x.player_key !== t.player_key))}
+              className="hover:text-white"
+              aria-label={`Remove target ${t.player_key}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      {skipped.length > 0 && (
+        <p className="mt-1.5 text-xs text-rose-400">
+          Couldn&apos;t lock in: {skipped.join(', ')} — not in the current pool (games threshold, excluded, or a typo).
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -762,7 +1067,15 @@ function PivotPlansStrip({
 /* Roster table (D5: $, max bid, VOR-ish value, all 9 cats)                   */
 /* -------------------------------------------------------------------------- */
 
-function RosterTable({ plan, ownedKeys }: { plan: DraftPlanSnapshot | null; ownedKeys: Set<string> }) {
+function RosterTable({
+  plan,
+  ownedKeys,
+  targetKeys,
+}: {
+  plan: DraftPlanSnapshot | null
+  ownedKeys: Set<string>
+  targetKeys: Set<string>
+}) {
   if (!plan) return null
   return (
     <Card>
@@ -788,7 +1101,12 @@ function RosterTable({ plan, ownedKeys }: { plan: DraftPlanSnapshot | null; owne
           </thead>
           <tbody>
             {plan.players.map((p) => (
-              <PlayerRowView key={p.player_key} player={p} owned={ownedKeys.has(p.player_key)} />
+              <PlayerRowView
+                key={p.player_key}
+                player={p}
+                owned={ownedKeys.has(p.player_key)}
+                targeted={targetKeys.has(p.player_key)}
+              />
             ))}
           </tbody>
         </table>
@@ -797,7 +1115,15 @@ function RosterTable({ plan, ownedKeys }: { plan: DraftPlanSnapshot | null; owne
   )
 }
 
-function PlayerRowView({ player, owned }: { player: DraftPlayerRow; owned: boolean }) {
+function PlayerRowView({
+  player,
+  owned,
+  targeted,
+}: {
+  player: DraftPlayerRow
+  owned: boolean
+  targeted: boolean
+}) {
   return (
     <tr className="border-b border-pg-border/60 font-mono text-xs">
       <td className="py-1.5 pr-2 text-slate-400">{player.pos ?? '—'}</td>
@@ -819,6 +1145,13 @@ function PlayerRowView({ player, owned }: { player: DraftPlayerRow; owned: boole
         {owned ? (
           <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-400">
             ✓ you
+          </span>
+        ) : targeted ? (
+          <span
+            className="rounded border px-1.5 py-0.5 text-[10px]"
+            style={{ borderColor: ACCENT, backgroundColor: `${ACCENT}1a`, color: '#fbbf24' }}
+          >
+            ★ target
           </span>
         ) : (
           <span className="rounded border border-dashed border-pg-border px-1.5 py-0.5 text-[10px] text-slate-500">
