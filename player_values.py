@@ -38,7 +38,7 @@ def calculate_player_values(
     min_bid: float = 1.0,
     dollar_one_players: Optional[int] = None,
     category_weights: Optional[Mapping[str, float]] = None,
-    star_exponent: float = 1.15,
+    star_exponent: float = 1.40,
 ) -> pd.DataFrame:
     """Return the projection pool with an internally calculated ``model_value``.
 

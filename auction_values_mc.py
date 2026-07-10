@@ -153,7 +153,7 @@ def prepare_auction_pool(
     min_bid: float = 1.0,
     dollar_one_players: Optional[int] = None,
     category_weights: Optional[Mapping[str, float]] = None,
-    star_exponent: float = 1.15,
+    star_exponent: float = 1.40,
 ) -> pd.DataFrame:
     """Normalize projection columns and add scoring helpers used by the room."""
 
@@ -227,7 +227,7 @@ def simulate_auction_prices(
     use_model_values: bool = True,
     dollar_one_players: Optional[int] = None,
     category_weights: Optional[Mapping[str, float]] = None,
-    star_exponent: float = 1.15,
+    star_exponent: float = 1.40,
     return_sales: bool = False,
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
     """Run full-room auction simulations and summarize each player's price.

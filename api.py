@@ -1552,7 +1552,7 @@ class AuctionSimulationBody(DraftPoolParams):
     use_model_values: bool = True
     dollar_one_players: Optional[int] = Field(default=None, ge=0)
     category_weights: Optional[dict[str, float]] = None
-    star_exponent: float = Field(default=1.15, gt=0)
+    star_exponent: float = Field(default=1.40, gt=0)
     return_sales: bool = False
     sales_limit: int = Field(default=500, ge=0, le=10000)
 
