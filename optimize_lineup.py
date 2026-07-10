@@ -6,7 +6,13 @@ from fantasy import MyLeague
 import cvxpy as cp
 import shutup
 
-from config import BBM_PROJECTIONS_PATH, DRAFT_LEAGUE_YEAR_DEFAULT, GAMES_PER_WEEK, LEAGUE_ID
+from config import (
+    BBM_PROJECTIONS_PATH,
+    DRAFT_LEAGUE_YEAR_DEFAULT,
+    GAMES_PER_WEEK,
+    LEAGUE_ID,
+    SOLVER_TIME_LIMIT_SECONDS,
+)
 import draft_targets_mc as mc
 
 shutup.please()
@@ -400,7 +406,14 @@ class OptimizeLineup:
         objective = cp.Maximize(player_data_df[f'{stat_to_maximize} PW'].values @ player_vars)
         prob = cp.Problem(objective, constraints)
         try:
-            prob.solve()
+            # cvxpy's MILP solve has no timeout by default. Discovered running real
+            # Monte Carlo-derived category targets through this path for the first
+            # time (docs/specs/MC_DRAFT_TARGETS.md): some genuinely feasible
+            # category/percentile combinations took 8-24s+ with no bound -- a live
+            # draft can't wait on that. `time_limit` bounds every solve; HiGHS
+            # returns status 'user_limit' with the best incumbent found so far
+            # when it hits the cap (accepted below like 'optimal_inaccurate').
+            prob.solve(solver=cp.HIGHS, time_limit=SOLVER_TIME_LIMIT_SECONDS)
         except ValueError as e:
             raise ValueError(
                 f"Solver failed to find a solution (status={prob.status}). This usually means the "
@@ -411,13 +424,41 @@ class OptimizeLineup:
                 f"the stat requirement percentile."
             ) from e
 
-        if prob.status not in ('optimal', 'optimal_inaccurate') or player_vars.value is None:
+        if prob.status == 'user_limit' and player_vars.value is None:
+            raise ValueError(
+                f"Solver hit the {SOLVER_TIME_LIMIT_SECONDS:.0f}s time limit without finding any "
+                f"feasible roster for a player pool of {len(player_data_df)} player(s) and remaining "
+                f"budget of {remaining_budget}. This doesn't necessarily mean it's infeasible -- just "
+                f"hard to solve quickly. Try relaxing the stat requirement percentile, lowering "
+                f"`minimum_game_threshold` (currently {self.minimum_game_threshold}), or reducing "
+                f"`minimum_value_players` (currently {self.minimum_value_players})."
+            )
+
+        if prob.status not in ('optimal', 'optimal_inaccurate', 'user_limit') or player_vars.value is None:
             raise ValueError(
                 f"No feasible roster found (solver status={prob.status}) for a player pool of "
                 f"{len(player_data_df)} player(s) and remaining budget of {remaining_budget}. Try "
                 f"lowering `minimum_game_threshold` (currently {self.minimum_game_threshold}), "
                 f"reducing `minimum_value_players` (currently {self.minimum_value_players}), or "
                 f"relaxing the stat requirement percentile."
+            )
+
+        # A 'user_limit' incumbent isn't guaranteed to satisfy every hard
+        # constraint the way a proven-optimal/proven-feasible status is -- e.g.
+        # HiGHS can return a degenerate all-zero selection when it hits the time
+        # limit before finding a single complete roster. Verify the count before
+        # trusting it; a size mismatch here means "ran out of time", not a
+        # usable (if suboptimal) roster.
+        selected_count = int(player_vars.value.round().astype(bool).sum())
+        needed_count = self.roster_size - len(current_roster)
+        if selected_count != needed_count:
+            raise ValueError(
+                f"Solver hit the {SOLVER_TIME_LIMIT_SECONDS:.0f}s time limit (status={prob.status}) "
+                f"without completing a valid {needed_count}-player roster (got {selected_count}) for a "
+                f"player pool of {len(player_data_df)} player(s) and remaining budget of "
+                f"{remaining_budget}. Try relaxing the stat requirement percentile, lowering "
+                f"`minimum_game_threshold` (currently {self.minimum_game_threshold}), or reducing "
+                f"`minimum_value_players` (currently {self.minimum_value_players})."
             )
 
         results = player_data_df[(player_vars.value.round().astype(bool))]

@@ -35,3 +35,13 @@ DRAFT_LEAGUE_YEAR_DEFAULT = int(os.getenv("DRAFT_LEAGUE_YEAR", "2025"))
 # consistent with the fantasy-standard 3-4 games/week. One tunable constant;
 # override via env if a league's cadence differs.
 GAMES_PER_WEEK: float = float(os.getenv("GAMES_PER_WEEK", "3.5"))
+
+# Hard cap on a single roster solve (optimize_lineup.OptimizeLineup.optimize_roster).
+# cvxpy's MILP solve has no timeout by default -- discovered running the real
+# Monte Carlo-derived category targets (docs/specs/MC_DRAFT_TARGETS.md) through
+# the Draft Room's actual constrained solve for the first time (previously
+# always bypassed in testing because the old target method needed live ESPN):
+# some genuinely feasible category/percentile combinations took 8-24s+, with no
+# bound. This caps it so a solve always terminates -- see docs/specs/DRAFT_ROOM.md
+# §2 criterion 2 (never freeze) and Gate 1's per-pick timing budget.
+SOLVER_TIME_LIMIT_SECONDS: float = float(os.getenv("SOLVER_TIME_LIMIT_SECONDS", "8"))

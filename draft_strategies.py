@@ -38,12 +38,24 @@ SPREAD_VALUE = "spread_value"
 
 # Representative percentile band per shape (spec §4 table). The config stores a
 # single value (the midpoint by default); tests assert it lands inside the band.
+#
+# Shifted down ~0.35 from the original (0.65-0.82) bands, 2026-07-10: those were
+# chosen without ever running a real constrained solve (this sandbox couldn't --
+# the old target method needed live ESPN). Once Monte Carlo targets landed
+# (docs/specs/MC_DRAFT_TARGETS.md, history-independent, so it's actually
+# testable here), the real solver hit 8-24s+ per solve in the old range, some of
+# it unbounded (see SOLVER_TIME_LIMIT_SECONDS in config.py, added alongside this
+# for the cases that are still slow even down here). Solve difficulty near a
+# MILP's feasibility boundary is not a smooth function of percentile -- sampled
+# 0.30-0.75 empirically; this range was consistently fast to solve or comfortably
+# within the new time limit, never outright unbounded. Relative spacing between
+# shapes (punt > balanced > stars & scrubs) is unchanged from the original.
 STRATEGY_PERCENTILE_BANDS: dict[str, tuple[float, float]] = {
-    BALANCED: (0.65, 0.75),
-    PUNT_ONE: (0.72, 0.80),
-    PUNT_MULTIPLE: (0.75, 0.82),
-    STARS_AND_SCRUBS: (0.55, 0.65),
-    SPREAD_VALUE: (0.66, 0.70),
+    BALANCED: (0.30, 0.40),
+    PUNT_ONE: (0.37, 0.45),
+    PUNT_MULTIPLE: (0.40, 0.47),
+    STARS_AND_SCRUBS: (0.20, 0.30),
+    SPREAD_VALUE: (0.31, 0.35),
 }
 
 # ``minimum_value_players`` is the optimizer's count of required $1 roster slots
