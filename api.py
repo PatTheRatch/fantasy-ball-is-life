@@ -26,10 +26,17 @@ from draft_engine import (
     apply_pick,
     build_initial_snapshot,
     pick_fallback,
+    plan_id_for,
     relax_plan,
     triage_player,
 )
-from draft_strategies import PlanConfig, SolveFn, build_plan_configs, generate_portfolio
+from draft_strategies import (
+    PlanConfig,
+    SolveFn,
+    build_plan_configs,
+    custom_config,
+    generate_portfolio,
+)
 from fantasy import MyLeague
 from optimize_lineup import OptimizeLineup, generate_multiple_plans
 
@@ -1559,6 +1566,20 @@ class DraftPlansBody(DraftPoolParams):
     picks: List[DraftPickEntry] = Field(default_factory=list)
 
 
+class CustomPlanBody(DraftPoolParams):
+    """One hand-tuned plan, solved and returned standalone -- the "build your
+    own, save it" flow (Patrick, 2026-07-10), as opposed to /draft/plans'
+    fixed 10-plan recipe. Every solver knob is set directly by the caller
+    rather than picked from a strategy shape."""
+
+    picks: List[DraftPickEntry] = Field(default_factory=list)
+    label: str
+    constrained_categories: List[str]
+    percentile: float
+    stat_to_maximize: str
+    ban_top_price: bool = False
+
+
 class AuctionSimulationBody(DraftPoolParams):
     """Monte Carlo auction-value simulation request.
 
@@ -1922,6 +1943,49 @@ def draft_plans(body: DraftPlansBody) -> dict:
     return {
         "plans": public_plans,
         "fallback_next": _fallback_public(snapshots, public_plans),
+        "value_board": _value_board(value_lookup, player_row_lookup, all_drafted_keys),
+        "skipped_targets": skipped_targets,
+    }
+
+
+@app.post("/draft/plans/custom")
+def draft_plans_custom(body: CustomPlanBody) -> dict:
+    """Solve one fully user-specified config and return it standalone -- the
+    counterpart to /draft/plans' fixed 10-plan recipe, for the "build your
+    own, save it" flow. Doesn't touch or know about the rest of the client's
+    working portfolio; the caller merges the result in on success."""
+    solve_fn, _, value_lookup, player_row_lookup, owned_keys, all_drafted_keys, skipped_targets = _build_pool_context(
+        body.picks, body
+    )
+
+    try:
+        cfg = custom_config(
+            label=body.label,
+            categories=body.constrained_categories,
+            percentile=body.percentile,
+            stat_to_maximize=body.stat_to_maximize,
+            minimum_value_players=body.minimum_value_players,
+            ban_top_price=body.ban_top_price,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    try:
+        roster = solve_fn(cfg)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    if not roster:
+        raise HTTPException(
+            status_code=422,
+            detail="no feasible roster for this configuration against the current pool",
+        )
+
+    snap = PlanSnapshot(plan_id=plan_id_for(cfg), config=cfg, roster=tuple(roster), health="alive")
+    public = _snapshot_to_public(snap, owned_keys, value_lookup, player_row_lookup)
+
+    return {
+        "plan": public,
         "value_board": _value_board(value_lookup, player_row_lookup, all_drafted_keys),
         "skipped_targets": skipped_targets,
     }

@@ -219,6 +219,47 @@ def spread_value_config(
     )
 
 
+def custom_config(
+    label: str,
+    categories: Sequence[str],
+    percentile: float,
+    stat_to_maximize: str,
+    minimum_value_players: int = 3,
+    ban_top_price: bool = False,
+) -> PlanConfig:
+    """A fully user-specified plan -- every knob set directly, no shape-band
+    lookup. This is the "build your own, save it" path (Patrick, 2026-07-10):
+    unlike ``build_plan_configs``'s fixed 10-plan recipe, the user picks their
+    own category set, percentile, objective, and $1-slot count instead of a
+    strategy shape choosing them.
+
+    ``shape="custom"`` is a free-form label read only for display and for
+    ``generate_portfolio``'s dedup key elsewhere in this module -- nothing
+    keys off it the way ``STRATEGY_MIN_VALUE_PLAYERS``/
+    ``STRATEGY_PERCENTILE_BANDS`` key off the five built-in shapes, so it's
+    safe to skip those lookups entirely here.
+    """
+    if not label.strip():
+        raise ValueError("label cannot be empty")
+    categories = tuple(dict.fromkeys(categories))
+    _validate("custom", categories, stat_to_maximize)
+    if not (0.0 < percentile <= 1.0):
+        raise ValueError(f"percentile must be in (0, 1], got {percentile}")
+    if minimum_value_players < 0:
+        raise ValueError("minimum_value_players cannot be negative")
+    punts = tuple(c for c in CATEGORIES if c not in categories)
+    return PlanConfig(
+        label=label,
+        shape="custom",
+        constrained_categories=categories,
+        percentile=round(percentile, 3),
+        minimum_value_players=minimum_value_players,
+        stat_to_maximize=stat_to_maximize,
+        ban_top_price=ban_top_price,
+        punts=punts,
+    )
+
+
 # Default recipe for a 10-plan portfolio (D8 target). Ordered so the most useful
 # fallbacks come first; the classic single-category punts dominate.
 _DEFAULT_RECIPE: tuple[tuple, ...] = (

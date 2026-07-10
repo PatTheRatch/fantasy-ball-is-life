@@ -261,6 +261,38 @@ genuinely unbounded. Two fixes landed together:
   is the regression guard — the first test in this suite to exercise a real,
   unmocked `set_requirements` solve, which is how this went undetected until now.
 
+**Amendment (2026-07-10) — user-defined ("build a plan") custom configs.**
+Patrick's follow-up: the recipe (§0/D8, five strategy shapes) is a guided
+starting point, but there was no way to hand-tune one plan's exact knobs and
+keep it — "hit save, then make a new one." Added a second, orthogonal path
+alongside `build_plan_configs`' fixed 10-plan recipe:
+
+- `draft_strategies.custom_config(label, categories, percentile,
+  stat_to_maximize, minimum_value_players, ban_top_price)` — builds a
+  `PlanConfig` directly from caller-supplied values instead of a shape-band
+  lookup. `shape="custom"`; reuses the same `_validate` every other builder
+  uses (unknown category, empty category set, non-counting objective,
+  maximizing a punted category all still raise).
+- `POST /draft/plans/custom` — solves exactly one `custom_config` against the
+  current pool and returns it standalone (not a portfolio). 422 on invalid
+  params or an infeasible combination against the current pool, mirroring
+  `/draft/plans`' existing error posture. The client merges the result into
+  its own working plan set; this endpoint has no opinion on the rest of it.
+- **UI ("Build a plan" card, DraftPage.tsx):** category chips, a confidence
+  slider, an objective dropdown, $1-slot count, and a "Start from" dropdown
+  that prefills the form from either a built-in shape (at its current
+  percentile-band midpoint) or a previously saved plan — purely a starting
+  point, every field stays editable. "Save & add to portfolio" solves it,
+  merges the result into the active plan set, and persists the *parameters*
+  (not the solved roster) to a client-side (`localStorage`) preset library
+  (D12's existing client-held-state posture — no new server storage) so the
+  same build can be reloaded and re-solved later against a changed pool.
+- This is additive: the existing recipe flow (`/draft/plans`, "Generate
+  portfolio") is unchanged and still the default entry point; a user can
+  ignore "Build a plan" entirely, or use it exclusively instead of the
+  recipe — both are supported, per Patrick's explicit "but they don't have
+  to" requirement.
+
 **Concurrency.** Every mutating call carries a monotonic `picks_version`
 (§3). The client echoes the version it acted on; a response for a superseded
 version is discarded, so rapid pick entry can't apply out of order.
