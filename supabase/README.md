@@ -101,6 +101,9 @@ SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...           # the anon/public key
 SUPABASE_SERVICE_ROLE_KEY=eyJ...   # the service_role key — keep secret
 PUBLIC_APP_URL=http://100.105.64.94:5173   # or your production URL
+RECAP_LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=...               # server only — keep secret
+DEEPSEEK_MODEL=deepseek-v4-flash   # lower-cost Phase 1 test model
 ```
 
 ### Frontend (`frontend/.env`)

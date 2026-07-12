@@ -177,7 +177,7 @@ def rollback_recap(
     store: RecapStore = Depends(get_recap_store),
 ) -> dict[str, Any]:
     return _run(
-        lambda: service.publish_edition(
+        lambda: service.rollback_edition(
             store=store,
             slug=slug,
             user_id=_user_id(user),

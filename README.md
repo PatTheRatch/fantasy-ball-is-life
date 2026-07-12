@@ -29,7 +29,7 @@ Backend lives under `backend/`, grouped by concern
 | Path | What |
 |---|---|
 | `backend/api/main.py` | FastAPI app factory; routers under `backend/api/routers/` (league, draft, commentary, projections, optimizer); shared helpers in `backend/api/deps.py` |
-| `backend/commentary/` | AI commentary: `prompts.py` (prompt blobs), `generate.py` (Anthropic client calls) |
+| `backend/commentary/` | AI commentary: prompt builders, provider clients, and validated structured recap generation |
 | `backend/league/` | `data_feed.py` (ESPN pull layer — rosters, transactions, matchups, scoreboards, projection attachment); `fantasy.py` (`MyLeague` — power rankings, universe-wins math) |
 | `backend/draft/` | The Draft Room engine: `optimizer.py` (auction draft optimizer, cvxpy integer program), `engine.py` (per-pick recompute loop), `strategies.py` (plan-diversity strategy map), `targets_mc.py` (Monte Carlo category targets), `values.py` (Forge Value — projection-derived auction values), `auction_sim.py` (auction-room price simulator) |
 | `backend/analytics/consistency.py` | Player consistency metrics (feeds the confidence endpoints) |
@@ -55,6 +55,11 @@ cd frontend && npm install && npm run dev
 # Streamlit (internal dashboard)
 streamlit run app.py
 ```
+
+Phase 1 weekly recap drafts default to DeepSeek's lower-cost
+`deepseek-v4-flash` model. Set `DEEPSEEK_API_KEY` and
+`RECAP_LLM_PROVIDER=deepseek` in the root `.env`; the key stays server-side.
+The legacy commentary endpoints continue to use `ANTHROPIC_API_KEY`.
 
 ## The 9 categories
 
