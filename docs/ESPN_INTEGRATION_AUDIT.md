@@ -6,12 +6,17 @@
 before building more features on top of it — specifically the Draft Room, whose
 plan-diversity engine (`draft_strategies.py`) depends on `set_requirements()`
 producing correct category targets.
-**Method:** read-only code audit (no live ESPN access from this environment);
-findings not yet confirmed against live ESPN behavior are marked below.
+**Method:** initial read-only code audit, followed by a sanitized live Patriot
+Games review on 2026-07-12.
 
 This is a tracked backlog, not a feature spec — most items are independent bug
 fixes / hardening, not new product decisions. Pull individual items into their
 own small PRs as they're prioritized.
+
+> **Live follow-up complete:** [`ESPN_API_REVIEW.md`](ESPN_API_REVIEW.md) is the
+> canonical evidence report. It confirms the findings below, measures request
+> fan-out, documents the working `mTransactions2` contract, and adds P0 items
+> for recap turnover inversion and playoff ghost-team rankings.
 
 ---
 
@@ -30,13 +35,31 @@ own small PRs as they're prioritized.
 
 ## Correctness — should fix before relying on the affected path
 
-- [ ] **`GET /rosters/current` silently zeroes games-left for every player**
+- [ ] **`GET /rosters/current` silently zeroes games-left for every player
+  — live-confirmed**
   when the optional `week_start_date`/`week_end_date` query params are omitted.
   `data_feed.py:1052-1053` defaults `week_start_date="2026-10-15"` *after*
   `week_end_date="2026-04-30"`, so `count_games_in_range`'s range check is
   always false. No validation catches the inverted default. Fix: derive sane
   defaults from the current matchup period, or validate `start <= end` and
-  400 if not.
+  400 if not. Live result: 181 roster rows, zero positive games-left by
+  default; the correct week-21 dates produced 649 player-games.
+- [ ] **Recap turnover winners are reversed — live-confirmed.**
+  `get_current_scoreboard()` negates ESPN's positive turnover totals so
+  frontend code can compare all categories as higher-is-better.
+  `canonical_matchups()` then treats the already-negated values as
+  lower-is-better. A live 57-vs-89 category was incorrectly awarded to the
+  89-turnover side. Keep canonical turnovers positive and apply category
+  direction once.
+- [ ] **Playoff all-play rankings synthesize zero-stat teams —
+  live-confirmed.** `MyLeague.get_wins()` reindexes every week to all league
+  teams and fills missing rows with zero. Week 21 had 11 unique active teams
+  but returned rankings for 14; each synthetic team received 11 turnover wins.
+  Compare only teams with valid weekly facts and define bye behavior explicitly.
+- [ ] **Transactions are unavailable — live-confirmed.**
+  `recent_activity()` returned HTTP 404, then `safe_recent_activity()` failed
+  on missing `League.espn_s2`. Replace both with the documented weekly
+  `mTransactions2` adapter before enabling transaction recap awards.
 - [ ] **`get_projected_matchup_table` crashes** (`data_feed.py:876-878`) —
   references `current_matchup_period`, which isn't a parameter or local
   variable, so it always raises `NameError`. Its only caller is the
@@ -46,7 +69,7 @@ own small PRs as they're prioritized.
 
 ## Reliability — real risk, not urgent
 
-- [ ] **Unbounded, uncached ESPN calls in plan generation.**
+- [ ] **Repeated, uncached ESPN calls in plan generation — live-confirmed.**
   `generate_multiple_plans()` (`optimize_lineup.py`) constructs a brand-new
   `MyLeague` → live `League()` fetch **per plan**, and `POST
   /optimizer/multiple-plans` (`backend/api/routers/optimizer.py`) exposes `n_plans` as a client-supplied
@@ -56,20 +79,21 @@ own small PRs as they're prioritized.
   Room spec:** confirm whether Aisha's `~3.77s/solve` benchmark included a real
   ESPN round-trip — if `MyLeague` construction is part of the per-plan cost in
   production, the spec's "0-2 re-solves, 0-8s between picks" model may be
-  optimistic. Fix: reuse one `MyLeague` across a portfolio's plans, cap
-  `n_plans` server-side.
-- [ ] **No caching anywhere.** Every request hits ESPN live
-  (`backend/api/main.py` `_handles()`/`_my_league()`). A short-TTL cache keyed by
+  optimistic. The modern Draft Room caps `n_plans` at 10, but its default
+  portfolio still has an inferred 44 ESPN requests (27.3 MB) before page
+  bootstrap. Fix: reuse one `MyLeague` across a portfolio's plans and cap or
+  retire the legacy unbounded endpoint.
+- [ ] **No backend caching — live-confirmed and quantified.** Every request hits ESPN live
+  (`backend/api/deps.py` `_handles()`/`_my_league()`). A short-TTL cache keyed by
   `(league_id, season)` would remove most of the rate-limit exposure above.
 - [ ] **Inconsistent error handling.** `/league/meta`, `/league/teams`,
   `/league/standings` (`backend/api/routers/league.py`) have no try/except, unlike most other
   endpoints that convert ESPN failures to a clean `HTTPException(500, ...)`.
   Unhandled exceptions currently surface as raw framework 500s.
-- [ ] **No timeout on a fallback network call.** `safe_recent_activity()`
-  (`data_feed.py:446`) calls `requests.get(url, cookies=cookies)` with no
-  timeout — and it's the fallback used specifically when
-  `league.recent_activity()` fails (`data_feed.py:712-714`), i.e. the
-  most likely-to-hang path is the unprotected one.
+- [ ] **No timeout on any ESPN read — live/code-confirmed.**
+  The installed `espn-api` library calls `requests.get()` without a timeout in
+  its normal `league_get()` and `get()` methods. `safe_recent_activity()` does
+  the same. Put all reads behind a gateway with explicit connect/read timeouts.
 - [ ] **Silent failure swallowing.** `matchups_df()`
   (`data_feed.py:1384-1388`) catches all exceptions from `league.box_scores()`
   via a bare `except: matchups = []`, which masks real ESPN failures as "no
@@ -99,15 +123,13 @@ own small PRs as they're prioritized.
   `add_bbm_projections` in `data_feed.py`) **is implemented**, not
   aspirational — the projection-source-framework spec can build on it as-is.
 
-## Needs live ESPN access to confirm (can't check from this sandbox)
+## Resolved by live ESPN review
 
-- [ ] `get_current_scoreboard`'s else-branch (`data_feed.py:1165-1177`)
-  hardcodes scores to `0` instead of reading `matchup.home_team.stats` —
-  unclear if that's intentional (e.g. a deliberate placeholder for a state ESPN
-  doesn't expose) or a bug.
-- [ ] Whether `espn_api` v0.46.0's `League()` fetches the full season schedule
-  eagerly on construction, or lazily per call — determines the true severity of
-  the unbounded-calls risk above.
-- [ ] Whether the ESPN `recent_activity()` 404 bug referenced in
-  `safe_recent_activity`'s own docstring still occurs in v0.46.0, i.e. whether
-  the `requests`-based fallback is still needed at all.
+- [x] Requested completed and playoff periods are honored by
+  `box_scores(matchup_period=week)`; weeks 1, 20, 21, and 22 returned distinct,
+  nonzero data. The zero-score else branch remains a future-period placeholder,
+  not the source of the current recap failure.
+- [x] `espn-api` v0.46.0 eagerly makes four requests per `League()`
+  construction, totaling 2.48 MB in the sampled league.
+- [x] `recent_activity()` still returns HTTP 404. The current fallback is also
+  unusable; `mTransactions2` is the replacement.
