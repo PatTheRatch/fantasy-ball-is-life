@@ -1,8 +1,10 @@
 # Feature Spec: Backend package restructure
 
-**Status:** PROPOSED — awaiting Aisha's architecture review (this is the
-restructure her projection-framework review flagged as "restructure-first,"
-and it resolves `MC_DRAFT_TARGETS.md` open question #1).
+**Status:** APPROVED by Aisha (2026-07-12, in the PR #12 review) — all three
+open questions resolved (see "Resolved by Aisha" below). Cleared for
+implementation once PR #12 merges. This is the restructure her
+projection-framework review flagged as "restructure-first," and it resolves
+`MC_DRAFT_TARGETS.md` open question #1.
 **Author:** Claude Code (implementation engineer)
 **Date:** 2026-07-12
 **Decision basis:** Patrick (2026-07-12): before the next feature (weekly
@@ -89,6 +91,8 @@ No externally visible API or UI change (criterion 2). Internal layout:
       commentary/
         prompts.py               # prompt blobs lifted out of api.py
         generate.py              # Anthropic client calls
+      projections/               # reserved (Aisha Q3): projection-source
+        __init__.py              # framework adapters land here; empty for now
       api/
         main.py                  # FastAPI app factory + shared deps
         routers/
@@ -102,19 +106,22 @@ No externally visible API or UI change (criterion 2). Internal layout:
 
 **Phasing:**
 
-- **PR 1 — the move.** `git mv` modules into the package, update imports
-  everywhere (tests, `app.py`), keep `api.py` intact as
-  `backend/api/main.py`. Mechanical; reviewable as a rename diff.
+- **PR 1 — the move + rename.** `git mv` modules into the package **with
+  their new basenames** (Aisha Q2: rename now — `optimize_lineup.py` →
+  `draft/optimizer.py`, `draft_strategies.py` → `draft/strategies.py`, etc.),
+  update imports everywhere (tests, `app.py`), add the empty reserved
+  `backend/projections/__init__.py` (Aisha Q3), and keep `api.py` intact as
+  `backend/api/main.py` plus the deprecated root shim (§6). Mechanical;
+  reviewable as a rename diff.
 - **PR 2 — split `api.py`.** Extract the routers and the commentary module
   from `main.py`. This is the only part with real surgery, so it gets its
   own review. Router extraction is FastAPI-conventional
   (`APIRouter` + `include_router`), no handler logic edited.
 
-**Open choice for Aisha:** module names inside `draft/` drop the redundant
-prefix (`draft_strategies.py` → `draft/strategies.py`) and
-`optimize_lineup.py` becomes `draft/optimizer.py`. If you'd rather keep the
-old basenames for greppability during the transition, PR 1 can move without
-renaming and the renames become a later chore.
+**Renaming resolved (Aisha Q2, 2026-07-12): rename in PR 1, not later.** The
+package prefix supplies the context the old basename carried, so the
+redundant prefix drops — that navigability *is* the point of the restructure.
+`git mv` preserves history; CI + the test suite catch any missed import.
 
 ## 5. Test plan
 
@@ -144,12 +151,17 @@ renaming and the renames become a later chore.
 
 ---
 
-## Open questions for Aisha
+## Resolved by Aisha (2026-07-12, PR #12 review)
 
-1. Bless or amend the §4 layout (names, grouping, `commentary/` as its own
-   package vs. a module under `api/`).
-2. The rename-vs-keep-basenames choice in §4.
-3. Should the projection-source framework
-   (`PROJECTION_SOURCE_FRAMEWORK.md`, still pending your review) assume this
-   layout lands first? Its adapter code would live at
-   `backend/projections/` — reserving that name now if so.
+1. **§4 layout — approved as written.** `commentary/` as its own package is
+   correct: it currently holds 3 endpoints with large inline prompt blobs,
+   and `commentary/prompts.py` is the natural home for them (separating
+   prompts from routing is "the key cleanup this restructure enables").
+2. **Rename now** (not a later chore) — `optimize_lineup.py` →
+   `draft/optimizer.py`, `draft_strategies.py` → `draft/strategies.py`, etc.
+   The package prefix supplies the context; dropping the redundant prefix is
+   the point. Folded into the §4 phasing above.
+3. **Reserve `backend/projections/` now.** Add an empty
+   `backend/projections/__init__.py` in PR 1 so it isn't a second rename
+   cycle when the projection-source framework lands. Added to the §4 layout
+   and PR 1 phasing.

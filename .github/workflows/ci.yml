@@ -4,8 +4,8 @@
 # both jobs.
 #
 # Integration tests that need the real projections file (gitignored) or live
-# ESPN skip cleanly by design — locally the full suite runs 106 tests; here
-# ~86 run and ~20 skip. That's expected, not a gap in the gate.
+# ESPN skip cleanly by design, so a bare CI checkout runs the pure/unit subset
+# and skips the rest. Seeing skips here is expected, not a gap in the gate.
 name: CI
 
 on:
