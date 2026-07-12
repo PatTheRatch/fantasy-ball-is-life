@@ -14,8 +14,18 @@ from config import (
     SOLVER_TIME_LIMIT_SECONDS,
 )
 import draft_targets_mc as mc
+import player_values
 
 shutup.please()
+
+# Player-pricing sources for OptimizeLineup(value_source=...). "bbm" is the
+# uploaded projections file's own $ column (unchanged, existing behavior).
+# "forge" is Forge Value -- PatriotGames' own projection-derived valuation
+# (player_values.calculate_player_values), scaled to this league's real team
+# count / roster size / budget instead of trusting an external $ column.
+VALUE_SOURCE_BBM = 'bbm'
+VALUE_SOURCE_FORGE = 'forge'
+VALUE_SOURCES = (VALUE_SOURCE_BBM, VALUE_SOURCE_FORGE)
 
 
 class OptimizeLineup:
@@ -32,22 +42,26 @@ class OptimizeLineup:
         favorite_team_representation=1,
         minimum_game_threshold=20,
         value_col='$',
+        value_source=VALUE_SOURCE_BBM,
         projections_df: Optional[pd.DataFrame] = None,
     ):
         if year is None:
             year = DRAFT_LEAGUE_YEAR_DEFAULT
         if games_per_week is None:
             games_per_week = GAMES_PER_WEEK
+        if value_source not in VALUE_SOURCES:
+            raise ValueError(f"value_source={value_source!r} must be one of {VALUE_SOURCES}")
         self.league = MyLeague(LEAGUE_ID, year)
         self.games_per_week = games_per_week
         self.excluded_players = exclude_players or []
         self.drafted_players = drafted_players or []
         self.roster_size = roster_size
         self.minimum_value_players = minimum_value_players
+        self.initial_budget = initial_budget
+        self.value_source = value_source
         self._projections_df = projections_df
         self.player_data_df = self.process_draft_data()
         self.current_roster = self.init_current_roster()
-        self.initial_budget = initial_budget
         self.requirements = {}
         self.favorite_team = favorite_team
         self.favorite_team_representation = favorite_team_representation
@@ -116,6 +130,9 @@ class OptimizeLineup:
         }
         stats_df.rename(columns=stat_columns, inplace=True)
 
+        if self.value_source == VALUE_SOURCE_FORGE:
+            stats_df = self._apply_forge_values(stats_df)
+
         # Merge and clean data
         df = pd.merge(stats_df, draft_df, how='left', left_on='Name', right_on='Player')
         df = self.clean_player_data(df)
@@ -124,6 +141,44 @@ class OptimizeLineup:
         df = self.calculate_stats(df)
 
         return df
+
+    def _league_team_count(self) -> int:
+        """Real number of teams in the live ESPN league, so Forge Value scales
+        to how this specific league is actually shaped rather than an assumed
+        default. Falls back to this app's own usual league size only when
+        league settings genuinely aren't available (e.g. a stubbed/offline
+        league in tests)."""
+        try:
+            count = int(self.league.settings.team_count)
+            if count > 0:
+                return count
+        except Exception:
+            pass
+        return 12
+
+    def _apply_forge_values(self, stats_df: pd.DataFrame) -> pd.DataFrame:
+        """Replace the uploaded projections' $ column with Forge Value --
+        PatriotGames' own projection-derived valuation
+        (player_values.calculate_player_values): a VORP/replacement-tier
+        model built from this pool's own projections rather than trusting an
+        external $ column. Scaled to this league's actual makeup -- real
+        team count (live ESPN settings), this draft's roster size, and this
+        draft's budget -- instead of hardcoded assumptions.
+
+        Operates on ``stats_df`` *before* it's merged with the draft log, so
+        the value model sees only 'Name' (not the merge's 'Player' column,
+        which is NaN for anyone not yet drafted and would otherwise get
+        picked up first by column-alias resolution)."""
+        stats_df = stats_df.reset_index(drop=True)
+        valued = player_values.calculate_player_values(
+            stats_df,
+            n_teams=self._league_team_count(),
+            roster_size=self.roster_size,
+            budget=self.initial_budget,
+        )
+        stats_df = stats_df.copy()
+        stats_df['$'] = valued['model_value'].to_numpy()
+        return stats_df
 
     def clean_player_data(self, df):
         # Filter and process player data

@@ -15,6 +15,7 @@ import type {
 import {
   formatApiError,
   getDraftPlayers,
+  getLeagueSettings,
   getLeagueTeams,
   postDraftCustomPlan,
   postDraftPick,
@@ -114,6 +115,7 @@ const DEFAULT_PARAMS: DraftPoolParams = {
   minimum_game_threshold: 20,
   games_per_week: 3,
   minimum_value_players: 3,
+  value_source: 'bbm',
   exclude_players: [],
   favorite_team: null,
   favorite_team_representation: 1,
@@ -194,6 +196,14 @@ export function DraftPage() {
   const teamsQuery = useQuery({
     queryKey: ['draft', 'teams'],
     queryFn: getLeagueTeams,
+    retry: 0,
+  })
+
+  // Surfaced next to the value-source toggle so "Forge Value" isn't a silent
+  // black box -- shows the real league size it's actually scaling to.
+  const leagueSettingsQuery = useQuery({
+    queryKey: ['draft', 'league-settings'],
+    queryFn: getLeagueSettings,
     retry: 0,
   })
 
@@ -373,6 +383,7 @@ export function DraftPage() {
         hasPortfolio={portfolio != null}
         pickCount={picks.length}
         skippedTargets={portfolio?.skipped_targets ?? []}
+        leagueTeamCount={leagueSettingsQuery.data?.team_count ?? null}
       />
 
       <CustomPlanCard
@@ -458,6 +469,7 @@ function SetupPanel({
   hasPortfolio,
   pickCount,
   skippedTargets,
+  leagueTeamCount,
 }: {
   params: DraftPoolParams
   onChange: (p: DraftPoolParams) => void
@@ -467,6 +479,7 @@ function SetupPanel({
   hasPortfolio: boolean
   pickCount: number
   skippedTargets: string[]
+  leagueTeamCount: number | null
 }) {
   const selectedCats = params.target_categories ?? [...CATS]
   const percentile = params.base_percentile ?? 0.7
@@ -574,6 +587,44 @@ function SetupPanel({
               ))}
             </select>
           </label>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-pg-border pt-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Player values</p>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <div className="flex overflow-hidden rounded-md border border-pg-border">
+            {(
+              [
+                { value: 'bbm' as const, label: 'BBM (uploaded)' },
+                { value: 'forge' as const, label: 'Forge Value (proprietary)' },
+              ]
+            ).map((opt) => {
+              const on = (params.value_source ?? 'bbm') === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => onChange({ ...params, value_source: opt.value })}
+                  className="px-3 py-1.5 text-xs font-semibold transition-colors"
+                  style={
+                    on
+                      ? { backgroundColor: `${ACCENT}1f`, color: '#fff' }
+                      : { color: '#64748b' }
+                  }
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-xs text-slate-500">
+            {(params.value_source ?? 'bbm') === 'bbm'
+              ? "The uploaded projections file's own $ column."
+              : leagueTeamCount
+                ? `PatriotGames' own projection-derived valuation — sized to your ${leagueTeamCount}-team league and this draft's roster size/budget.`
+                : "PatriotGames' own projection-derived valuation — sized to your league's real team count and this draft's roster size/budget."}
+          </p>
         </div>
       </div>
 

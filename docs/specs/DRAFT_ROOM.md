@@ -293,6 +293,46 @@ alongside `build_plan_configs`' fixed 10-plan recipe:
   recipe — both are supported, per Patrick's explicit "but they don't have
   to" requirement.
 
+**Amendment (2026-07-10) — selectable player-pricing source ("Forge Value").**
+Prior to this, every solve priced players from one fixed source: the `$`
+column baked into whatever projections file was uploaded (BBM). Patrick asked
+for a real alternative — an in-house valuation, not the file's own number —
+plus confirmation that it (and the rest of the pool math) actually accounts
+for *this* league's real makeup rather than assumed defaults.
+
+- `OptimizeLineup(value_source="bbm" | "forge")` (`optimize_lineup.py`, new
+  param, default `"bbm"` — fully backward compatible, every existing call
+  site is unaffected unless it opts in). `"forge"` replaces the `$` column
+  with **Forge Value** — PatriotGames' own projection-derived valuation
+  (`player_values.calculate_player_values`, already built for the auction-sim
+  feature but not previously wired into the actual optimizer pool): a
+  VORP/replacement-tier model computed from the pool's own projections, not
+  an external $ column.
+- **League makeup actually feeds the model,** not hardcoded assumptions:
+  `n_teams` comes from the *live* ESPN league (`league.settings.team_count`),
+  and `roster_size`/`budget` come from this draft's own params (already
+  user-set, previously unused by any valuation). Verified empirically —
+  holding the pool/budget/roster size fixed and only changing the live
+  league's team count changes every player's Forge Value (8-team vs. 16-team
+  league: Jokic $110 vs. $115 in one sampled run) — this is a real input, not
+  a decorative one. Falls back to a sane default (12) only when league
+  settings genuinely aren't reachable (e.g. an offline/stubbed league),
+  rather than raising.
+- `DraftPoolParams.value_source` (`api.py`, `Literal["bbm", "forge"]`,
+  default `"bbm"`) threads through `_build_pool_context` to every endpoint
+  that builds a pool (`/draft/plans`, `/draft/plans/custom`, `/draft/pick`,
+  `/draft/triage`, `/draft/relax`) — one pool-level setting, not a per-plan
+  knob, consistent with `favorite_team`/`exclude_players`.
+- **UI:** a "Player values" toggle in the SetupPanel (BBM vs. Forge Value),
+  with the live team count it resolved to shown next to it (reads the
+  already-fetched `/league/settings`) so the source isn't a silent black
+  box. Verified live: switching sources changes the value board and every
+  solved roster's prices; the toggle correctly displayed "sized to your
+  10-team league" against a stubbed league with `team_count=10`.
+- Naming: "Forge Value" was chosen over a generic label specifically to read
+  as *this app's own*, not a re-export of someone else's number — the
+  distinction Patrick asked for.
+
 **Concurrency.** Every mutating call carries a monotonic `picks_version`
 (§3). The client echoes the version it acted on; a response for a superseded
 version is discarded, so rapid pick entry can't apply out of order.
