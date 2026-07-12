@@ -313,7 +313,7 @@ def generate_structured_recap(
     try:
         content = validate_generated_content(_parse_json_object(raw))
     except Exception as exc:
-        raise ValueError(f"Anthropic returned an invalid structured recap: {exc}") from exc
+        raise ValueError(f"LLM returned an invalid structured recap: {exc}") from exc
 
     valid_evidence = _evidence_ids(snapshot_payload)
     used_evidence = _evidence_ids(dump_model(content))

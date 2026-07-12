@@ -225,3 +225,36 @@ class RecapStore:
         if isinstance(rows, list):
             return rows[0]
         return rows
+
+    def rollback(
+        self,
+        edition_id: str,
+        *,
+        league_id: str,
+        season: int,
+        week: int,
+    ) -> dict[str, Any]:
+        edition = self.get_edition_by_id(edition_id)
+        if (
+            not edition
+            or edition.get("league_id") != league_id
+            or int(edition.get("season", -1)) != season
+            or int(edition.get("week", -1)) != week
+        ):
+            raise RecapStoreError("Recap edition not found.")
+
+        rows = self._request(
+            "PATCH",
+            "recap_editions",
+            params={
+                "id": f"eq.{edition_id}",
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "week": f"eq.{week}",
+            },
+            json={"status": "draft", "published_at": None},
+            prefer="return=representation",
+        )
+        if not rows:
+            raise RecapStoreError("Recap edition could not be rolled back.")
+        return rows[0]

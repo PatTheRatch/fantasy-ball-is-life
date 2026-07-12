@@ -14,6 +14,7 @@ from backend.recaps import auth, service
 from backend.recaps.assemble import STAT_ORDER, canonical_matchups
 from backend.recaps.awards import select_awards
 from backend.recaps.sharing import format_share_text
+from backend.recaps.store import RecapStore, RecapStoreError
 
 
 def _snapshot(*, ready: bool = True) -> WeeklyFactSnapshot:
@@ -240,3 +241,132 @@ def test_deepseek_structured_completion_uses_json_mode(monkeypatch):
     request = post.call_args.kwargs
     assert request["json"]["model"] == "deepseek-v4-flash"
     assert request["json"]["response_format"] == {"type": "json_object"}
+
+
+def test_store_rollback_validates_scope_and_returns_draft(monkeypatch):
+    store = RecapStore(url="https://example.supabase.co", service_role_key="key")
+    monkeypatch.setattr(
+        store,
+        "get_edition_by_id",
+        Mock(
+            return_value={
+                "id": "edition-1",
+                "league_id": "league-1",
+                "season": 2026,
+                "week": 1,
+                "status": "published",
+            }
+        ),
+    )
+    request = Mock(
+        return_value=[
+            {
+                "id": "edition-1",
+                "status": "draft",
+                "published_at": None,
+            }
+        ]
+    )
+    monkeypatch.setattr(store, "_request", request)
+
+    result = store.rollback(
+        "edition-1", league_id="league-1", season=2026, week=1
+    )
+
+    assert result["status"] == "draft"
+    request.assert_called_once_with(
+        "PATCH",
+        "recap_editions",
+        params={
+            "id": "eq.edition-1",
+            "league_id": "eq.league-1",
+            "season": "eq.2026",
+            "week": "eq.1",
+        },
+        json={"status": "draft", "published_at": None},
+        prefer="return=representation",
+    )
+
+
+def test_store_rollback_rejects_wrong_league_before_patch(monkeypatch):
+    store = RecapStore(url="https://example.supabase.co", service_role_key="key")
+    monkeypatch.setattr(
+        store,
+        "get_edition_by_id",
+        Mock(
+            return_value={
+                "id": "edition-1",
+                "league_id": "another-league",
+                "season": 2026,
+                "week": 1,
+            }
+        ),
+    )
+    request = Mock()
+    monkeypatch.setattr(store, "_request", request)
+
+    with pytest.raises(RecapStoreError, match="not found"):
+        store.rollback(
+            "edition-1", league_id="league-1", season=2026, week=1
+        )
+
+    request.assert_not_called()
+
+
+def test_service_rollback_validates_edition_and_calls_store(monkeypatch):
+    store = Mock()
+    store.get_edition_by_id.return_value = {
+        "id": "edition-1",
+        "league_id": "league-1",
+        "season": 2026,
+        "week": 1,
+    }
+    store.rollback.return_value = {"id": "edition-1", "status": "draft"}
+    monkeypatch.setattr(
+        service,
+        "require_admin",
+        lambda *_args, **_kwargs: {"id": "league-1"},
+    )
+
+    result = service.rollback_edition(
+        store=store,
+        slug="test",
+        user_id="user-1",
+        season=2026,
+        week=1,
+        edition_id="edition-1",
+    )
+
+    assert result["status"] == "draft"
+    store.rollback.assert_called_once_with(
+        "edition-1", league_id="league-1", season=2026, week=1
+    )
+
+
+def test_rollback_router_uses_rollback_service(monkeypatch):
+    from backend.api.routers import recaps
+
+    rollback = Mock(return_value={"id": "edition-1", "status": "draft"})
+    monkeypatch.setattr(recaps.service, "rollback_edition", rollback)
+
+    result = recaps.rollback_recap(
+        slug="test",
+        season=2026,
+        week=1,
+        body=recaps.EditionActionBody(edition_id="edition-1"),
+        user={"id": "user-1"},
+        store=Mock(),
+    )
+
+    assert result["status"] == "draft"
+    rollback.assert_called_once()
+
+
+def test_invalid_structured_recap_uses_provider_neutral_error(monkeypatch):
+    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
+    monkeypatch.setattr(
+        generate, "_complete_structured", lambda *args, **kwargs: "{}"
+    )
+
+    with pytest.raises(ValueError, match="LLM returned an invalid structured recap"):
+        generate.generate_structured_recap(_snapshot())

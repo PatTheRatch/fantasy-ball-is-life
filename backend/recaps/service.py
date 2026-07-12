@@ -211,5 +211,31 @@ def publish_edition(
     return store.publish(edition_id, user_id)
 
 
+def rollback_edition(
+    *,
+    store: RecapStore,
+    slug: str,
+    user_id: str,
+    season: int,
+    week: int,
+    edition_id: str,
+) -> dict[str, Any]:
+    league = require_admin(store, slug, user_id)
+    edition = store.get_edition_by_id(edition_id)
+    if (
+        not edition
+        or edition.get("league_id") != league["id"]
+        or int(edition.get("season", -1)) != season
+        or int(edition.get("week", -1)) != week
+    ):
+        raise HTTPException(status_code=404, detail="Recap edition not found.")
+    return store.rollback(
+        edition_id,
+        league_id=league["id"],
+        season=season,
+        week=week,
+    )
+
+
 def as_http_error(exc: RecapStoreError) -> HTTPException:
     return HTTPException(status_code=503, detail=str(exc))
