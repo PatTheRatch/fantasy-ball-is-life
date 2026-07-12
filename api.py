@@ -9,7 +9,7 @@ import os
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -1549,6 +1549,13 @@ class DraftPoolParams(BaseModel):
     minimum_value_players: int = 3
     year: Optional[int] = None
 
+    # Who prices each player. "bbm" is the uploaded projections file's own $
+    # column (unchanged default). "forge" is Forge Value -- PatriotGames' own
+    # projection-derived valuation (player_values.calculate_player_values),
+    # scaled to this league's real team count (live ESPN settings) and this
+    # draft's roster size/budget instead of trusting an external $ column.
+    value_source: Literal["bbm", "forge"] = "bbm"
+
     # Team construction (engine support already existed; this is the plumbing
     # that was missing to actually drive it).
     exclude_players: List[str] = Field(default_factory=list)
@@ -1674,6 +1681,7 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
             favorite_team=params.favorite_team,
             favorite_team_representation=params.favorite_team_representation,
             value_col="Value",
+            value_source=params.value_source,
         )
         for p in user_picks:
             opt.draft_player(p.player_key, p.price)

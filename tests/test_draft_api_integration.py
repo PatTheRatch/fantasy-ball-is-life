@@ -463,6 +463,52 @@ def test_draft_plans_custom_rejects_out_of_range_percentile():
 
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_value_source_forge_prices_the_value_board_differently(monkeypatch):
+    """value_source="forge" must actually change what the pool/value board is
+    priced against -- Forge Value (player_values.calculate_player_values)
+    instead of the uploaded projections' own $ column -- and must use the
+    live league's real team count, not a hardcoded default."""
+    import api
+
+    class _FakeLeagueWithSettings(_FakeLeague):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+            class _Settings:
+                team_count = 8
+
+            self.settings = _Settings()
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeagueWithSettings)
+    monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    bbm_resp = client.post("/draft/plans", json={"n_plans": 2, "picks": [], "value_source": "bbm"})
+    forge_resp = client.post("/draft/plans", json={"n_plans": 2, "picks": [], "value_source": "forge"})
+    assert bbm_resp.status_code == 200, bbm_resp.text
+    assert forge_resp.status_code == 200, forge_resp.text
+
+    bbm_board = {row["player_key"]: row["max_bid"] for row in bbm_resp.json()["value_board"]}
+    forge_board = {row["player_key"]: row["max_bid"] for row in forge_resp.json()["value_board"]}
+    common = set(bbm_board) & set(forge_board)
+    assert len(common) > 0
+    assert any(bbm_board[k] != forge_board[k] for k in common)
+
+
+def test_value_source_rejects_unknown_value():
+    import api
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.post("/draft/plans", json={"n_plans": 1, "picks": [], "value_source": "yahoo"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_draft_players_search_matches_by_substring(monkeypatch):
     import api
 

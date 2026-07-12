@@ -406,6 +406,8 @@ export interface DraftTargetPlayer {
   expected_price?: number | null
 }
 
+export type DraftValueSource = 'bbm' | 'forge'
+
 export interface DraftPoolParams {
   n_plans?: number
   initial_budget?: number
@@ -414,6 +416,12 @@ export interface DraftPoolParams {
   games_per_week?: number
   minimum_value_players?: number
   year?: number | null
+
+  // Who prices each player. "bbm" is the uploaded projections file's own $
+  // column. "forge" is Forge Value -- PatriotGames' own projection-derived
+  // valuation, scaled to the live league's real team count + this draft's
+  // roster size/budget.
+  value_source?: DraftValueSource
 
   // Team construction.
   exclude_players?: string[]
