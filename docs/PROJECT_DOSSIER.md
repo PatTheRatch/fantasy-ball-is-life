@@ -90,7 +90,7 @@ Patrick's league. Everything else waits until that works and someone else is usi
 | Rank | Slot | Feature | State |
 |---|---|---|---|
 | 1 | PF | Draft optimizer in the app | **Shipped** — full Draft Room (PRs #2–#11): diverse plan portfolio, per-pick recompute, triage/relax, MC category targets, custom saved plans, Forge Value pricing. Feature-paused; Patrick drafts with it first |
-| 2 | SF | Auto weekly recap → group chat | **Next feature** (needed by season week 1). AI endpoint exists; scheduling + delivery not started |
+| 2 | SF | Auto weekly recap → group chat | **Next feature** (needed by season week 1). AI endpoint exists; scheduling + delivery not started. Spec pending review: [`WEEKLY_RECAP_AUTOMATION.md`](specs/WEEKLY_RECAP_AUTOMATION.md) |
 | 3 | PG | League connect + auto-pull | Mostly built; no caching, 2 open correctness findings in the audit |
 | 4 | SG | In-season matchup dashboard (live category win-probability) | Built in React |
 | 5 | C | Season / playoff odds | Season page built; ⚠️ the v1 playoff simulator (`season_simulation.py`) was marked "Keep" in §01 but never actually copied into this repo — recover from the archive or re-scope |
@@ -159,16 +159,20 @@ clean foundation.
       `ProjectionConfig`, hardcoded league-personal data out of engine code,
       `games_per_week` drift, deprecated Claude model IDs, CI workflow (PR #12).
 - [x] Restructure the flat backend into a `backend/` package — spec approved
-      by Aisha (2026-07-12), answers MC spec open question #1. PR 1 (move +
-      rename) done; PR 2 (split `backend/api/main.py` into routers +
-      `commentary/`) still open.
+      by Aisha (2026-07-12), answers MC spec open question #1. PR 1 (#13)
+      move + rename and PR 2 (#14) routers + `commentary/` both merged;
+      root `api.py` shim removed.
 - [ ] **Close the loop: schedule + deliver weekly recaps to the group chat —
-      the next feature** (Decision D). Needed by season week 1.
+      the next feature** (Decision D). Needed by season week 1. Spec up for
+      Patrick + Aisha review:
+      [`docs/specs/WEEKLY_RECAP_AUTOMATION.md`](specs/WEEKLY_RECAP_AUTOMATION.md)
+      (WhatsApp v1; Discord / bot companion out of scope but
+      architecture-shaped).
 - [ ] Implement the projection-source framework (after Aisha's review).
 - [ ] Recover or re-scope the v1 playoff simulator (see Starting Five, C slot).
 
 ---
 
 *Project: fantasy-ball-is-life · League: Patriot Games (ESPN, H2H 9-cat) ·
-Status: Draft Room shipped & paused · cleanup pass under way · next feature:
-automated weekly recaps.*
+Status: Draft Room shipped & paused · backend restructure done · next feature:
+automated weekly recaps (spec pending review).*
