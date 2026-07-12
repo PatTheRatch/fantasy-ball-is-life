@@ -90,7 +90,7 @@ Patrick's league. Everything else waits until that works and someone else is usi
 | Rank | Slot | Feature | State |
 |---|---|---|---|
 | 1 | PF | Draft optimizer in the app | **Shipped** — full Draft Room (PRs #2–#11): diverse plan portfolio, per-pick recompute, triage/relax, MC category targets, custom saved plans, Forge Value pricing. Feature-paused; Patrick drafts with it first |
-| 2 | SF | Auto weekly recap → group chat | **Next feature** (needed by season week 1). AI endpoint exists; scheduling + delivery not started. Spec pending review: [`WEEKLY_RECAP_AUTOMATION.md`](specs/WEEKLY_RECAP_AUTOMATION.md) |
+| 2 | SF | Weekly recap newsroom + publishing | **Next feature** (needed by season week 1). Public archive, admin publishing, structured AI generation, and WhatsApp copy tools; bot delivery later. Spec pending review: [`WEEKLY_RECAP_NEWSROOM.md`](specs/WEEKLY_RECAP_NEWSROOM.md) |
 | 3 | PG | League connect + auto-pull | Mostly built; no caching, 2 open correctness findings in the audit |
 | 4 | SG | In-season matchup dashboard (live category win-probability) | Built in React |
 | 5 | C | Season / playoff odds | Season page built; ⚠️ the v1 playoff simulator (`season_simulation.py`) was marked "Keep" in §01 but never actually copied into this repo — recover from the archive or re-scope |
@@ -127,9 +127,11 @@ the first moment this app gets used for real. Rollout is **Patrick-first** —
 he drafts with it privately (a competitive edge is the point), verifies it
 works under live conditions, and only then ships it to the league. §02's
 "self-delivering recaps is the demo that sells this" framing stays true for
-the *league-facing* launch — the recap loop is what the group actually sees —
-so **weekly recap automation is the #2 priority and the next feature**, needed
-by week 1 of the season. The Draft Room is feature-paused at its current state
+the *league-facing* launch — the recap loop is what the group actually sees.
+The week-one version is a public league newsroom with admin-controlled
+publishing and WhatsApp copy tools; bot delivery follows. This **weekly recap
+newsroom is the #2 priority and the next feature**. The Draft Room is
+feature-paused at its current state
 (good enough to draft with); before recap work starts, the codebase gets the
 long-deferred cleanup + backend restructure so the next feature lands on a
 clean foundation.
@@ -162,12 +164,12 @@ clean foundation.
       by Aisha (2026-07-12), answers MC spec open question #1. PR 1 (#13)
       move + rename and PR 2 (#14) routers + `commentary/` both merged;
       root `api.py` shim removed.
-- [ ] **Close the loop: schedule + deliver weekly recaps to the group chat —
-      the next feature** (Decision D). Needed by season week 1. Spec up for
-      Patrick + Aisha review:
-      [`docs/specs/WEEKLY_RECAP_AUTOMATION.md`](specs/WEEKLY_RECAP_AUTOMATION.md)
-      (WhatsApp v1; Discord / bot companion out of scope but
-      architecture-shaped).
+- [ ] **Ship the weekly recap newsroom + publishing workflow — the next
+      feature** (Decision D). Needed by season week 1. Spec up for Patrick +
+      Aisha review:
+      [`docs/specs/WEEKLY_RECAP_NEWSROOM.md`](specs/WEEKLY_RECAP_NEWSROOM.md).
+      Week one is a public archive, admin publishing, and WhatsApp copy tools;
+      automated Discord/WhatsApp bot delivery is a future phase.
 - [ ] Implement the projection-source framework (after Aisha's review).
 - [ ] Recover or re-scope the v1 playoff simulator (see Starting Five, C slot).
 
@@ -175,4 +177,4 @@ clean foundation.
 
 *Project: fantasy-ball-is-life · League: Patriot Games (ESPN, H2H 9-cat) ·
 Status: Draft Room shipped & paused · backend restructure done · next feature:
-automated weekly recaps (spec pending review).*
+weekly recap newsroom + publishing (spec pending review).*
