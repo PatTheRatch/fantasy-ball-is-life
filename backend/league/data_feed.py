@@ -109,6 +109,31 @@ MATCHUP_WEEKS_2025_26 = {
     22: {"start": "2026-03-23", "end": "2026-03-29"}, # Championship week
 }
 
+# Categories where a lower value wins the head-to-head. Every other scoring
+# category is higher-is-better. Turnovers are stored as natural positive counts
+# throughout the data layer; direction is applied at comparison time only.
+LOWER_IS_BETTER_STATS = {"TO"}
+
+
+def category_result(stat: str, home_score, away_score) -> tuple[str, str]:
+    """Return ``(home_result, away_result)`` as 'W'/'L'/'T' for one category.
+
+    ``TO`` is lower-is-better; all other categories are higher-is-better.
+    Non-comparable values (e.g. NaN) tie, matching the prior inline behavior.
+    """
+    if stat in LOWER_IS_BETTER_STATS:
+        if home_score < away_score:
+            return "W", "L"
+        if home_score > away_score:
+            return "L", "W"
+        return "T", "T"
+    if home_score > away_score:
+        return "W", "L"
+    if home_score < away_score:
+        return "L", "W"
+    return "T", "T"
+
+
 @dataclass
 class ESPNHandles:
     league: League
@@ -1158,8 +1183,11 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
                 current_scoreboards.append({
                     "away_team": away_team,
                     "home_team": home_team,
-                    "current_home_score": matchup.home_stats[stat].get("value") if stat != 'TO' else -matchup.home_stats[stat].get("value", 0),  # invert TO
-                    "current_away_score": matchup.away_stats[stat].get("value") if stat != 'TO' else -matchup.away_stats[stat].get("value", 0),  # invert TO
+                    # Turnovers are stored as a natural positive count (fewer is
+                    # better). Category direction is applied once by each consumer
+                    # (recap canonical_matchups, projected W/L, frontend), not here.
+                    "current_home_score": matchup.home_stats[stat].get("value"),
+                    "current_away_score": matchup.away_stats[stat].get("value"),
                     "stat": stat,
                 })
     else:
@@ -1171,8 +1199,9 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
                 current_scoreboards.append({
                     "away_team": away_team,
                     "home_team": home_team,
+                    # Future/unplayed periods: ESPN does not expose live scores yet.
                     "current_home_score": 0,
-                    "current_away_score": 0,  # invert TO
+                    "current_away_score": 0,
                     "stat": stat,
                 })
 
@@ -1289,11 +1318,11 @@ def get_projected_scoreboard(
 
     team_with_future['future_total'] = team_with_future['future_total'].fillna(0)
 
-    # TO is "bad", so projected_score = current - future for TO, + future otherwise
-    is_to = team_with_future['stat'] == 'TO'
+    # Turnovers are now a natural positive count (fewer is better), so the
+    # projected total is simply current + future for every stat. Category
+    # direction is applied when W/L is decided below, not in the sign here.
     team_with_future['projected_score'] = (
-        team_with_future['current_score'] +
-        np.where(is_to, -team_with_future['future_total'], team_with_future['future_total'])
+        team_with_future['current_score'] + team_with_future['future_total']
     )
 
     # --- Pivot to team x stat and compute FG% / FT% ---
@@ -1336,13 +1365,12 @@ def get_projected_scoreboard(
         stat_df = projected_records_df[projected_records_df['stat'] == stat]
 
         for _, row in stat_df.iterrows():
-            # Determine W/L/T for this matchup & stat
-            if row['home_projected_score'] > row['away_projected_score']:
-                home_result, away_result = 'W', 'L'
-            elif row['home_projected_score'] < row['away_projected_score']:
-                home_result, away_result = 'L', 'W'
-            else:
-                home_result = away_result = 'T'
+            # Determine W/L/T for this matchup & stat. Category direction
+            # (TO lower-is-better, all others higher-is-better) is applied once
+            # in category_result().
+            home_result, away_result = category_result(
+                stat, row['home_projected_score'], row['away_projected_score']
+            )
 
             final_projected_scoreboard_rows.extend([
                 {
