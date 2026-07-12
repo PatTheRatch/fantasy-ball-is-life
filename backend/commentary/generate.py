@@ -1,6 +1,7 @@
 """Anthropic client calls for AI commentary endpoints."""
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -9,6 +10,12 @@ from fastapi import HTTPException
 
 from backend.api.deps import _strip_numpy
 from backend.commentary import prompts
+from backend.commentary.schemas import (
+    RecapGeneratedContent,
+    WeeklyFactSnapshot,
+    dump_model,
+    validate_generated_content,
+)
 
 
 def _require_api_key() -> None:
@@ -195,3 +202,81 @@ def generate_season_commentary(body: Any) -> dict[str, Any]:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+def _evidence_ids(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "evidence_id" and isinstance(item, str):
+                found.add(item)
+            elif key == "evidence_ids" and isinstance(item, list):
+                found.update(str(part) for part in item)
+            found.update(_evidence_ids(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_evidence_ids(item))
+    return found
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    candidate = text.strip()
+    if candidate.startswith("```") and candidate.endswith("```"):
+        candidate = candidate.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    value = json.loads(candidate)
+    if not isinstance(value, dict):
+        raise ValueError("Structured recap response must be a JSON object.")
+    return value
+
+
+def generate_structured_recap(
+    snapshot: WeeklyFactSnapshot,
+) -> RecapGeneratedContent:
+    """Generate and validate evidence-bound narrative for a persisted fact snapshot."""
+    _require_api_key()
+    snapshot_payload = dump_model(snapshot)
+    system_prompt, user_prompt = prompts.build_structured_recap_prompts(
+        snapshot_payload
+    )
+    raw = _complete(system_prompt, user_prompt, max_tokens=8000)
+    try:
+        content = validate_generated_content(_parse_json_object(raw))
+    except Exception as exc:
+        raise ValueError(f"Anthropic returned an invalid structured recap: {exc}") from exc
+
+    valid_evidence = _evidence_ids(snapshot_payload)
+    used_evidence = _evidence_ids(dump_model(content))
+    unknown_evidence = sorted(used_evidence - valid_evidence)
+    if unknown_evidence:
+        raise ValueError(
+            "Structured recap referenced unknown evidence IDs: "
+            + ", ".join(unknown_evidence)
+        )
+
+    matchup_ids = {item["matchup_id"] for item in snapshot.matchups}
+    returned_matchups = {item.matchup_id for item in content.matchup_takeaways}
+    if (
+        returned_matchups != matchup_ids
+        or len(content.matchup_takeaways) != len(matchup_ids)
+    ):
+        raise ValueError("Structured recap must contain exactly one takeaway per matchup.")
+
+    ranking_ids = {item["team_id"] for item in snapshot.power_rankings}
+    returned_rankings = {item.team_id for item in content.ranking_explanations}
+    if (
+        returned_rankings != ranking_ids
+        or len(content.ranking_explanations) != len(ranking_ids)
+    ):
+        raise ValueError(
+            "Structured recap must contain exactly one explanation per ranked team."
+        )
+
+    award_ids = {item["award_id"] for item in snapshot.award_candidates}
+    returned_awards = {item.award_id for item in content.award_explanations}
+    if returned_awards != award_ids or len(content.award_explanations) != len(
+        award_ids
+    ):
+        raise ValueError(
+            "Structured recap must contain exactly one explanation per award."
+        )
+    return content

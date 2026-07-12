@@ -640,4 +640,168 @@ export async function postProjectedScoreboard(
   return data
 }
 
+export interface RecapDataQuality {
+  ready: boolean
+  warnings: string[]
+  checks: Record<string, boolean>
+  transaction_quality: string
+}
+
+export interface RecapGeneratedContent {
+  headline: string
+  dek: string
+  lead_story: string[]
+  matchup_takeaways: Array<{
+    matchup_id: string
+    text: string
+    evidence_ids: string[]
+  }>
+  ranking_explanations: Array<{
+    team_id: string
+    text: string
+    evidence_ids: string[]
+  }>
+  award_explanations: Array<{
+    award_id: string
+    text: string
+    evidence_ids: string[]
+  }>
+  whatsapp_summary: string
+  whatsapp_full: string
+}
+
+export interface RecapSnapshot {
+  schema_version: string
+  league: JsonRecord
+  season: number
+  week: number
+  week_dates: { start: string; end: string }
+  matchups: JsonRecord[]
+  standings: JsonRecord[]
+  power_rankings: JsonRecord[]
+  transactions: JsonRecord[]
+  season_stats: JsonRecord[]
+  award_candidates: JsonRecord[]
+  data_quality: RecapDataQuality
+}
+
+export interface RecapEdition {
+  id: string
+  league_id: string
+  season: number
+  week: number
+  version: number
+  status: 'draft' | 'published' | 'superseded'
+  structured_content_json: RecapGeneratedContent
+  data_warnings_json: string[]
+  created_at: string
+  published_at?: string | null
+  snapshot?: RecapSnapshot
+  league_week_snapshots?: JsonRecord
+}
+
+export interface RecapHistoryItem {
+  id: string
+  version: number
+  status: RecapEdition['status']
+  data_warnings_json: string[]
+  created_at: string
+  published_at?: string | null
+}
+
+function bearer(token: string) {
+  return { Authorization: `Bearer ${token}` }
+}
+
+export async function getPublishedRecap(
+  slug: string,
+  season: number,
+  week: number,
+): Promise<{ league: JsonRecord; edition: RecapEdition }> {
+  const { data } = await client.get(`/leagues/${slug}/recaps/${season}/${week}`)
+  return data
+}
+
+export async function getRecapReadiness(
+  slug: string,
+  season: number,
+  week: number,
+  weekStart: string,
+  weekEnd: string,
+  token: string,
+): Promise<RecapSnapshot> {
+  const { data } = await client.get(
+    `/leagues/${slug}/recaps/${season}/${week}/readiness`,
+    {
+      params: { week_start: weekStart, week_end: weekEnd },
+      headers: bearer(token),
+    },
+  )
+  return data
+}
+
+export async function generateRecapDraft(
+  slug: string,
+  season: number,
+  week: number,
+  weekStart: string,
+  weekEnd: string,
+  generateAnyway: boolean,
+  token: string,
+): Promise<RecapEdition> {
+  const { data } = await client.post(
+    `/leagues/${slug}/recaps/${season}/${week}/generate`,
+    {
+      week_start: weekStart,
+      week_end: weekEnd,
+      generate_anyway: generateAnyway,
+    },
+    { headers: bearer(token) },
+  )
+  return data
+}
+
+export async function getRecapHistory(
+  slug: string,
+  season: number,
+  week: number,
+  token: string,
+): Promise<RecapHistoryItem[]> {
+  const { data } = await client.get(
+    `/leagues/${slug}/recaps/${season}/${week}/history`,
+    { headers: bearer(token) },
+  )
+  return data
+}
+
+export async function publishRecapEdition(
+  slug: string,
+  season: number,
+  week: number,
+  editionId: string,
+  token: string,
+): Promise<RecapEdition> {
+  const { data } = await client.post(
+    `/leagues/${slug}/recaps/${season}/${week}/publish`,
+    { edition_id: editionId },
+    { headers: bearer(token) },
+  )
+  return data
+}
+
+export async function rollbackRecapEdition(
+  slug: string,
+  season: number,
+  week: number,
+  editionId: string,
+  token: string,
+): Promise<RecapEdition> {
+  const { data } = await client.post(
+    `/leagues/${slug}/recaps/${season}/${week}/rollback`,
+    { edition_id: editionId },
+    { headers: bearer(token) },
+  )
+  return data
+}
+
 export { client as apiClient }

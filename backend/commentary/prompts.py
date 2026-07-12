@@ -5,6 +5,7 @@ to feed the prompt lives here; Anthropic client calls live in ``generate.py``.
 """
 from __future__ import annotations
 
+import json
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -383,5 +384,60 @@ def build_season_commentary_prompts(
         f"{jsonable_encoder(leaders_payload)}\n\n"
         "Write the season commentary now. Use personality, fantasy slang, and cite specific teams. "
         "Ground every claim in the stats above and the weeks listed at the top — nothing else."
+    )
+    return system_prompt, user_prompt
+
+
+def build_structured_recap_prompts(
+    snapshot: Dict[str, Any],
+) -> Tuple[str, str]:
+    system_prompt = (
+        "You are the newsroom writer for a fantasy basketball league. "
+        "Use professional sports-journalism prose with witty, friendly trash talk. "
+        "The supplied fact snapshot is your only source of truth. Never invent, "
+        "infer, or import a player, team, score, result, ranking, transaction, "
+        "award winner, or trend that is absent from it. Omit claims when evidence "
+        "is unavailable. Return one JSON object only: no Markdown fences and no "
+        "text before or after it. Preserve every referenced matchup_id, team_id, "
+        "award_id, and evidence_id exactly."
+    )
+    schema = {
+        "headline": "string",
+        "dek": "string",
+        "lead_story": ["paragraph string"],
+        "matchup_takeaways": [
+            {
+                "matchup_id": "exact snapshot matchup_id",
+                "text": "one sentence",
+                "evidence_ids": ["exact snapshot evidence_id"],
+            }
+        ],
+        "ranking_explanations": [
+            {
+                "team_id": "team evidence_id suffix or exact team/team_id value",
+                "text": "one or two grounded sentences",
+                "evidence_ids": ["exact snapshot evidence_id"],
+            }
+        ],
+        "award_explanations": [
+            {
+                "award_id": "exact deterministic award_id",
+                "text": "one grounded sentence",
+                "evidence_ids": ["exact snapshot evidence_id"],
+            }
+        ],
+        "whatsapp_summary": "few-scroll WhatsApp-ready summary",
+        "whatsapp_full": "complete WhatsApp-ready narrative without tables",
+    }
+    user_prompt = (
+        "OUTPUT SCHEMA:\n"
+        f"{json.dumps(schema, separators=(',', ':'))}\n\n"
+        "FACT SNAPSHOT:\n"
+        f"{json.dumps(snapshot, separators=(',', ':'), ensure_ascii=False)}\n\n"
+        "Write the edition. Include a matchup_takeaway for every matchup and an "
+        "award_explanation for every supplied award. The WhatsApp summary must "
+        "include every matchup result, key ranking movers, selected awards, and "
+        "restrained section labels. If data_quality.ready is false, disclose the "
+        "warnings and do not fill the gaps."
     )
     return system_prompt, user_prompt

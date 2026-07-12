@@ -59,10 +59,18 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-from backend.api.routers import commentary, draft, league, optimizer, projections  # noqa: E402
+from backend.api.routers import (  # noqa: E402
+    commentary,
+    draft,
+    league,
+    optimizer,
+    projections,
+    recaps,
+)
 
 app.include_router(league.router)
 app.include_router(draft.router)
 app.include_router(commentary.router)
 app.include_router(projections.router)
 app.include_router(optimizer.router)
+app.include_router(recaps.router)

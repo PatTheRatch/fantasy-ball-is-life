@@ -14,11 +14,25 @@ from pathlib import Path
 # player_rankings/ and .env live) is one level up from this file's directory.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
+
 # --- ESPN fantasy league ---
 LEAGUE_ID: int = int(os.getenv("ESPN_LEAGUE_ID", "3853870"))
 SEASON: int = int(os.getenv("ESPN_SEASON", "2026"))
 SWID = os.getenv("ESPN_SWID", None)
 ESPN_S2 = os.getenv("ESPN_S2", None)
+
+# --- Supabase recap persistence / auth ---
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+RECAP_LEAGUE_SLUG = os.getenv("RECAP_LEAGUE_SLUG", "patriot-games")
+PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/")
 
 # --- Player rankings / projections (relative to project root) ---
 PLAYER_RANKINGS_DIR = PROJECT_ROOT / "player_rankings"
