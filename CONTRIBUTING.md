@@ -53,3 +53,24 @@ Aisha (lead systems engineer) has approved. `main` stays deployable at all times
 Patrick, as repo owner, may push directly in a genuine emergency (e.g. a hotfix
 to a broken `main`). It's the exception, not the habit — everything else goes
 through review.
+
+## Cross-agent handoffs
+
+This project is built by multiple agents (Aisha, Claude, Codex, Cursor).
+When you pick up where another agent left off:
+
+- **Read the spec first.** Every feature has an approved spec in `docs/specs/`.
+  The spec is the single source of truth. Do not implement from memory or from
+  conversation history — read the file.
+- **Pull `main` before starting.** The latest state is on `origin/main`.
+  Check `git log --oneline -5` to see what landed since the spec was written.
+- **Small PRs, clear commits.** Each PR does one thing. Commit messages describe
+  what changed and why. The next agent should understand your commit from the
+  message alone.
+- **Write the test that would have caught your bug.** If you find a gap in test
+  coverage during implementation, add the test before fixing the code.
+- **Don't guess on ambiguity.** If the spec doesn't cover a decision you need to
+  make, add a comment to the spec with the open question and flag it in your PR
+  description. Aisha or Patrick will resolve it.
+- **`docs/specs/` is the handoff surface.** When a review closes an open question
+  or a decision changes, update the spec. The spec is what the next agent reads.

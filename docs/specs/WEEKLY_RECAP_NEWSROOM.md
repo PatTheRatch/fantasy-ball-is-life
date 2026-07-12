@@ -1,9 +1,11 @@
 # Feature Spec: Weekly Recap Newsroom & Publishing
 
-**Status:** Pending Patrick + Aisha review — no implementation until approved
-(`docs/AISHA_OPERATING_MANUAL.md` feature gate).
-**Author:** Claude Code (implementation engineer)
-**Date:** 2026-07-12
+**Status: APPROVED** — Aisha (architecture) + Patrick (product) on 2026-07-12.
+Phase 1 implementation authorized. Phase 2 follows.
+
+**Handoff note for agents (Claude, Codex, Cursor):** this spec is the single source of truth. All architecture decisions are recorded here. Before implementing, read this spec + `docs/AISHA_OPERATING_MANUAL.md` + `CONTRIBUTING.md`. Commit often, write tests, keep PRs small. If you hit an ambiguity not covered here, flag it — do not guess. The latest state of the repo is on `main`; pull before starting.
+
+**Author:** Claude Code (implementation engineer), with Aisha + Patrick review
 **Decision basis:** Dossier Decision D makes the weekly recap the next feature
 after the backend restructure. Patrick's product interview (2026-07-12)
 reframed v1 from automatic WhatsApp delivery into a persistent league
@@ -380,23 +382,37 @@ Supabase/test migrations or isolated fixtures.
 
 ---
 
-## 10. Open questions for Aisha
+## 10. Resolved by Aisha + Patrick (architecture review, 2026-07-12)
 
-1. **Runtime boundary:** should server-side snapshot/generation/publication live
-   in FastAPI, Supabase Edge Functions, or a split? ESPN + Anthropic credentials
-   and service-role access must remain server-only.
-2. **Social previews:** the current Vite SPA cannot provide reliable
-   per-edition Open Graph metadata to all crawlers. Approve an edge-rendered
-   share page/function now, or defer rich previews while preserving stable URLs?
-3. **Snapshot storage:** approve versioned JSONB snapshots for v1, or normalize
-   high-value entities immediately? Recommendation: JSONB snapshot + relational
-   league/edition metadata until query needs prove otherwise.
-4. **Transaction quality gate:** audit and repair the existing feed before
-   enabling Move of the Week / Waiver Wire Wizard. Transaction Addict may use
-   validated counts sooner.
-5. **Migration of `POST /league-recap`:** keep as a compatibility endpoint
-   through newsroom launch, then restrict/remove once no client depends on
-   browser-submitted generation.
+1. **Runtime boundary: FastAPI.** ESPN + Anthropic calls are Python-native and already work in FastAPI. Supabase Edge Functions add a second runtime, deploy pipeline, and cold-start latency for no gain. Generation/publication stays in `backend/recaps/` served by FastAPI. Supabase is storage + auth only, not compute.
+
+2. **Social previews: Defer to Phase 2.** Copy Summary / Copy Full Recap solves the WhatsApp sharing problem without OG meta tags. Add edge-rendered share pages when the public newsroom ships.
+
+3. **Snapshot storage: JSONB + relational metadata.** Agree with the recommendation. Versioned JSONB for the week's fact snapshot, relational columns for `league_id`, `season`, `week`, `status`, `created_by`, `published_at`. Normalize individual entities only when query needs demand it.
+
+4. **Transaction quality gate: Audit first.** Move of the Week and Waiver Wire Wizard gated behind a feed audit. Spot-check the last 4 weeks of ESPN transactions against actual roster moves. If the feed misses waiver claims or has timestamp errors, those awards ship disabled with a visible "data quality" flag. Transaction Addict (counts only) is safe to ship immediately.
+
+5. **Migration of `POST /league-recap`:** Keep as compatibility endpoint until the newsroom is proven stable on the new generation path, then remove. No new features depend on it.
+
+6. **RLS: Schema-ready now, enforce later.** Design the Supabase schema with RLS policies from day one, but for v1 with one seeded public league, enforce admin-only generation via a simple `admin_user_id` check on the league row. Enable RLS enforcement when multi-league onboarding ships.
+
+### Phasing (Aisha, 2026-07-12)
+
+Original §8 proposed launching everything at once. Revised plan: two phases so the workflow improvement ships immediately.
+
+**Phase 1 — Ship first (replaces Monday workflow)**:
+- Supabase foundation: migrations, seeded Patriot Games league, Patrick auth, versioned snapshots/editions
+- Reliable generation: deterministic assembler + awards, structured LLM output, readiness warnings
+- Admin mode: Generate Draft → Preview → Publish, version history, rollback
+- **Copy Summary / Copy Full Recap buttons** — the killer feature. Replaces the 2-hour Monday morning workflow in one click
+
+**Phase 2 — Follow-up (public consumption)**:
+- League-scoped public newsroom routes: `/leagues/:slug/recaps/:season/:week`
+- Six tabs: Weekly Recap, Matchups, Power Rankings, Transactions, Awards & Stats, Standings & Season Stats
+- Archive navigation, sortable standings, mobile-responsive layouts
+- Social previews (OG meta tags) for shareable URLs
+
+Everything after Phase 2 (multi-league onboarding, midweek reports, bot delivery, Discord) stays as future-state per §8.
 
 ---
 
