@@ -29,12 +29,12 @@ export function formatApiError(err: unknown): string {
         code === 'ECONNREFUSED' ||
         (err.message && /network/i.test(err.message))
       ) {
-        return `Cannot reach the API (${API_BASE}). Start the backend (e.g. uvicorn api:app --reload --port 8000) and reload the page.`
+        return `Cannot reach the API (${API_BASE}). Start the backend (e.g. uvicorn backend.api.main:app --reload --port 8000) and reload the page.`
       }
     }
     const st = err.response?.status
     if (st === 502 || st === 503) {
-      return `Bad gateway (${st}): the dev server could not reach FastAPI on port 8000, or the request timed out. Start the API (uvicorn api:app --reload --port 8000) and try again. If the API is running, try setting VITE_API_BASE=http://127.0.0.1:8000 in frontend/.env to bypass the Vite proxy.`
+      return `Bad gateway (${st}): the dev server could not reach FastAPI on port 8000, or the request timed out. Start the API (uvicorn backend.api.main:app --reload --port 8000) and try again. If the API is running, try setting VITE_API_BASE=http://127.0.0.1:8000 in frontend/.env to bypass the Vite proxy.`
     }
     const d = err.response?.data as { detail?: unknown } | undefined
     if (d && typeof d === 'object' && d.detail !== undefined) {

@@ -6,7 +6,7 @@ Pure module: no cvxpy/pandas/ESPN import. A plan's roster is produced by an
 injected ``solve_fn`` (same DI pattern as ``draft_strategies.generate_portfolio``),
 so the health-check + selective-resolve logic is unit-testable offline. The real
 ``solve_fn`` (built on ``OptimizeLineup`` against the live pick pool) lives in
-``api.py``.
+``backend/api/routers/draft.py``.
 
 Implementation note on the API surface: docs/specs/DRAFT_ROOM.md §4 names
 ``/draft/{id}/...`` endpoints, implying a server-held session. The same section's

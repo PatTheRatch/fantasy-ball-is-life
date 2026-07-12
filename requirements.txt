@@ -31,7 +31,7 @@ anthropic>=0.0.0
 # FastAPI multipart/form-data support (File/Form)
 python-multipart>=0.0.9
 
-# Loads `.env` into environment variables (used by api.py for ANTHROPIC_API_KEY)
+# Loads `.env` into environment variables (used by backend.api.main for ANTHROPIC_API_KEY)
 python-dotenv>=1.0.0
 
 # Tests

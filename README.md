@@ -28,13 +28,13 @@ Backend lives under `backend/`, grouped by concern
 
 | Path | What |
 |---|---|
-| `backend/api/main.py` | FastAPI app — league data, power rankings, matchup confidence, draft room, AI commentary endpoints |
+| `backend/api/main.py` | FastAPI app factory; routers under `backend/api/routers/` (league, draft, commentary, projections, optimizer); shared helpers in `backend/api/deps.py` |
+| `backend/commentary/` | AI commentary: `prompts.py` (prompt blobs), `generate.py` (Anthropic client calls) |
 | `backend/league/` | `data_feed.py` (ESPN pull layer — rosters, transactions, matchups, scoreboards, projection attachment); `fantasy.py` (`MyLeague` — power rankings, universe-wins math) |
 | `backend/draft/` | The Draft Room engine: `optimizer.py` (auction draft optimizer, cvxpy integer program), `engine.py` (per-pick recompute loop), `strategies.py` (plan-diversity strategy map), `targets_mc.py` (Monte Carlo category targets), `values.py` (Forge Value — projection-derived auction values), `auction_sim.py` (auction-room price simulator) |
 | `backend/analytics/consistency.py` | Player consistency metrics (feeds the confidence endpoints) |
 | `backend/config.py` | Central config — ESPN credentials, league-owner draft-pool knobs, tunable constants |
 | `backend/projections/` | Reserved for the projection-source framework (`docs/specs/PROJECTION_SOURCE_FRAMEWORK.md`, pending review); empty for now |
-| `api.py` (root) | Deprecated entrypoint shim (`from backend.api.main import app`) — kept for one release, then deleted |
 | `app.py` | Streamlit dashboard (internal tool), imports `backend.*` |
 | `frontend/` | React 19 + Vite + Tailwind web app (the product UI) |
 | `docs/` | Operating manual, project dossier, ESPN access handoff, feature specs |

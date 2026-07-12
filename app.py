@@ -157,7 +157,7 @@ def _friendly_api_error(exc: BaseException) -> str:
         return (
             f"Cannot connect to the API at {API_BASE}. "
             "Start the FastAPI server in another terminal, then try again. "
-            "Example: uvicorn api:app --host 127.0.0.1 --port 8000 --reload"
+            "Example: uvicorn backend.api.main:app --host 127.0.0.1 --port 8000 --reload"
         )
     if isinstance(exc, httpx.TimeoutException):
         return (
@@ -1682,7 +1682,7 @@ def main() -> None:
     _render_league_sidebar()
 
     st.title("PatriotGames Fantasy")
-    st.caption(f"API: `{API_BASE}` — run the backend in a separate terminal: `uvicorn api:app --host 127.0.0.1 --port 8000 --reload`")
+    st.caption(f"API: `{API_BASE}` — run the backend in a separate terminal: `uvicorn backend.api.main:app --host 127.0.0.1 --port 8000 --reload`")
 
     tab1, tab2, tab3, tab4 = st.tabs(["Draft Optimizer", "In-Season Dashboard", "📰 Weekly Recap", "🏆 Season"])
     with tab1:

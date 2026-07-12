@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-09
 **Trigger:** Patrick asked for a review of the ESPN integration (`data_feed.py`,
-`fantasy.py`, `config.py`, the `/league/*` and `/rosters/*` endpoints in `api.py`)
+`fantasy.py`, `config.py`, the `/league/*` and `/rosters/*` endpoints in `backend/api/`)
 before building more features on top of it — specifically the Draft Room, whose
 plan-diversity engine (`draft_strategies.py`) depends on `set_requirements()`
 producing correct category targets.
@@ -49,7 +49,7 @@ own small PRs as they're prioritized.
 - [ ] **Unbounded, uncached ESPN calls in plan generation.**
   `generate_multiple_plans()` (`optimize_lineup.py`) constructs a brand-new
   `MyLeague` → live `League()` fetch **per plan**, and `POST
-  /optimizer/multiple-plans` (`api.py`) exposes `n_plans` as a client-supplied
+  /optimizer/multiple-plans` (`backend/api/routers/optimizer.py`) exposes `n_plans` as a client-supplied
   int with no upper bound — one request can trigger unbounded live ESPN
   traffic. Each plan can also call `get_universe_wins` up to
   `reg_season_count` times inside `get_target_stats`. **Relevant to the Draft
@@ -59,10 +59,10 @@ own small PRs as they're prioritized.
   optimistic. Fix: reuse one `MyLeague` across a portfolio's plans, cap
   `n_plans` server-side.
 - [ ] **No caching anywhere.** Every request hits ESPN live
-  (`api.py` `_handles()`/`_my_league()`). A short-TTL cache keyed by
+  (`backend/api/main.py` `_handles()`/`_my_league()`). A short-TTL cache keyed by
   `(league_id, season)` would remove most of the rate-limit exposure above.
 - [ ] **Inconsistent error handling.** `/league/meta`, `/league/teams`,
-  `/league/standings` (`api.py`) have no try/except, unlike most other
+  `/league/standings` (`backend/api/routers/league.py`) have no try/except, unlike most other
   endpoints that convert ESPN failures to a clean `HTTPException(500, ...)`.
   Unhandled exceptions currently surface as raw framework 500s.
 - [ ] **No timeout on a fallback network call.** `safe_recent_activity()`
@@ -84,7 +84,7 @@ own small PRs as they're prioritized.
   the repo.
 - [ ] Debug CSVs are written unconditionally to the working directory in
   several places (`data_feed.py`, e.g. `get_current_rosters`, `run()`).
-- [ ] `MultiplePlansBody.out_prefix` (`api.py`) is caller-controlled and used
+- [ ] `MultiplePlansBody.out_prefix` (`backend/api/routers/optimizer.py`) is caller-controlled and used
   unsanitized in a file path (`optimize_lineup.py`, `generate_multiple_plans`)
   — a plausible path-traversal opening if this endpoint is ever exposed beyond
   a trusted single user.

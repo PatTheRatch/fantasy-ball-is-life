@@ -318,7 +318,7 @@ for *this* league's real makeup rather than assumed defaults.
   a decorative one. Falls back to a sane default (12) only when league
   settings genuinely aren't reachable (e.g. an offline/stubbed league),
   rather than raising.
-- `DraftPoolParams.value_source` (`api.py`, `Literal["bbm", "forge"]`,
+- `DraftPoolParams.value_source` (`backend/api/routers/draft.py`, `Literal["bbm", "forge"]`,
   default `"bbm"`) threads through `_build_pool_context` to every endpoint
   that builds a pool (`/draft/plans`, `/draft/plans/custom`, `/draft/pick`,
   `/draft/triage`, `/draft/relax`) — one pool-level setting, not a per-plan

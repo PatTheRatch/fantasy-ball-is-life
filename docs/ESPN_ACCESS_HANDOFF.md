@@ -3,7 +3,7 @@
 This document explains how to connect to and pull data from my ESPN fantasy
 basketball league, so another project (e.g. a larger dashboard) can reuse the
 same approach. It is distilled from the working `PatriotGames` codebase
-(`config.py`, `data_feed.py`, `fantasy.py`, `api.py`).
+(`backend/config.py`, `backend/league/data_feed.py`, `backend/league/fantasy.py`, `backend/api/`).
 
 ---
 
@@ -206,8 +206,8 @@ These tripped me up; bake them into the new project.
 4. **`currentMatchupPeriod` can exceed the real schedule length** during
    playoffs / championship week. Clamp week numbers to the weeks that actually
    exist in the schedule before requesting them, or you'll get `KeyError`. See
-   `MyLeague.effective_current_week` and the clamping logic in `api.py`'s
-   power-rankings endpoint.
+   `MyLeague.effective_current_week` and the clamping logic in
+   `backend/api/routers/league.py`'s power-rankings endpoint.
 
 5. **Season label vs. calendar year.** `SEASON = 2026` means the 2025–26 NBA
    season. The stat-window keys are prefixed with that same year

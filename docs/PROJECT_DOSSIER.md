@@ -50,7 +50,7 @@ control. Both now archived read-only; the consolidated code lives in this repo.
 
 | Asset | What it does | Disposition |
 |---|---|---|
-| FastAPI backend (`api.py`, 27 endpoints) | League meta, standings, power rankings, matchup win-probability, rosters, transactions, scoreboards, projections upload, optimizer | **Keep · backbone** |
+| FastAPI backend (`backend/api/`, routers by concern) | League meta, standings, power rankings, matchup win-probability, rosters, transactions, scoreboards, projections upload, optimizer, Draft Room | **Keep · backbone** |
 | AI commentary (`/matchup-commentary`, `/league-recap`, `/season-commentary`) | Calls Claude to write recaps directly — already replaces the ChatGPT copy-paste workflow. Uses a deprecated model in 3 spots | **Keep · update model** |
 | React web app (`frontend/`, React 19 + Vite + Tailwind) | In-Season, Recap, Season pages built; API client fully wired; Draft page is a 26-line stub | **Keep · finish** |
 | Streamlit dashboard (`app.py`, 4 tabs) | Draft Optimizer / In-Season / Weekly Recap / Season — the working internal tool | **Keep as internal** |
