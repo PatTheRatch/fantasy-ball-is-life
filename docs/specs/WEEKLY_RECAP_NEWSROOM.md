@@ -223,7 +223,7 @@ league, invitations, and private-league onboarding are later UI phases.
 - Private-league reads require membership (future UI, policy designed now).
 - Draft/history reads require league admin or owner role.
 - Generate, refresh, publish, and rollback require league admin/owner role.
-- The Anthropic key, ESPN credentials, and Supabase service-role key never
+- LLM provider keys, ESPN credentials, and the Supabase service-role key never
   reach the browser.
 - Publishing a replacement occurs transactionally so there is exactly one
   current public edition per league/season/week.
@@ -319,11 +319,11 @@ Deterministic facts are not duplicated as AI-authored values.
   control separation, sortable column groups, mobile behavior, and both copy
   formats.
 - **Token guard:** repeated public reads never invoke generation; unauthorized
-  generation returns 401/403 before any Anthropic call.
+  generation returns 401/403 before any paid LLM call.
 - **Regression:** current league data endpoints and other commentary endpoints
   remain green.
 
-No live Anthropic, ESPN, or Supabase production calls in default CI. Use local
+No live LLM, ESPN, or Supabase production calls in default CI. Use local
 Supabase/test migrations or isolated fixtures.
 
 ---
@@ -384,7 +384,7 @@ Supabase/test migrations or isolated fixtures.
 
 ## 10. Resolved by Aisha + Patrick (architecture review, 2026-07-12)
 
-1. **Runtime boundary: FastAPI.** ESPN + Anthropic calls are Python-native and already work in FastAPI. Supabase Edge Functions add a second runtime, deploy pipeline, and cold-start latency for no gain. Generation/publication stays in `backend/recaps/` served by FastAPI. Supabase is storage + auth only, not compute.
+1. **Runtime boundary: FastAPI.** ESPN + LLM provider calls are Python-native and already work in FastAPI. Supabase Edge Functions add a second runtime, deploy pipeline, and cold-start latency for no gain. Generation/publication stays in `backend/recaps/` served by FastAPI. Supabase is storage + auth only, not compute.
 
 2. **Social previews: Defer to Phase 2.** Copy Summary / Copy Full Recap solves the WhatsApp sharing problem without OG meta tags. Add edge-rendered share pages when the public newsroom ships.
 
@@ -395,6 +395,13 @@ Supabase/test migrations or isolated fixtures.
 5. **Migration of `POST /league-recap`:** Keep as compatibility endpoint until the newsroom is proven stable on the new generation path, then remove. No new features depend on it.
 
 6. **RLS: Schema-ready now, enforce later.** Design the Supabase schema with RLS policies from day one, but for v1 with one seeded public league, enforce admin-only generation via a simple `admin_user_id` check on the league row. Enable RLS enforcement when multi-league onboarding ships.
+
+7. **Phase 1 LLM provider: DeepSeek.** Use the configurable provider boundary in
+   `backend/commentary/generate.py`, with `deepseek-v4-flash` as the default
+   structured-recap model while validating the workflow at lower cost. Keep
+   Anthropic support for the existing compatibility commentary endpoints and
+   as a configurable recap fallback. Provider output must pass the same JSON
+   schema and evidence validation before a draft can be created.
 
 ### Phasing (Aisha, 2026-07-12)
 

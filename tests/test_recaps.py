@@ -117,8 +117,12 @@ def test_structured_generation_rejects_unknown_evidence(monkeypatch):
         "whatsapp_summary": "Summary",
         "whatsapp_full": "Full recap",
     }
-    monkeypatch.setattr(generate, "_require_api_key", lambda: None)
-    monkeypatch.setattr(generate, "_complete", lambda *args, **kwargs: json.dumps(payload))
+    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
+    monkeypatch.setattr(
+        generate,
+        "_complete_structured",
+        lambda *args, **kwargs: json.dumps(payload),
+    )
 
     with pytest.raises(ValueError, match="unknown evidence"):
         generate.generate_structured_recap(snapshot)
@@ -209,3 +213,30 @@ def test_copy_summary_contains_every_matchup_and_public_link(monkeypatch):
 
     assert "Alpha 6–3 Beta" in result.whatsapp_summary
     assert "https://example.com/recap?season=2026&week=1" in result.whatsapp_summary
+
+
+def test_deepseek_structured_completion_uses_json_mode(monkeypatch):
+    response = Mock()
+    response.ok = True
+    response.json.return_value = {
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {"content": '{"headline":"Test"}'},
+            }
+        ]
+    }
+    post = Mock(return_value=response)
+    monkeypatch.setattr(generate.requests, "post", post)
+    monkeypatch.setattr(generate.config, "RECAP_LLM_PROVIDER", "deepseek")
+    monkeypatch.setattr(generate.config, "DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(generate.config, "DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+    result = generate._complete_structured(
+        "Return json.", "Use this schema.", max_tokens=1000
+    )
+
+    assert result == '{"headline":"Test"}'
+    request = post.call_args.kwargs
+    assert request["json"]["model"] == "deepseek-v4-flash"
+    assert request["json"]["response_format"] == {"type": "json_object"}

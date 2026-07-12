@@ -34,6 +34,14 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 RECAP_LEAGUE_SLUG = os.getenv("RECAP_LEAGUE_SLUG", "patriot-games")
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/")
 
+# --- Structured recap generation ---
+RECAP_LLM_PROVIDER = os.getenv("RECAP_LLM_PROVIDER", "deepseek").lower()
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_BASE_URL = os.getenv(
+    "DEEPSEEK_BASE_URL", "https://api.deepseek.com"
+).rstrip("/")
+
 # --- Player rankings / projections (relative to project root) ---
 PLAYER_RANKINGS_DIR = PROJECT_ROOT / "player_rankings"
 BBM_PROJECTIONS_PATH = str(PLAYER_RANKINGS_DIR / "BBM_Projections.xls")

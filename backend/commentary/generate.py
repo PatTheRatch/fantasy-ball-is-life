@@ -6,8 +6,10 @@ import os
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import requests
 from fastapi import HTTPException
 
+from backend import config
 from backend.api.deps import _strip_numpy
 from backend.commentary import prompts
 from backend.commentary.schemas import (
@@ -53,6 +55,75 @@ def _complete(system_prompt: str, user_prompt: str, *, max_tokens: int) -> str:
             if hasattr(block, "text"):
                 text += block.text
     return (text or "").strip()
+
+
+def _require_recap_api_key() -> None:
+    if config.RECAP_LLM_PROVIDER == "deepseek":
+        if not config.DEEPSEEK_API_KEY:
+            raise HTTPException(
+                status_code=500,
+                detail="DEEPSEEK_API_KEY is missing. Set it in the root .env file.",
+            )
+        return
+    if config.RECAP_LLM_PROVIDER == "anthropic":
+        _require_api_key()
+        return
+    raise HTTPException(
+        status_code=500,
+        detail=f"Unsupported RECAP_LLM_PROVIDER: {config.RECAP_LLM_PROVIDER}",
+    )
+
+
+def _complete_structured(
+    system_prompt: str, user_prompt: str, *, max_tokens: int
+) -> str:
+    if config.RECAP_LLM_PROVIDER == "anthropic":
+        return _complete(system_prompt, user_prompt, max_tokens=max_tokens)
+
+    try:
+        response = requests.post(
+            f"{config.DEEPSEEK_BASE_URL}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {config.DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": config.DEEPSEEK_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": max_tokens,
+                "temperature": 0.7,
+                "stream": False,
+            },
+            timeout=120,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError("DeepSeek API request failed.") from exc
+
+    if not response.ok:
+        try:
+            error = response.json().get("error", {})
+            detail = error.get("message") or response.reason
+        except (ValueError, AttributeError):
+            detail = response.reason
+        raise RuntimeError(
+            f"DeepSeek API returned HTTP {response.status_code}: {detail}"
+        )
+
+    payload = response.json()
+    choices = payload.get("choices") or []
+    if not choices:
+        raise RuntimeError("DeepSeek returned no completion choices.")
+    choice = choices[0]
+    if choice.get("finish_reason") == "length":
+        raise RuntimeError("DeepSeek structured output exceeded the token limit.")
+    content = (choice.get("message") or {}).get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("DeepSeek returned empty structured output.")
+    return content.strip()
 
 
 def generate_matchup_commentary(body: Any) -> dict[str, Any]:
@@ -233,12 +304,12 @@ def generate_structured_recap(
     snapshot: WeeklyFactSnapshot,
 ) -> RecapGeneratedContent:
     """Generate and validate evidence-bound narrative for a persisted fact snapshot."""
-    _require_api_key()
+    _require_recap_api_key()
     snapshot_payload = dump_model(snapshot)
     system_prompt, user_prompt = prompts.build_structured_recap_prompts(
         snapshot_payload
     )
-    raw = _complete(system_prompt, user_prompt, max_tokens=8000)
+    raw = _complete_structured(system_prompt, user_prompt, max_tokens=8000)
     try:
         content = validate_generated_content(_parse_json_object(raw))
     except Exception as exc:
