@@ -1818,15 +1818,6 @@ def emit_current_matchup_table(
     return out
 
 
-@dataclass(frozen=True)
-class ProjectionConfig:
-    counting_stats: tuple[str, ...] = (
-        "PTS", "BLK", "AST", "STL", "REB", "3PM",
-        "FTA", "FTM", "FGM", "FGA", "TO",
-    )
-    result_stats: tuple[str, ...] = ("PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO")
-
-
 def group_move_sets(trans_df, window='3min'):
     df = trans_df.copy()
     df['ts'] = pd.to_datetime(df['timestamp_utc'])

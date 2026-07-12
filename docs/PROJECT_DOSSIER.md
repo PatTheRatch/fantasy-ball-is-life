@@ -85,15 +85,15 @@ that started the whole project.
 Scope the product v1 to five features that make the core loop real end-to-end for
 Patrick's league. Everything else waits until that works and someone else is using it.
 
-### Starting Five — ship this
+### Starting Five — ship this (order re-ranked 2026-07-12, see Decision D)
 
-| Slot | Feature | State |
-|---|---|---|
-| PG | League connect + auto-pull | Mostly built |
-| SG | In-season matchup dashboard (live category win-probability) | Built in React |
-| SF | Auto weekly recap → group chat | AI endpoint exists; add scheduling + delivery |
-| PF | Draft optimizer in the app | Engine works; wire the stub page to it |
-| C | Season / playoff odds | Simulator exists; surface in Season page |
+| Rank | Slot | Feature | State |
+|---|---|---|---|
+| 1 | PF | Draft optimizer in the app | **Shipped** — full Draft Room (PRs #2–#11): diverse plan portfolio, per-pick recompute, triage/relax, MC category targets, custom saved plans, Forge Value pricing. Feature-paused; Patrick drafts with it first |
+| 2 | SF | Auto weekly recap → group chat | **Next feature** (needed by season week 1). AI endpoint exists; scheduling + delivery not started |
+| 3 | PG | League connect + auto-pull | Mostly built; no caching, 2 open correctness findings in the audit |
+| 4 | SG | In-season matchup dashboard (live category win-probability) | Built in React |
+| 5 | C | Season / playoff odds | Season page built; ⚠️ the v1 playoff simulator (`season_simulation.py`) was marked "Keep" in §01 but never actually copied into this repo — recover from the archive or re-scope |
 
 ### The Bench — later
 
@@ -121,9 +121,22 @@ and eventually our own model each plug in as an adapter. Full design:
 **C — Platform.** Web-first. Ship to the league as a web app, prove the loop,
 wrap for mobile only if there's real pull.
 
+**D — Build order re-ranked (2026-07-12).** The Draft Room is deliberately the
+#1 priority, not a drift: the draft happens before the season starts, so it's
+the first moment this app gets used for real. Rollout is **Patrick-first** —
+he drafts with it privately (a competitive edge is the point), verifies it
+works under live conditions, and only then ships it to the league. §02's
+"self-delivering recaps is the demo that sells this" framing stays true for
+the *league-facing* launch — the recap loop is what the group actually sees —
+so **weekly recap automation is the #2 priority and the next feature**, needed
+by week 1 of the season. The Draft Room is feature-paused at its current state
+(good enough to draft with); before recap work starts, the codebase gets the
+long-deferred cleanup + backend restructure so the next feature lands on a
+clean foundation.
+
 ---
 
-## 05 · Progress
+## 05 · Progress (refreshed 2026-07-12)
 
 - [x] Repo created and everything put under version control.
 - [x] PatriotGames code consolidated into this repo behind a `.gitignore`
@@ -132,18 +145,28 @@ wrap for mobile only if there's real pull.
 - [x] Projection-source framework spec written; open questions resolved;
       pending Aisha's technical review.
 - [x] Review-gated contribution workflow documented (`CONTRIBUTING.md`);
-      branch protection to be enabled on `main`.
-- [ ] Restructure the flat backend (`api.py`, `data_feed.py`) into a package.
-- [ ] Implement the projection-source framework (after Aisha's review).
-- [ ] Close the loop: schedule + deliver weekly recaps to the group chat.
-- [ ] Finish the Draft page in the React app — spec approved by Aisha
-      ([`docs/specs/DRAFT_ROOM.md`](specs/DRAFT_ROOM.md)); plan-diversity engine
-      shipped (`draft_strategies.py`); `/draft/*` API + React rebuild still open.
+      branch protection still to be enabled on `main` (Patrick, repo settings).
 - [x] ESPN integration audited; the category-target week-sampling bug it found
-      is fixed. Remaining findings tracked in
-      [`docs/ESPN_INTEGRATION_AUDIT.md`](ESPN_INTEGRATION_AUDIT.md).
+      is fixed. Remaining findings (2 correctness, several reliability) tracked
+      in [`docs/ESPN_INTEGRATION_AUDIT.md`](ESPN_INTEGRATION_AUDIT.md).
+- [x] **Draft Room shipped end to end** (PRs #2–#11): spec + Aisha's review,
+      plan-diversity engine, `/draft/*` API, full React DraftPage, optimization
+      controls (categories/percentile/objective, exclude/favorite/target
+      players), Monte Carlo category targets (Patrick's port), solver time
+      bounding, custom saved plans, selectable pricing source (Forge Value),
+      auction-value simulator. 106 tests passing.
+- [ ] **Cleanup pass (in progress, 2026-07-12):** dead code removal, duplicate
+      `ProjectionConfig`, hardcoded league-personal data out of engine code,
+      `games_per_week` drift, deprecated Claude model IDs, CI workflow.
+- [ ] Restructure the flat backend (`api.py`, `data_feed.py`) into a package —
+      spec going to Aisha (answers MC spec open question #1).
+- [ ] **Close the loop: schedule + deliver weekly recaps to the group chat —
+      the next feature** (Decision D). Needed by season week 1.
+- [ ] Implement the projection-source framework (after Aisha's review).
+- [ ] Recover or re-scope the v1 playoff simulator (see Starting Five, C slot).
 
 ---
 
 *Project: fantasy-ball-is-life · League: Patriot Games (ESPN, H2H 9-cat) ·
-Status: consolidated, speccing features.*
+Status: Draft Room shipped & paused · cleanup pass under way · next feature:
+automated weekly recaps.*

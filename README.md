@@ -25,14 +25,16 @@ Team roles and the feature definition-of-done live in
 
 | Path | What |
 |---|---|
-| `api.py` | FastAPI backend — league data, power rankings, matchup confidence, optimizer, AI commentary endpoints |
+| `api.py` | FastAPI backend — league data, power rankings, matchup confidence, draft room, AI commentary endpoints |
 | `data_feed.py` | ESPN pull layer (rosters, transactions, matchups, scoreboards) + projection attachment |
 | `fantasy.py` | `MyLeague` — power rankings, universe-wins math |
 | `optimize_lineup.py` | Auction draft optimizer (cvxpy integer program) |
-| `consistency.py` / `load_data.py` | Player consistency metrics; Kaggle game-log loader |
+| `draft_engine.py` / `draft_strategies.py` | Draft Room per-pick recompute loop; plan-diversity strategy map (both pure, no solver/ESPN imports) |
+| `draft_targets_mc.py` / `player_values.py` / `auction_values_mc.py` | Monte Carlo category targets; Forge Value (projection-derived auction values); auction-room price simulator |
+| `consistency.py` | Player consistency metrics (feeds the confidence endpoints) |
 | `app.py` | Streamlit dashboard (internal tool) |
 | `frontend/` | React 19 + Vite + Tailwind web app (the product UI) |
-| `docs/` | Operating manual, ESPN access handoff, feature specs |
+| `docs/` | Operating manual, project dossier, ESPN access handoff, feature specs |
 | `player_rankings/`, `data/` | Local data drop zones — gitignored |
 
 > Note: the flat backend layout is inherited from PatriotGames. Restructuring

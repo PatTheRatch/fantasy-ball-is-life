@@ -1,0 +1,50 @@
+# CI gate for CONTRIBUTING.md's review-gated flow: every PR (and main) must
+# pass the backend tests and a frontend build + lint before merge. Pairs with
+# branch protection on `main` (repo settings — Patrick), which should require
+# both jobs.
+#
+# Integration tests that need the real projections file (gitignored) or live
+# ESPN skip cleanly by design — locally the full suite runs 106 tests; here
+# ~86 run and ~20 skip. That's expected, not a gap in the gate.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      # Lint everything EXCEPT the two files carrying pre-existing errors
+      # (14 errors, mostly react-hooks/set-state-in-effect) that predate this
+      # gate. Fixing them means refactoring in-season effect logic — tracked
+      # as its own change, not snuck into CI setup. Do NOT add new files to
+      # this ignore list; shrink it.
+      - run: >
+          npx eslint .
+          --ignore-pattern src/pages/InSeason.tsx
+          --ignore-pattern src/components/AiCommentaryCard.tsx

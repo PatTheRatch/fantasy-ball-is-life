@@ -46,7 +46,11 @@ const NBA_TEAMS = [
 ] as const
 
 const STORAGE_KEY = 'draft-room-v1'
-const SCHEMA_VERSION = 1
+// v2: dropped the pinned games_per_week (backend now owns the default, 3.5 from
+// config.GAMES_PER_WEEK — v1 clients pinned 3.0, silently disagreeing with the
+// MC-targets spec). Bumping discards stored v1 state on load; done pre-draft on
+// purpose so no stale 3.0 survives into a real draft.
+const SCHEMA_VERSION = 2
 const PRESETS_STORAGE_KEY = 'draft-room-presets-v1'
 
 // Starting points for "Build a plan" (below) — the same shapes build_plan_configs'
@@ -113,7 +117,8 @@ const DEFAULT_PARAMS: DraftPoolParams = {
   initial_budget: 200,
   roster_size: 13,
   minimum_game_threshold: 20,
-  games_per_week: 3,
+  // games_per_week deliberately unset — the backend owns that default
+  // (config.GAMES_PER_WEEK), so one constant governs every surface.
   minimum_value_players: 3,
   value_source: 'bbm',
   exclude_players: [],

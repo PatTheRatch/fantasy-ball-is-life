@@ -36,6 +36,33 @@ DRAFT_LEAGUE_YEAR_DEFAULT = int(os.getenv("DRAFT_LEAGUE_YEAR", "2025"))
 # override via env if a league's cadence differs.
 GAMES_PER_WEEK: float = float(os.getenv("GAMES_PER_WEEK", "3.5"))
 
+# --- Draft pool hygiene (previously hardcoded inside optimize_lineup.clean_player_data) ---
+# These are league-owner judgment calls, not engine logic, so they live in config:
+# a different league (or a future multi-league deployment) should be able to change
+# them without touching engine code.
+
+# Players never drafted regardless of projected value (injury redshirts, personal
+# do-not-draft list). Lowercase full names, comma-separated in the env override.
+# Per-request exclusions (DraftPoolParams.exclude_players) stack on top of this.
+DO_NOT_DRAFT: list[str] = [
+    s.strip().lower()
+    for s in os.getenv(
+        "DO_NOT_DRAFT",
+        "kyrie irving,deandre ayton,kristaps porzingis,jimmy butler,jason tatum",
+    ).split(",")
+    if s.strip()
+]
+
+# Position corrections applied on top of the projections file, for players whose
+# listed position doesn't match how this league actually slots them.
+POSITION_OVERRIDES: dict[str, str] = {
+    "Anthony Davis": "C",
+}
+
+# Players projected for fewer season games than this are dropped from the draft
+# pool entirely (before any per-request minimum_game_threshold applies).
+MIN_SEASON_GAMES_FILTER: int = int(os.getenv("MIN_SEASON_GAMES_FILTER", "25"))
+
 # Hard cap on a single roster solve (optimize_lineup.OptimizeLineup.optimize_roster).
 # cvxpy's MILP solve has no timeout by default -- discovered running the real
 # Monte Carlo-derived category targets (docs/specs/MC_DRAFT_TARGETS.md) through

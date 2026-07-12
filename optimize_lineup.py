@@ -8,9 +8,12 @@ import shutup
 
 from config import (
     BBM_PROJECTIONS_PATH,
+    DO_NOT_DRAFT,
     DRAFT_LEAGUE_YEAR_DEFAULT,
     GAMES_PER_WEEK,
     LEAGUE_ID,
+    MIN_SEASON_GAMES_FILTER,
+    POSITION_OVERRIDES,
     SOLVER_TIME_LIMIT_SECONDS,
 )
 import draft_targets_mc as mc
@@ -181,15 +184,17 @@ class OptimizeLineup:
         return stats_df
 
     def clean_player_data(self, df):
-        # Filter and process player data
-        excluded = ['kyrie irving', 'deandre ayton', 'kristaps porzingis', 'jimmy butler',
-                    'jason tatum']
+        # Pool hygiene knobs are league-owner judgment calls, so they live in
+        # config (env-overridable), not here: see DO_NOT_DRAFT,
+        # POSITION_OVERRIDES, MIN_SEASON_GAMES_FILTER in config.py.
+        excluded = list(DO_NOT_DRAFT)
         if self.excluded_players:
             excluded.extend(self.excluded_players)
 
         df = df[~df['Name'].str.lower().isin(excluded)]
-        df = df[df['g'] >= 25]
-        df.loc[df['Name'] == 'Anthony Davis', 'Pos'] = 'C'
+        df = df[df['g'] >= MIN_SEASON_GAMES_FILTER]
+        for player, pos in POSITION_OVERRIDES.items():
+            df.loc[df['Name'] == player, 'Pos'] = pos
         # replace nans in bid with '$' column
         df.loc[df['Bid'].isna(), 'Bid'] = df.loc[df['Bid'].isna(), '$']
 

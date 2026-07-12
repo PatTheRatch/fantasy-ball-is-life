@@ -25,9 +25,6 @@ uvicorn[standard]>=0.27.0
 httpx>=0.26.0
 streamlit>=1.28.0
 
-# Kaggle dataset loading (load_data.py)
-kagglehub>=0.1.0
-
 # Anthropic Claude (matchup commentary)
 anthropic>=0.0.0
 

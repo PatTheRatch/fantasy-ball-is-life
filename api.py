@@ -712,10 +712,15 @@ def matchup_commentary(body: MatchupCommentaryBody) -> dict[str, Any]:
                 "Keep it to 3-4 punchy paragraphs in ESPN-style news article tone, with a bit of personality."
             )
 
-        # Anthropics Messages API.
+        # Anthropics Messages API. claude-sonnet-4-20250514 is deprecated
+        # (retires 2026-06-15); claude-sonnet-5 is its designated replacement.
+        # Sonnet 5 runs adaptive thinking by default and thinking tokens count
+        # against max_tokens (and its tokenizer runs ~30% more tokens for the
+        # same text), so budgets get headroom vs. the old values -- the
+        # text-block parsing below already skips thinking blocks.
         resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=500,
+            model="claude-sonnet-5",
+            max_tokens=2000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -892,9 +897,10 @@ def league_recap(body: LeagueRecapBody) -> dict[str, Any]:
             "Write the recap now. Use the section headers exactly as specified."
         )
 
+        # Model + budget rationale: see the /matchup-commentary call above.
         resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
+            model="claude-sonnet-5",
+            max_tokens=4000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -1135,9 +1141,10 @@ def season_commentary(body: SeasonCommentaryBody) -> dict[str, Any]:
         )
 
         client = Anthropic()
+        # Model + budget rationale: see the /matchup-commentary call above.
         resp = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
+            model="claude-sonnet-5",
+            max_tokens=4000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -1545,7 +1552,10 @@ class DraftPoolParams(BaseModel):
     initial_budget: float = 200
     roster_size: int = 13
     minimum_game_threshold: float = 20
-    games_per_week: float = 3.0
+    # None -> config.GAMES_PER_WEEK (3.5, the constant locked in
+    # docs/specs/MC_DRAFT_TARGETS.md §2.7). Was a hardcoded 3.0 here, which
+    # silently disagreed with /optimizer/optimize and the MC spec.
+    games_per_week: Optional[float] = None
     minimum_value_players: int = 3
     year: Optional[int] = None
 
