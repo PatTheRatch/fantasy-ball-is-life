@@ -35,7 +35,7 @@ import os
 import requests
 from dataclasses import dataclass
 from datetime import datetime, timedelta, date
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Iterable
 import re
 import unicodedata
 
@@ -466,6 +466,121 @@ def safe_recent_activity(h, limit=200):
         })
 
     return out
+
+
+# Transaction types that represent real, completed player movement worth
+# surfacing in the recap. Executed free-agent / waiver acquisitions, standalone
+# drops, and completed (accepted / upheld) trades. Draft, future-roster /
+# lineup-only, and pending / failed / canceled / declined / vetoed records are
+# intentionally excluded.
+RECAP_TRANSACTION_TYPES = frozenset({"FREEAGENT", "WAIVER", "TRADE_ACCEPT", "TRADE_UPHOLD"})
+_EXECUTED_STATUS = "EXECUTED"
+_MOVEMENT_ITEM_TYPES = frozenset({"ADD", "DROP"})
+
+
+def _epoch_ms_to_iso_date(value: Any) -> Optional[str]:
+    """ESPN transaction dates are epoch milliseconds; return ``YYYY-MM-DD`` (UTC)."""
+    if value is None:
+        return None
+    try:
+        seconds = int(value)
+        if seconds > 10**10:  # milliseconds, not seconds
+            seconds = seconds / 1000.0
+        return pd.to_datetime(seconds, unit="s", utc=True).date().isoformat()
+    except (TypeError, ValueError):
+        try:
+            return pd.to_datetime(str(value), utc=True).date().isoformat()
+        except Exception:
+            return None
+
+
+def week_transactions(
+    h: "ESPNHandles",
+    scoring_period: int,
+    types: Optional[Iterable[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Normalized, executed player-movement transactions for one scoring period.
+
+    Reads ESPN's ``mTransactions2`` view — the stable transaction feed — through
+    the league's own authenticated request helper (``espn_request.league_get``),
+    then parses the raw JSON defensively. This replaces ``safe_recent_activity()``,
+    which pulled the wrong (communication) view and read a ``League.espn_s2``
+    attribute that does not exist on the basketball client, so it always raised.
+
+    Returns one row per add/drop item, filtered to executed acquisitions,
+    standalone drops, and completed trades. Rows carry ``team_name`` and a stable
+    ``activity_id`` (the fields the recap awards layer consumes) plus enough raw
+    context (``type``, ``player``, ``from_team_id``/``to_team_id``,
+    ``related_transaction_id``) to build trade-chain attribution later.
+
+    Parsing is defensive throughout: a transport/auth error, a missing payload,
+    or an unknown player id degrades to fewer rows rather than crashing the
+    recap, whose data-quality report then flags the gap.
+    """
+    requested = {str(t).upper() for t in (types if types is not None else RECAP_TRANSACTION_TYPES)}
+    params = {"view": "mTransactions2", "scoringPeriodId": int(scoring_period)}
+    filters = {"transactions": {"filterType": {"value": sorted(requested)}}}
+    headers = {"x-fantasy-filter": json.dumps(filters)}
+
+    try:
+        data = h.league.espn_request.league_get(params=params, headers=headers)
+    except Exception:
+        return []
+
+    raw = (data or {}).get("transactions") or []
+    player_map = getattr(h.league, "player_map", {}) or {}
+    team_names = {
+        getattr(t, "team_id", None): getattr(t, "team_name", None)
+        for t in getattr(h.league, "teams", []) or []
+    }
+
+    rows: List[Dict[str, Any]] = []
+    for txn in raw:
+        if not isinstance(txn, dict):
+            continue
+        status = str(txn.get("status") or "").upper()
+        txn_type = str(txn.get("type") or "").upper()
+        if status != _EXECUTED_STATUS or txn_type not in requested:
+            continue
+
+        base_team_id = txn.get("teamId")
+        date_iso = _epoch_ms_to_iso_date(txn.get("processDate") or txn.get("proposedDate"))
+        scoring = txn.get("scoringPeriodId", scoring_period)
+        related = txn.get("relatedTransactionId")
+
+        for item in txn.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            action = str(item.get("type") or "").upper()  # ADD / DROP
+            if action not in _MOVEMENT_ITEM_TYPES:
+                continue
+            player_id = item.get("playerId")
+            from_team_id = item.get("fromTeamId")
+            to_team_id = item.get("toTeamId")
+            # Adds/drops carry the owning team at the transaction level; trades
+            # record source/destination on the item.
+            owner_id = base_team_id
+            if owner_id in (None, 0):
+                owner_id = to_team_id if action == "ADD" else from_team_id
+            rows.append(
+                {
+                    "activity_id": f"txn-{scoring}-{txn.get('id')}-{action}-{player_id}",
+                    "date": date_iso,
+                    "scoring_period": scoring,
+                    "team_id": owner_id,
+                    "team_name": team_names.get(owner_id),
+                    "type": txn_type,
+                    "action_type": action,
+                    "player": player_map.get(player_id, "Unknown"),
+                    "player_id": player_id,
+                    "bid_amount": txn.get("bidAmount"),
+                    "status": status,
+                    "from_team_id": from_team_id,
+                    "to_team_id": to_team_id,
+                    "related_transaction_id": related,
+                }
+            )
+    return rows
 
 
 def standings_df(h: ESPNHandles) -> pd.DataFrame:
