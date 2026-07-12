@@ -19,6 +19,7 @@ from draft_strategies import (
     PlanConfig,
     balanced_config,
     build_plan_configs,
+    custom_config,
     generate_portfolio,
     punt_config,
     spread_value_config,
@@ -76,6 +77,67 @@ def test_spread_value_is_flat():
     # single-top-player reliance
     assert spread.minimum_value_players < balanced.minimum_value_players
     assert spread.ban_top_price is True
+
+
+# --- custom (user-built, hand-tuned) plans ---------------------------------------
+
+def test_custom_config_uses_exactly_what_it_is_given():
+    cfg = custom_config(
+        label="My build",
+        categories=["PTS", "REB", "AST"],
+        percentile=0.6,
+        stat_to_maximize="PTS",
+        minimum_value_players=5,
+        ban_top_price=True,
+    )
+    assert cfg.shape == "custom"
+    assert cfg.label == "My build"
+    assert cfg.constrained_categories == ("PTS", "REB", "AST")
+    assert cfg.percentile == 0.6
+    assert cfg.minimum_value_players == 5
+    assert cfg.stat_to_maximize == "PTS"
+    assert cfg.ban_top_price is True
+    # everything left out of the category selection is a punt, by definition
+    assert set(cfg.punts) == set(CATEGORIES) - {"PTS", "REB", "AST"}
+
+
+def test_custom_config_defaults_match_other_builders():
+    cfg = custom_config(label="Defaults", categories=CATEGORIES, percentile=0.5, stat_to_maximize="PTS")
+    assert cfg.minimum_value_players == 3
+    assert cfg.ban_top_price is False
+    assert cfg.punts == ()
+
+
+def test_custom_config_dedupes_categories():
+    cfg = custom_config(label="Dupes", categories=["PTS", "PTS", "REB"], percentile=0.5, stat_to_maximize="PTS")
+    assert cfg.constrained_categories == ("PTS", "REB")
+
+
+def test_custom_config_rejects_empty_label():
+    with pytest.raises(ValueError):
+        custom_config(label="  ", categories=CATEGORIES, percentile=0.5, stat_to_maximize="PTS")
+
+
+def test_custom_config_rejects_out_of_range_percentile():
+    with pytest.raises(ValueError):
+        custom_config(label="X", categories=CATEGORIES, percentile=0.0, stat_to_maximize="PTS")
+    with pytest.raises(ValueError):
+        custom_config(label="X", categories=CATEGORIES, percentile=1.5, stat_to_maximize="PTS")
+
+
+def test_custom_config_rejects_negative_min_value_players():
+    with pytest.raises(ValueError):
+        custom_config(label="X", categories=CATEGORIES, percentile=0.5, stat_to_maximize="PTS", minimum_value_players=-1)
+
+
+def test_custom_config_cannot_maximize_a_punted_category():
+    with pytest.raises(ValueError):
+        custom_config(label="X", categories=["REB", "AST"], percentile=0.5, stat_to_maximize="PTS")
+
+
+def test_custom_config_rejects_unknown_category():
+    with pytest.raises(ValueError):
+        custom_config(label="X", categories=["POINTS"], percentile=0.5, stat_to_maximize="PTS")
 
 
 # --- validation -----------------------------------------------------------------

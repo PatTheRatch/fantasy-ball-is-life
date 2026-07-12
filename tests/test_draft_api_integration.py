@@ -387,6 +387,82 @@ def test_target_categories_validation_error_returns_422():
 
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_draft_plans_custom_solves_one_hand_tuned_plan(monkeypatch):
+    """POST /draft/plans/custom -- the "build your own, save it" flow. Unlike
+    /draft/plans' fixed recipe, every knob here comes straight from the
+    caller."""
+    import api
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.post(
+        "/draft/plans/custom",
+        json={
+            "picks": [],
+            "label": "My punt-AST build",
+            "constrained_categories": ["PTS", "REB", "STL", "BLK", "3PM", "FG%", "FT%", "TO"],
+            "percentile": 0.4,
+            "stat_to_maximize": "PTS",
+            "minimum_value_players": 4,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    assert data["plan"]["label"] == "My punt-AST build"
+    assert data["plan"]["config"]["shape"] == "custom"
+    assert data["plan"]["config"]["percentile"] == 0.4
+    assert data["plan"]["config"]["minimum_value_players"] == 4
+    assert "AST" not in data["plan"]["config"]["constrained_categories"]
+    assert data["plan"]["health"] == "alive"
+    assert len(data["plan"]["roster"]) > 0
+    assert len(data["value_board"]) > 0
+
+
+def test_draft_plans_custom_rejects_maximizing_a_punted_category():
+    import api
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.post(
+        "/draft/plans/custom",
+        json={
+            "picks": [],
+            "label": "Invalid",
+            "constrained_categories": ["REB", "AST"],
+            "percentile": 0.5,
+            "stat_to_maximize": "PTS",
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_draft_plans_custom_rejects_out_of_range_percentile():
+    import api
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+
+    resp = client.post(
+        "/draft/plans/custom",
+        json={
+            "picks": [],
+            "label": "Invalid",
+            "constrained_categories": ["PTS", "REB"],
+            "percentile": 1.5,
+            "stat_to_maximize": "PTS",
+        },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_draft_players_search_matches_by_substring(monkeypatch):
     import api
 

@@ -493,6 +493,29 @@ export interface DraftPlansBody extends DraftPoolParams {
   picks: DraftPickEntry[]
 }
 
+/** One hand-tuned plan spec -- the "build your own, save it" flow, as opposed
+ * to the fixed 10-plan recipe /draft/plans generates. Every solver knob is
+ * set directly instead of picked from a strategy shape. */
+export interface CustomPlanSpec {
+  label: string
+  constrained_categories: string[]
+  percentile: number
+  stat_to_maximize: string
+  minimum_value_players: number
+  ban_top_price: boolean
+}
+
+export type CustomPlanBody = DraftPoolParams &
+  CustomPlanSpec & {
+    picks: DraftPickEntry[]
+  }
+
+export interface DraftCustomPlanResponse {
+  plan: DraftPlanSnapshot
+  value_board: DraftValueBoardEntry[]
+  skipped_targets?: string[]
+}
+
 export interface DraftPickBody extends DraftPoolParams {
   picks: DraftPickEntry[]
   new_pick: DraftPickEntry
@@ -536,6 +559,13 @@ export async function postDraftPlans(
   body: DraftPlansBody,
 ): Promise<DraftPortfolioResponse> {
   const { data } = await client.post<DraftPortfolioResponse>('/draft/plans', body)
+  return data
+}
+
+export async function postDraftCustomPlan(
+  body: CustomPlanBody,
+): Promise<DraftCustomPlanResponse> {
+  const { data } = await client.post<DraftCustomPlanResponse>('/draft/plans/custom', body)
   return data
 }
 

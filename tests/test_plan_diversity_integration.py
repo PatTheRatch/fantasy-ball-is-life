@@ -2,12 +2,19 @@
 on the real optimizer + real projections.
 
 Unlike the pure unit tests, this drives the actual `OptimizeLineup` engine. It
-isolates the one ESPN dependency by stubbing the live league (empty draft) and
-skipping `set_requirements` (whose targets come from `get_universe_wins` /
-ESPN history) — so it runs anywhere the projections file is present, no ESPN
-needed. In production the solver also sets category requirements from
-ESPN-derived targets, which *increases* diversity; this test therefore measures
-a lower bound.
+isolates the one ESPN dependency by stubbing the live league (empty draft).
+Most tests below also skip `set_requirements` (bypassing category targets
+entirely) so they run as a fast lower-bound check independent of target method.
+
+`test_default_recipe_solves_for_real_with_mc_targets_and_stays_bounded` below
+is the exception: it calls the real `set_requirements` with no mock at all.
+That's possible (and new) because Monte Carlo targets (the default since
+docs/specs/MC_DRAFT_TARGETS.md) are history-independent — unlike the old
+ESPN-backed method, MC needs no live league connection, so a real, unmocked,
+fully-constrained solve is actually testable here. It wasn't run for real
+anywhere in this suite until this test was added, which is how the two solver
+issues fixed alongside it (unbounded solve time; percentile defaults tuned
+without ever seeing a real constrained solve) went undetected.
 
 Skips cleanly when the engine deps (cvxpy/espn_api) or the projections file
 aren't available, so a bare CI checkout stays green.
@@ -96,3 +103,46 @@ def test_portfolio_dedup_yields_a_diverse_saved_set(monkeypatch):
     # The engine + strategy map must still yield a genuinely varied set, not one
     # or two survivors.
     assert len(plans) >= 4
+
+
+@pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
+def test_default_recipe_solves_for_real_with_mc_targets_and_stays_bounded(monkeypatch):
+    """The default 10-plan recipe, solved with real (unmocked) set_requirements
+    -- real Monte Carlo category targets against the real player pool, no
+    shortcuts. Regression guard for the two issues found running this for the
+    first time (2026-07-10): a config that's genuinely hard to solve must never
+    hang (config.SOLVER_TIME_LIMIT_SECONDS bounds every call) or silently return
+    a broken roster (optimize_lineup.optimize_roster validates the selected
+    count before trusting a time-limited result) -- and with the retuned
+    STRATEGY_PERCENTILE_BANDS, every default plan should actually solve."""
+    import time
+
+    from config import SOLVER_TIME_LIMIT_SECONDS
+
+    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+
+    configs = build_plan_configs(10)
+    failures = []
+    for cfg in configs:
+        opt = ol.OptimizeLineup(
+            initial_budget=200,
+            roster_size=13,
+            minimum_value_players=cfg.minimum_value_players,
+            minimum_game_threshold=20,
+            value_col="Value",
+        )
+        t0 = time.time()
+        with contextlib.redirect_stdout(io.StringIO()):
+            opt.set_requirements(list(cfg.constrained_categories), percentile=cfg.percentile)
+            try:
+                res = opt.optimize_roster(cfg.stat_to_maximize)
+            except ValueError as e:
+                failures.append((cfg.label, str(e)))
+                continue
+        elapsed = time.time() - t0
+        # Every solve (target-setting + roster solve) is bounded by the solver
+        # time limit plus a little slack for the target computation itself.
+        assert elapsed <= SOLVER_TIME_LIMIT_SECONDS + 5, f"{cfg.label} took {elapsed:.1f}s"
+        assert len(res) == 13, f"{cfg.label} returned {len(res)} players, not 13"
+
+    assert not failures, f"default recipe configs failed against real MC targets: {failures}"

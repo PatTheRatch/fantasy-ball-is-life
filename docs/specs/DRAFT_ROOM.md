@@ -229,6 +229,70 @@ is structurally impossible regardless of backend. It doesn't matter — a single
 solve is **~3.77s** (benchmark: 564-player pool, 13 spots), and cold 10-plan
 generation is **~42s**, a one-time prep/reset cost, not the per-pick workload.
 
+**Amendment (2026-07-10) — solver timeout + retuned percentiles.** The ~3.77s
+benchmark above, like every solve this spec was tested against, ran with
+category constraints bypassed (`set_requirements` mocked out) — necessary at
+the time because the only target method needed live ESPN history, which wasn't
+reachable where this was built. Once Monte Carlo targets landed
+([`MC_DRAFT_TARGETS.md`](MC_DRAFT_TARGETS.md), history-independent, so
+`set_requirements` is testable without ESPN for the first time) and were run
+for real, a full constrained solve took 8–24s+ for several category/percentile
+combinations in `draft_strategies.STRATEGY_PERCENTILE_BANDS`' original range —
+and `cp.Problem.solve()` had **no time limit at all**, so some of that was
+genuinely unbounded. Two fixes landed together:
+- `optimize_lineup.optimize_roster` now solves with
+  `config.SOLVER_TIME_LIMIT_SECONDS` (default 8s). A time-limited solve is
+  validated (selected-player count must still equal the roster need) before
+  being trusted — HiGHS can return a `user_limit` status with a degenerate
+  incumbent, which surfaced as a real bug during the fix (silently returning a
+  0-player "feasible" roster) before the count check was added.
+- `STRATEGY_PERCENTILE_BANDS` shifted down ~0.35 (e.g. Balanced 0.70 → 0.35
+  midpoint) to the range empirically sampled as reliably fast to solve.
+  Relative spacing between shapes is unchanged.
+- **Honest result, not a full guarantee:** with the retuned bands, the default
+  10-plan portfolio solves end-to-end in ~31s total against real MC targets —
+  but **2 of the 10 default plans still hit the full 8s cap** on today's pool
+  (still succeed; just not fast). Solve difficulty near a MILP's feasibility
+  boundary isn't a smooth function of percentile, so lower isn't strictly
+  better everywhere — this wasn't chased further. The real guarantee this
+  amendment adds is that a solve **always terminates** and **never returns a
+  corrupted result**; it does not guarantee every pick recompute finishes
+  comfortably under 8s. `tests/test_plan_diversity_integration.py::test_default_recipe_solves_for_real_with_mc_targets_and_stays_bounded`
+  is the regression guard — the first test in this suite to exercise a real,
+  unmocked `set_requirements` solve, which is how this went undetected until now.
+
+**Amendment (2026-07-10) — user-defined ("build a plan") custom configs.**
+Patrick's follow-up: the recipe (§0/D8, five strategy shapes) is a guided
+starting point, but there was no way to hand-tune one plan's exact knobs and
+keep it — "hit save, then make a new one." Added a second, orthogonal path
+alongside `build_plan_configs`' fixed 10-plan recipe:
+
+- `draft_strategies.custom_config(label, categories, percentile,
+  stat_to_maximize, minimum_value_players, ban_top_price)` — builds a
+  `PlanConfig` directly from caller-supplied values instead of a shape-band
+  lookup. `shape="custom"`; reuses the same `_validate` every other builder
+  uses (unknown category, empty category set, non-counting objective,
+  maximizing a punted category all still raise).
+- `POST /draft/plans/custom` — solves exactly one `custom_config` against the
+  current pool and returns it standalone (not a portfolio). 422 on invalid
+  params or an infeasible combination against the current pool, mirroring
+  `/draft/plans`' existing error posture. The client merges the result into
+  its own working plan set; this endpoint has no opinion on the rest of it.
+- **UI ("Build a plan" card, DraftPage.tsx):** category chips, a confidence
+  slider, an objective dropdown, $1-slot count, and a "Start from" dropdown
+  that prefills the form from either a built-in shape (at its current
+  percentile-band midpoint) or a previously saved plan — purely a starting
+  point, every field stays editable. "Save & add to portfolio" solves it,
+  merges the result into the active plan set, and persists the *parameters*
+  (not the solved roster) to a client-side (`localStorage`) preset library
+  (D12's existing client-held-state posture — no new server storage) so the
+  same build can be reloaded and re-solved later against a changed pool.
+- This is additive: the existing recipe flow (`/draft/plans`, "Generate
+  portfolio") is unchanged and still the default entry point; a user can
+  ignore "Build a plan" entirely, or use it exclusively instead of the
+  recipe — both are supported, per Patrick's explicit "but they don't have
+  to" requirement.
+
 **Concurrency.** Every mutating call carries a monotonic `picks_version`
 (§3). The client echoes the version it acted on; a response for a superseded
 version is discarded, so rapid pick entry can't apply out of order.

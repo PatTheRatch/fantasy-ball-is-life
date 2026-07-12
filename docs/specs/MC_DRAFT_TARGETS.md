@@ -4,8 +4,29 @@
 review of both spec and code (touches the approved Draft Room optimizer, so
 architecture sign-off per `docs/AISHA_OPERATING_MANUAL.md`). Engine ported to
 `draft_targets_mc.py`; wired into `OptimizeLineup.set_requirements` as the
-default; 12 engine tests pass (`tests/test_mc_draft_targets.py`). Optimizer
-integration test needs live ESPN and is not in the automated suite.
+default; 12 engine tests pass (`tests/test_mc_draft_targets.py`).
+
+**Amendment (2026-07-10):** the line above originally said the optimizer
+integration test "needs live ESPN and is not in the automated suite" — that
+turned out to be wrong, and correcting it is what surfaced a real bug. MC
+targets are history-independent by design (§0), so `set_requirements` at its
+new default needs **no ESPN connection at all** — the one thing every other
+target-setting test in this repo had to mock away for unrelated reasons (the
+*old* method's ESPN dependency) doesn't apply here. Once that was noticed and
+a real, unmocked solve was actually run
+(`tests/test_plan_diversity_integration.py::test_default_recipe_solves_for_real_with_mc_targets_and_stays_bounded`,
+new), it found `cp.Problem.solve()` had no time limit and several
+category/percentile combinations in the Draft Room's original defaults took
+8–24s+ or hung outright. Fixed in
+[`DRAFT_ROOM.md`](DRAFT_ROOM.md#3-data-model-impact)'s matching amendment:
+`config.SOLVER_TIME_LIMIT_SECONDS` bounds every solve, and
+`draft_strategies.STRATEGY_PERCENTILE_BANDS` was retuned to a range that's
+reliably fast against real MC targets. Nothing in *this* spec's own claims
+(§2.5's "<a few seconds for n_teams=1000") was wrong — that's target
+*computation* time (confirmed ~1.2s) and always was; the slow part was the
+*optimizer's* solve using those targets, one layer downstream, which this
+spec's test plan didn't cover and correctly scoped as the Draft Room's
+concern, not this feature's.
 **Author:** Claude Code (implementation engineer)
 **Date:** 2026-07-09
 **Decision basis:** Patrick asked to bring back his existing Monte Carlo work
