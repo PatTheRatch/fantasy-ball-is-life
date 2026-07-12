@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import draft_targets_mc as mc
+from backend.draft import targets_mc as mc
 
 
 def make_pool(n=120, seed=0):

@@ -42,7 +42,8 @@ Aisha (lead systems engineer) has approved. `main` stays deployable at all times
 
 ## Before requesting review
 
-- Backend: run the tests and make sure the app still boots (`uvicorn api:app`).
+- Backend: run the tests and make sure the app still boots
+  (`uvicorn backend.api.main:app`).
 - Frontend: `npm run lint` and `npm run build` pass.
 - No secrets in the diff. `.env` is gitignored; never commit credentials or
   ESPN cookies.

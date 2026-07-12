@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import player_values
+from backend.draft import values as player_values
 
 
 def make_value_pool(n=30):

@@ -65,7 +65,7 @@ except Exception as e:
         "You need the `espn-api` package. Install with: pip install espn-api"
     )
 
-from config import (
+from backend.config import (
     BBM_PROJECTIONS_PATH,
     ESPN_S2,
     LEAGUE_ID,

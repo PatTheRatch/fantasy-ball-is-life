@@ -5,8 +5,8 @@ import re
 
 import pytest
 
-from draft_engine import apply_pick, build_initial_snapshot, pick_fallback, plan_id_for, relax_plan, triage_player
-from draft_strategies import CATEGORIES, Plan, balanced_config, punt_config
+from backend.draft.engine import apply_pick, build_initial_snapshot, pick_fallback, plan_id_for, relax_plan, triage_player
+from backend.draft.strategies import CATEGORIES, Plan, balanced_config, punt_config
 
 
 def _plan(config, roster):

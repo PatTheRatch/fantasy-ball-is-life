@@ -1,5 +1,6 @@
 """
-FastAPI layer over `data_feed` and `optimize_lineup` — thin wrappers only; no business-logic changes.
+FastAPI layer over `backend.league.data_feed` and `backend.draft.optimizer` —
+thin wrappers only; no business-logic changes.
 """
 from __future__ import annotations
 
@@ -13,15 +14,15 @@ from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
-import auction_values_mc as auction_mc
+from backend.draft import auction_sim as auction_mc
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
-import data_feed as feed
-from config import BBM_PROJECTIONS_PATH, LEAGUE_ID, SEASON
-from draft_engine import (
+from backend.league import data_feed as feed
+from backend.config import BBM_PROJECTIONS_PATH, LEAGUE_ID, SEASON
+from backend.draft.engine import (
     PlanSnapshot,
     apply_pick,
     build_initial_snapshot,
@@ -30,22 +31,28 @@ from draft_engine import (
     relax_plan,
     triage_player,
 )
-from draft_strategies import (
+from backend.draft.strategies import (
     PlanConfig,
     SolveFn,
     build_plan_configs,
     custom_config,
     generate_portfolio,
 )
-from fantasy import MyLeague
-from optimize_lineup import OptimizeLineup, generate_multiple_plans
+from backend.league.fantasy import MyLeague
+from backend.draft.optimizer import OptimizeLineup, generate_multiple_plans
 
 # Load local environment variables (e.g. ANTHROPIC_API_KEY) when running the dev server.
 # This keeps `ANTHROPIC_API_KEY` setup simple even if it's not exported in the shell.
+# Uses backend.config.PROJECT_ROOT rather than a second hand-rolled relative
+# path -- this file moved one directory deeper (backend/api/) in the package
+# restructure, and a bare `Path(__file__).resolve().parent` here would land
+# on backend/api/ instead of the repo root where .env actually lives.
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+    from backend.config import PROJECT_ROOT
+
+    load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 except Exception:
     # If `python-dotenv` isn't installed or .env doesn't exist, we'll just rely on real env vars.
     pass
@@ -351,7 +358,7 @@ def confidence(
     player_avg: float = Query(..., description="Player season average for the stat (used for tier lookup)"),
 ) -> dict[str, Any]:
     try:
-        from consistency import get_confidence
+        from backend.analytics.consistency import get_confidence
 
         return get_confidence(
             projected_value=projected_value,
@@ -377,7 +384,7 @@ def matchup_confidence(
     """
     try:
         h = _handles()
-        from consistency import get_confidence
+        from backend.analytics.consistency import get_confidence
 
         df = feed.get_projected_scoreboard(
             h,

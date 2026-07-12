@@ -13,7 +13,7 @@ from typing import Dict, Mapping, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-import draft_targets_mc as target_mc
+from backend.draft import targets_mc as target_mc
 
 
 CATEGORIES: Tuple[str, ...] = ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FG%", "FT%")

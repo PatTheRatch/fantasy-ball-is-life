@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import auction_values_mc as auction
+from backend.draft import auction_sim as auction
 
 
 def make_pool(n=36, seed=0):

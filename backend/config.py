@@ -10,8 +10,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Project root (directory containing this file)
-PROJECT_ROOT = Path(__file__).resolve().parent
+# Repo root -- this file lives at backend/config.py, so the repo root (where
+# player_rankings/ and .env live) is one level up from this file's directory.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # --- ESPN fantasy league ---
 LEAGUE_ID: int = int(os.getenv("ESPN_LEAGUE_ID", "3853870"))

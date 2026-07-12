@@ -247,9 +247,10 @@ DataFrames:
 - `MyLeague(...).get_universe_wins(weeks=[...])` for all-play / power-ranking data
 
 ### Option B — Call the existing FastAPI service (any frontend)
-`api.py` already exposes HTTP endpoints over the data layer. Run it with:
+`backend/api/main.py` already exposes HTTP endpoints over the data layer.
+Run it with:
 ```bash
-uvicorn api:app --host 127.0.0.1 --port 8000 --reload
+uvicorn backend.api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 Then GET/POST JSON. Most useful endpoints for a dashboard:
 - `GET /league/settings`

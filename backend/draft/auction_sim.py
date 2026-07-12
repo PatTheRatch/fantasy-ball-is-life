@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-import draft_targets_mc as target_mc
-import player_values
+from backend.draft import targets_mc as target_mc
+from backend.draft import values as player_values
 
 
 CATEGORIES: Tuple[str, ...] = ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FG%", "FT%")

@@ -26,13 +26,13 @@ import os
 
 import pytest
 
-from draft_strategies import build_plan_configs, generate_portfolio
+from backend.draft.strategies import build_plan_configs, generate_portfolio
 
 pd = pytest.importorskip("pandas")
-ol = pytest.importorskip("optimize_lineup")
+ol = pytest.importorskip("backend.draft.optimizer")
 
 try:
-    from config import BBM_PROJECTIONS_PATH
+    from backend.config import BBM_PROJECTIONS_PATH
 except Exception:  # pragma: no cover
     BBM_PROJECTIONS_PATH = "player_rankings/BBM_Projections.xls"
 
@@ -117,7 +117,7 @@ def test_default_recipe_solves_for_real_with_mc_targets_and_stays_bounded(monkey
     STRATEGY_PERCENTILE_BANDS, every default plan should actually solve."""
     import time
 
-    from config import SOLVER_TIME_LIMIT_SECONDS
+    from backend.config import SOLVER_TIME_LIMIT_SECONDS
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
 

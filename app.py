@@ -15,7 +15,7 @@ import httpx
 import pandas as pd
 import streamlit as st
 
-from config import BBM_PROJECTIONS_PATH
+from backend.config import BBM_PROJECTIONS_PATH
 
 API_BASE = "http://localhost:8000"
 
@@ -595,7 +595,7 @@ html, body {
 
     # "Current Matchup Week" is a bounded discrete set: choose based on today's date.
     # (We derive options from the same week range mapping used by the backend.)
-    from data_feed import MATCHUP_WEEKS_2025_26
+    from backend.league.data_feed import MATCHUP_WEEKS_2025_26
 
     # Only allow weeks that have completed (end date <= today).
     week_options_all = sorted(int(w) for w in MATCHUP_WEEKS_2025_26.keys())
@@ -1327,7 +1327,7 @@ def tab_weekly_recap() -> None:
         unsafe_allow_html=True,
     )
 
-    from data_feed import MATCHUP_WEEKS_2025_26
+    from backend.league.data_feed import MATCHUP_WEEKS_2025_26
 
     week_options = sorted(int(w) for w in MATCHUP_WEEKS_2025_26.keys())
     # Guard against `st.session_state["weekly_recap_week"]` being None/invalid (can happen on first load).

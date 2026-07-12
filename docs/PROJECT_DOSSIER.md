@@ -155,11 +155,13 @@ clean foundation.
       players), Monte Carlo category targets (Patrick's port), solver time
       bounding, custom saved plans, selectable pricing source (Forge Value),
       auction-value simulator. 106 tests passing.
-- [ ] **Cleanup pass (in progress, 2026-07-12):** dead code removal, duplicate
+- [x] **Cleanup pass (2026-07-12):** dead code removal, duplicate
       `ProjectionConfig`, hardcoded league-personal data out of engine code,
-      `games_per_week` drift, deprecated Claude model IDs, CI workflow.
-- [ ] Restructure the flat backend (`api.py`, `data_feed.py`) into a package —
-      spec going to Aisha (answers MC spec open question #1).
+      `games_per_week` drift, deprecated Claude model IDs, CI workflow (PR #12).
+- [x] Restructure the flat backend into a `backend/` package — spec approved
+      by Aisha (2026-07-12), answers MC spec open question #1. PR 1 (move +
+      rename) done; PR 2 (split `backend/api/main.py` into routers +
+      `commentary/`) still open.
 - [ ] **Close the loop: schedule + deliver weekly recaps to the group chat —
       the next feature** (Decision D). Needed by season week 1.
 - [ ] Implement the projection-source framework (after Aisha's review).

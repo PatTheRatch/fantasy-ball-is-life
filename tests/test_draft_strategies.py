@@ -6,7 +6,7 @@ rosters distinct on real projections" check lives in the gated integration test.
 """
 import pytest
 
-from draft_strategies import (
+from backend.draft.strategies import (
     BALANCED,
     CATEGORIES,
     COUNTING_CATS,

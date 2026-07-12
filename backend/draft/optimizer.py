@@ -2,11 +2,11 @@ import string
 from typing import Optional
 
 import pandas as pd
-from fantasy import MyLeague
+from backend.league.fantasy import MyLeague
 import cvxpy as cp
 import shutup
 
-from config import (
+from backend.config import (
     BBM_PROJECTIONS_PATH,
     DO_NOT_DRAFT,
     DRAFT_LEAGUE_YEAR_DEFAULT,
@@ -16,8 +16,8 @@ from config import (
     POSITION_OVERRIDES,
     SOLVER_TIME_LIMIT_SECONDS,
 )
-import draft_targets_mc as mc
-import player_values
+from backend.draft import targets_mc as mc
+from backend.draft import values as player_values
 
 shutup.please()
 

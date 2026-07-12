@@ -5,8 +5,9 @@ real optimizer + real BBM projections.
 Same isolation pattern as tests/test_plan_diversity_integration.py: ESPN is
 stubbed (a fake empty-draft league) so this runs without network access, and
 `set_requirements` is consequently skipped inside the stubbed solve path in
-api.py's own error handling is NOT bypassed here — we're driving the actual
-production code path (api.draft_plans / api.draft_pick), not a copy of it.
+backend/api/main.py's own error handling is NOT bypassed here — we're
+driving the actual production code path (api.draft_plans / api.draft_pick,
+imported from backend.api.main), not a copy of it.
 
 Skips cleanly when the engine deps or the projections file aren't available.
 """
@@ -16,10 +17,10 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 pytest.importorskip("fastapi")
-ol = pytest.importorskip("optimize_lineup")
+ol = pytest.importorskip("backend.draft.optimizer")
 
 try:
-    from config import BBM_PROJECTIONS_PATH
+    from backend.config import BBM_PROJECTIONS_PATH
 except Exception:  # pragma: no cover
     BBM_PROJECTIONS_PATH = "player_rankings/BBM_Projections.xls"
 
@@ -41,7 +42,7 @@ class _FakeLeague:
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_draft_plans_then_pick_round_trip(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     # set_requirements needs live ESPN history; stub it to a no-op so the
@@ -192,7 +193,7 @@ def _synthetic_plan(plan_id="balanced", health="broken", roster=None):
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_draft_relax_runs_the_sweep_and_returns_a_feasible_proposal(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
@@ -216,7 +217,7 @@ def test_draft_relax_runs_the_sweep_and_returns_a_feasible_proposal(monkeypatch)
 
 
 def test_draft_relax_rejects_when_a_plan_is_still_alive():
-    import api
+    import backend.api.main as api
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)
@@ -227,7 +228,7 @@ def test_draft_relax_rejects_when_a_plan_is_still_alive():
 
 
 def test_draft_relax_requires_prior_plans():
-    import api
+    import backend.api.main as api
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)
@@ -242,7 +243,7 @@ def test_draft_relax_requires_prior_plans():
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_exclude_players_never_appear_in_any_plan(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
@@ -264,7 +265,7 @@ def test_exclude_players_never_appear_in_any_plan(monkeypatch):
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_favorite_team_representation_is_respected(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
@@ -302,7 +303,7 @@ def test_favorite_team_representation_is_respected(monkeypatch):
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_target_player_is_pre_locked_onto_every_plan_at_projected_price(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
@@ -347,7 +348,7 @@ def test_target_player_is_pre_locked_onto_every_plan_at_projected_price(monkeypa
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_target_categories_and_stat_to_maximize_are_respected(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
@@ -374,7 +375,7 @@ def test_target_categories_and_stat_to_maximize_are_respected(monkeypatch):
 
 
 def test_target_categories_validation_error_returns_422():
-    import api
+    import backend.api.main as api
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)
@@ -391,7 +392,7 @@ def test_draft_plans_custom_solves_one_hand_tuned_plan(monkeypatch):
     """POST /draft/plans/custom -- the "build your own, save it" flow. Unlike
     /draft/plans' fixed recipe, every knob here comes straight from the
     caller."""
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
@@ -425,7 +426,7 @@ def test_draft_plans_custom_solves_one_hand_tuned_plan(monkeypatch):
 
 
 def test_draft_plans_custom_rejects_maximizing_a_punted_category():
-    import api
+    import backend.api.main as api
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)
@@ -444,7 +445,7 @@ def test_draft_plans_custom_rejects_maximizing_a_punted_category():
 
 
 def test_draft_plans_custom_rejects_out_of_range_percentile():
-    import api
+    import backend.api.main as api
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)
@@ -468,7 +469,7 @@ def test_value_source_forge_prices_the_value_board_differently(monkeypatch):
     priced against -- Forge Value (player_values.calculate_player_values)
     instead of the uploaded projections' own $ column -- and must use the
     live league's real team count, not a hardcoded default."""
-    import api
+    import backend.api.main as api
 
     class _FakeLeagueWithSettings(_FakeLeague):
         def __init__(self, *args, **kwargs):
@@ -499,7 +500,7 @@ def test_value_source_forge_prices_the_value_board_differently(monkeypatch):
 
 
 def test_value_source_rejects_unknown_value():
-    import api
+    import backend.api.main as api
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)
@@ -510,7 +511,7 @@ def test_value_source_rejects_unknown_value():
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_draft_players_search_matches_by_substring(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     from fastapi.testclient import TestClient
@@ -527,7 +528,7 @@ def test_draft_players_search_matches_by_substring(monkeypatch):
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_draft_players_search_requires_two_chars(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     from fastapi.testclient import TestClient
@@ -541,7 +542,7 @@ def test_draft_players_search_requires_two_chars(monkeypatch):
 
 @pytest.mark.skipif(not _HAS_PROJECTIONS, reason="projections file not present")
 def test_draft_players_search_no_match_returns_empty(monkeypatch):
-    import api
+    import backend.api.main as api
 
     monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
     from fastapi.testclient import TestClient

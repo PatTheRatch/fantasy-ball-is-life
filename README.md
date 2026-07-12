@@ -23,22 +23,22 @@ Team roles and the feature definition-of-done live in
 
 ## Layout
 
+Backend lives under `backend/`, grouped by concern
+(`docs/specs/BACKEND_RESTRUCTURE.md`, approved by Aisha 2026-07-12):
+
 | Path | What |
 |---|---|
-| `api.py` | FastAPI backend — league data, power rankings, matchup confidence, draft room, AI commentary endpoints |
-| `data_feed.py` | ESPN pull layer (rosters, transactions, matchups, scoreboards) + projection attachment |
-| `fantasy.py` | `MyLeague` — power rankings, universe-wins math |
-| `optimize_lineup.py` | Auction draft optimizer (cvxpy integer program) |
-| `draft_engine.py` / `draft_strategies.py` | Draft Room per-pick recompute loop; plan-diversity strategy map (both pure, no solver/ESPN imports) |
-| `draft_targets_mc.py` / `player_values.py` / `auction_values_mc.py` | Monte Carlo category targets; Forge Value (projection-derived auction values); auction-room price simulator |
-| `consistency.py` | Player consistency metrics (feeds the confidence endpoints) |
-| `app.py` | Streamlit dashboard (internal tool) |
+| `backend/api/main.py` | FastAPI app — league data, power rankings, matchup confidence, draft room, AI commentary endpoints |
+| `backend/league/` | `data_feed.py` (ESPN pull layer — rosters, transactions, matchups, scoreboards, projection attachment); `fantasy.py` (`MyLeague` — power rankings, universe-wins math) |
+| `backend/draft/` | The Draft Room engine: `optimizer.py` (auction draft optimizer, cvxpy integer program), `engine.py` (per-pick recompute loop), `strategies.py` (plan-diversity strategy map), `targets_mc.py` (Monte Carlo category targets), `values.py` (Forge Value — projection-derived auction values), `auction_sim.py` (auction-room price simulator) |
+| `backend/analytics/consistency.py` | Player consistency metrics (feeds the confidence endpoints) |
+| `backend/config.py` | Central config — ESPN credentials, league-owner draft-pool knobs, tunable constants |
+| `backend/projections/` | Reserved for the projection-source framework (`docs/specs/PROJECTION_SOURCE_FRAMEWORK.md`, pending review); empty for now |
+| `api.py` (root) | Deprecated entrypoint shim (`from backend.api.main import app`) — kept for one release, then deleted |
+| `app.py` | Streamlit dashboard (internal tool), imports `backend.*` |
 | `frontend/` | React 19 + Vite + Tailwind web app (the product UI) |
 | `docs/` | Operating manual, project dossier, ESPN access handoff, feature specs |
 | `player_rankings/`, `data/` | Local data drop zones — gitignored |
-
-> Note: the flat backend layout is inherited from PatriotGames. Restructuring
-> into a `backend/` package is planned as its own change.
 
 ## Setup
 
@@ -47,7 +47,7 @@ Team roles and the feature definition-of-done live in
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in keys/cookies (see docs/ESPN_ACCESS_HANDOFF.md)
-uvicorn api:app --reload
+uvicorn backend.api.main:app --reload
 
 # Frontend
 cd frontend && npm install && npm run dev

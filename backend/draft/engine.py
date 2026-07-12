@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, FrozenSet, Optional, Sequence, Tuple
 
-from draft_strategies import Plan, PlanConfig, SolveFn
+from backend.draft.strategies import Plan, PlanConfig, SolveFn
 
 
 @dataclass(frozen=True)

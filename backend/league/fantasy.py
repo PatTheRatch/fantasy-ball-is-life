@@ -1,7 +1,7 @@
 import pandas as pd
 from espn_api.basketball import League, Matchup
 
-from config import ESPN_S2, SWID
+from backend.config import ESPN_S2, SWID
 
 
 class MyLeague(League):

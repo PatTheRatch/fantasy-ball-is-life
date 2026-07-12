@@ -12,10 +12,10 @@ import os
 
 import pytest
 
-ol = pytest.importorskip("optimize_lineup")
+ol = pytest.importorskip("backend.draft.optimizer")
 
 try:
-    from config import BBM_PROJECTIONS_PATH
+    from backend.config import BBM_PROJECTIONS_PATH
 except Exception:  # pragma: no cover
     BBM_PROJECTIONS_PATH = "player_rankings/BBM_Projections.xls"
 

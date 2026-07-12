@@ -17,7 +17,7 @@ call the unbound method directly, since `get_target_stats` only touches
 import pandas as pd
 import pytest
 
-ol = pytest.importorskip("optimize_lineup")
+ol = pytest.importorskip("backend.draft.optimizer")
 
 CATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
 
