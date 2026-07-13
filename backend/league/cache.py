@@ -43,20 +43,18 @@ class ESPNRequestCache:
         self.misses: int = 0
 
     def get(self, league_id: int, season: int) -> Optional[ESPNHandles]:
-        """Return the cached ``ESPNHandles``, or ``None`` on a miss."""
-        return self._store.get((league_id, season))
+        """Return the cached ``ESPNHandles``, or ``None`` on a miss.
+        Increments ``hits`` or ``misses`` automatically (diagnostic counters)."""
+        entry = self._store.get((league_id, season))
+        if entry is not None:
+            self.hits += 1
+        else:
+            self.misses += 1
+        return entry
 
     def put(self, league_id: int, season: int, handles: ESPNHandles) -> None:
         """Cache an ``ESPNHandles`` for this request."""
         self._store[(league_id, season)] = handles
-
-    def load(self, league_id: int, season: int) -> None:
-        """Mark a cache access as a hit (caller verified the entry exists)."""
-        self.hits += 1
-
-    def load_miss(self, league_id: int, season: int) -> None:
-        """Mark a cache access as a miss."""
-        self.misses += 1
 
 
 def get_request_cache() -> Optional[ESPNRequestCache]:
@@ -71,11 +69,13 @@ def set_request_cache(cache: Optional[ESPNRequestCache]) -> None:
 
 class ESPNRequestCacheMiddleware:
     """FastAPI middleware that provisions a fresh ``ESPNRequestCache`` for every
-    incoming request and tears it down on response. Attach via
-    ``app.add_middleware(ESPNRequestCacheMiddleware)``.
-    """
+    incoming HTTP or WebSocket request and tears it down on response. Attach
+    via ``app.add_middleware(ESPNRequestCacheMiddleware)``.
 
-    _implements_flask_middleware = True  # tells FastAPI/Starlette this is ASGI middleware
+    Uses raw ASGI middleware (not ``BaseHTTPMiddleware``) so the ``ContextVar``
+    is set in the same task context as the route handler — ``BaseHTTPMiddleware``
+    spawns a child task that breaks propagation.
+    """
 
     def __init__(self, app):
         self.app = app

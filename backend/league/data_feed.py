@@ -225,15 +225,13 @@ def connect() -> ESPNHandles:
     new ``League`` (4 ESPN requests); subsequent ``connect()`` calls inside the
     same request reuse the cached handles.
     """
-    from backend.league.cache import ESPNRequestCache, get_request_cache
+    from backend.league.cache import get_request_cache
 
     cache = get_request_cache()
     if cache is not None:
         existing = cache.get(LEAGUE_ID, SEASON)
         if existing is not None:
-            cache.load(LEAGUE_ID, SEASON)
             return existing
-        cache.load_miss(LEAGUE_ID, SEASON)
 
     league = League(
         league_id=LEAGUE_ID,

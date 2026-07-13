@@ -107,6 +107,12 @@ own small PRs as they're prioritized.
 - [ ] **No backend caching — live-confirmed and quantified.** Every request hits ESPN live
   (`backend/api/deps.py` `_handles()`/`_my_league()`). A short-TTL cache keyed by
   `(league_id, season)` would remove most of the rate-limit exposure above.
+- [x] **Recap (connect) cache partially added (PR E2).** `connect()`
+  is now backed by a `ContextVar`-scoped request cache (one `League`
+  construction per HTTP request instead of four). Recap's 4 `connect()`
+  calls → 1, saving 12 ESPN requests (~22 → ~10). The uncached
+  `_my_league()` calls (power rankings, season stats) will be addressed
+  in PR F.
 - [x] **Inconsistent error handling — partially fixed (PR E1).**
   `/league/meta`, `/league/teams`, `/league/standings` (`backend/api/routers/league.py`)
   had no try/except, unlike most other endpoints. Now wrapped and routed

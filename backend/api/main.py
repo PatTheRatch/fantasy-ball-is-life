@@ -40,8 +40,10 @@ from backend.league.cache import ESPNRequestCacheMiddleware
 
 app = FastAPI(title="PatriotGames Fantasy API", version="0.1.0")
 
-# ESPN request cache: reuses one League construction per request, saves ~16 of
-# the 22 ESPN calls in recap assembly and ~40 of 44 in a Draft Room portfolio.
+# ESPN request cache: reuses one League construction per request. The recap's
+# assemble_weekly_snapshot() calls connect() 4 separate times; this deduplicates
+# those to one construction (12 fewer ESPN requests, ~22 → ~10). The remaining
+# MyLeague constructions (power rankings, season stats) are PR F's concern.
 app.add_middleware(ESPNRequestCacheMiddleware)
 
 # Browser dev: any localhost / 127.0.0.1 port (Vite may use 5174+, etc.) + common LAN preview IPs.

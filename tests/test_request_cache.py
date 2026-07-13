@@ -47,11 +47,18 @@ def test_cache_stores_and_retrieves_by_key():
     assert c.get(1, 2025) is None
 
 
-def test_cache_counts_hits_and_misses():
+def test_get_auto_counts_hits_and_misses():
+    from backend.league.data_feed import ESPNHandles
+
     c = ESPNRequestCache()
-    c.load(1, 2026)
-    c.load(1, 2026)
-    c.load_miss(2, 2026)
+    h = ESPNHandles(league=Mock())
+    c.put(1, 2026, h)
+    # Hit
+    assert c.get(1, 2026) is h
+    # Miss
+    assert c.get(2, 2026) is None
+    # Another hit
+    assert c.get(1, 2026) is h
     assert c.hits == 2
     assert c.misses == 1
 
@@ -135,24 +142,20 @@ def test_connect_reuses_cached_handles(monkeypatch):
     client = TestClient(app)
     call_count = 0
 
-    original_league = df.League
+    def _counting_league(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        from espn_api.basketball import League as _League
+        league = Mock(spec=_League)
+        league.league_id = df.LEAGUE_ID
+        return league
 
-    class SpyLeague(original_league):
-        def __init__(self, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            super().__init__(*args, **kwargs)
-
-    monkeypatch.setattr(df, "League", SpyLeague)
-
-    handles_seen = {}
+    monkeypatch.setattr(df, "League", _counting_league)
 
     @app.get("/__test_connect_reuse__")
     def _connect_reuse():
         h1 = connect()
         h2 = connect()
-        handles_seen["same"] = h1 is h2
-        handles_seen["count"] = call_count
         return {"same": h1 is h2, "count": call_count}
 
     resp = client.get("/__test_connect_reuse__")
@@ -182,26 +185,54 @@ def test_connect_refresh_after_middleware_lifecycle(monkeypatch):
     from backend.league import data_feed as df
 
     client = TestClient(app)
-    counts = []
+    call_count = 0
 
-    original_league = df.League
+    def _counting_league(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        from espn_api.basketball import League as _League
+        league = Mock(spec=_League)
+        league.league_id = df.LEAGUE_ID
+        return league
 
-    class CountingLeague(original_league):
-        _count = 0
-
-        def __init__(self, *args, **kwargs):
-            CountingLeague._count += 1
-            super().__init__(*args, **kwargs)
-
-    monkeypatch.setattr(df, "League", CountingLeague)
+    monkeypatch.setattr(df, "League", _counting_league)
 
     @app.get("/__test_refresh__")
     def _refresh():
         connect()
-        return {"count": CountingLeague._count}
+        return {"count": call_count}
 
     # Two separate requests — each should trigger one construction.
     r1 = client.get("/__test_refresh__")
     r2 = client.get("/__test_refresh__")
     assert r1.json()["count"] == 1
     assert r2.json()["count"] == 2  # fresh cache, new construction
+
+
+def test_league_constructor_failure_does_not_cache_and_cleans_up(monkeypatch):
+    """If the League constructor raises inside a request, nothing is cached
+    and the ContextVar is still reset after the request returns — no leak."""
+    from backend.league import data_feed as df
+
+    client = TestClient(app)
+    call_count = 0
+
+    def _failing_league(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("ESPN unreachable")
+
+    monkeypatch.setattr(df, "League", _failing_league)
+
+    client = TestClient(app, raise_server_exceptions=False)
+
+    @app.get("/__test_constructor_failure__")
+    def _fail():
+        connect()
+        return {}
+
+    resp = client.get("/__test_constructor_failure__")
+    assert resp.status_code == 500
+    assert call_count == 1
+    # After the request returns, no cache should leak.
+    assert get_request_cache() is None
