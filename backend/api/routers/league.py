@@ -461,6 +461,21 @@ def transactions(
     return _df_records(feed.transactions_df(h, start=start, end=end))
 
 
+@router.get("/transactions/week")
+def transactions_week(
+    scoring_period: int = Query(..., description="Matchup week / scoring period (one ESPN scoringPeriodId == one week)"),
+) -> List[dict[str, Any]]:
+    """Executed player-movement transactions (adds/drops + completed trades) for
+    a single matchup week, via the ``mTransactions2`` adapter. This is the
+    recap-facing path; unlike the legacy date-range ``/transactions`` it is not
+    projection-dependent and does not rely on the broken communication feed."""
+    try:
+        h = _handles()
+        return feed.week_transactions(h, scoring_period=scoring_period)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
+
+
 @router.get("/matchups")
 def matchups(scoring_period: Optional[int] = None) -> List[dict[str, Any]]:
     h = _handles()

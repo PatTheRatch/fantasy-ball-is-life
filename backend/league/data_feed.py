@@ -474,8 +474,14 @@ def safe_recent_activity(h, limit=200):
 # lineup-only, and pending / failed / canceled / declined / vetoed records are
 # intentionally excluded.
 RECAP_TRANSACTION_TYPES = frozenset({"FREEAGENT", "WAIVER", "TRADE_ACCEPT", "TRADE_UPHOLD"})
+# Completed trades: the ACCEPT/UPHOLD records carry status + relatedTransactionId
+# but an EMPTY items array. The player-level items (type "TRADE" with
+# fromTeamId / toTeamId) live on the linked TRADE_PROPOSAL, which we fetch
+# alongside to reconstruct who moved where.
+_TRADE_COMPLETION_TYPES = frozenset({"TRADE_ACCEPT", "TRADE_UPHOLD"})
+_TRADE_PROPOSAL_TYPE = "TRADE_PROPOSAL"
 _EXECUTED_STATUS = "EXECUTED"
-_MOVEMENT_ITEM_TYPES = frozenset({"ADD", "DROP"})
+_ADD_DROP_ITEM_TYPES = frozenset({"ADD", "DROP"})
 
 
 def _epoch_ms_to_iso_date(value: Any) -> Optional[str]:
@@ -501,83 +507,134 @@ def week_transactions(
 ) -> List[Dict[str, Any]]:
     """Normalized, executed player-movement transactions for one scoring period.
 
+    In this league one ``scoringPeriodId`` equals one matchup week, so a single
+    ``mTransactions2`` request returns the whole week's transactions.
+
     Reads ESPN's ``mTransactions2`` view — the stable transaction feed — through
     the league's own authenticated request helper (``espn_request.league_get``),
     then parses the raw JSON defensively. This replaces ``safe_recent_activity()``,
     which pulled the wrong (communication) view and read a ``League.espn_s2``
     attribute that does not exist on the basketball client, so it always raised.
 
-    Returns one row per add/drop item, filtered to executed acquisitions,
-    standalone drops, and completed trades. Rows carry ``team_name`` and a stable
-    ``activity_id`` (the fields the recap awards layer consumes) plus enough raw
-    context (``type``, ``player``, ``from_team_id``/``to_team_id``,
-    ``related_transaction_id``) to build trade-chain attribution later.
+    Returns one row per player movement:
 
-    Parsing is defensive throughout: a transport/auth error, a missing payload,
-    or an unknown player id degrades to fewer rows rather than crashing the
-    recap, whose data-quality report then flags the gap.
+    - executed FREEAGENT / WAIVER acquisitions and standalone drops
+      (``action_type`` ``ADD`` / ``DROP``, owning team from ``teamId``);
+    - completed trades. ESPN's ``TRADE_ACCEPT`` / ``TRADE_UPHOLD`` records carry
+      the status but an empty ``items`` array; the player-level items live on the
+      linked ``TRADE_PROPOSAL`` (``relatedTransactionId``). We follow that link,
+      read the proposal's ``TRADE`` items, and attribute each moved player to the
+      receiving team (``toTeamId``), with ``from_team_id`` as the counterparty.
+      A proposal that is both accepted and upheld is counted once.
+
+    Rows carry ``team_name`` and a stable ``activity_id`` (the fields the recap
+    awards layer consumes) plus raw context (``type``, ``player``,
+    ``from_team_id`` / ``to_team_id``, ``related_transaction_id``).
+
+    Transport / auth errors from ESPN propagate so callers can distinguish an
+    outage from a genuinely quiet week (the recap's capture layer turns them into
+    a data-quality warning). Parse-level issues — a missing payload, a trade
+    proposal absent from this week's window, an unknown player id — degrade to
+    fewer rows instead.
     """
     requested = {str(t).upper() for t in (types if types is not None else RECAP_TRANSACTION_TYPES)}
+
+    # To reconstruct completed trades we also need the proposals they link to.
+    fetch_types = set(requested)
+    if fetch_types & _TRADE_COMPLETION_TYPES:
+        fetch_types.add(_TRADE_PROPOSAL_TYPE)
+
     params = {"view": "mTransactions2", "scoringPeriodId": int(scoring_period)}
-    filters = {"transactions": {"filterType": {"value": sorted(requested)}}}
+    filters = {"transactions": {"filterType": {"value": sorted(fetch_types)}}}
     headers = {"x-fantasy-filter": json.dumps(filters)}
 
-    try:
-        data = h.league.espn_request.league_get(params=params, headers=headers)
-    except Exception:
-        return []
-
-    raw = (data or {}).get("transactions") or []
+    data = h.league.espn_request.league_get(params=params, headers=headers)
+    raw = [t for t in ((data or {}).get("transactions") or []) if isinstance(t, dict)]
     player_map = getattr(h.league, "player_map", {}) or {}
     team_names = {
         getattr(t, "team_id", None): getattr(t, "team_name", None)
         for t in getattr(h.league, "teams", []) or []
     }
+    by_id = {t.get("id"): t for t in raw if t.get("id") is not None}
+
+    def _player(player_id: Any) -> str:
+        return player_map.get(player_id, "Unknown")
 
     rows: List[Dict[str, Any]] = []
+    seen_trade_proposals: set = set()
+
     for txn in raw:
-        if not isinstance(txn, dict):
-            continue
         status = str(txn.get("status") or "").upper()
         txn_type = str(txn.get("type") or "").upper()
         if status != _EXECUTED_STATUS or txn_type not in requested:
             continue
 
-        base_team_id = txn.get("teamId")
-        date_iso = _epoch_ms_to_iso_date(txn.get("processDate") or txn.get("proposedDate"))
         scoring = txn.get("scoringPeriodId", scoring_period)
-        related = txn.get("relatedTransactionId")
+        date_iso = _epoch_ms_to_iso_date(txn.get("processDate") or txn.get("proposedDate"))
 
+        if txn_type in _TRADE_COMPLETION_TYPES:
+            # Follow the chain to the proposal that holds the player items.
+            proposal_id = txn.get("relatedTransactionId")
+            if proposal_id in seen_trade_proposals:
+                continue  # accepted AND upheld -> count the trade once
+            proposal = by_id.get(proposal_id)
+            if not proposal:
+                # Proposal is outside this week's window; can't attribute players.
+                continue
+            seen_trade_proposals.add(proposal_id)
+            for item in proposal.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                player_id = item.get("playerId")
+                if not player_id:  # draft-pick-only trade items carry no player
+                    continue
+                to_team_id = item.get("toTeamId")
+                from_team_id = item.get("fromTeamId")
+                rows.append(
+                    {
+                        "activity_id": f"txn-{scoring}-{txn.get('id')}-TRADE-{player_id}",
+                        "date": date_iso,
+                        "scoring_period": scoring,
+                        "team_id": to_team_id,
+                        "team_name": team_names.get(to_team_id),
+                        "type": txn_type,
+                        "action_type": "TRADE",
+                        "player": _player(player_id),
+                        "player_id": player_id,
+                        "bid_amount": None,
+                        "status": status,
+                        "from_team_id": from_team_id,
+                        "to_team_id": to_team_id,
+                        "related_transaction_id": proposal_id,
+                    }
+                )
+            continue
+
+        # FREEAGENT / WAIVER: add/drop items carry the owning team at txn level.
+        base_team_id = txn.get("teamId")
         for item in txn.get("items") or []:
             if not isinstance(item, dict):
                 continue
             action = str(item.get("type") or "").upper()  # ADD / DROP
-            if action not in _MOVEMENT_ITEM_TYPES:
+            if action not in _ADD_DROP_ITEM_TYPES:
                 continue
             player_id = item.get("playerId")
-            from_team_id = item.get("fromTeamId")
-            to_team_id = item.get("toTeamId")
-            # Adds/drops carry the owning team at the transaction level; trades
-            # record source/destination on the item.
-            owner_id = base_team_id
-            if owner_id in (None, 0):
-                owner_id = to_team_id if action == "ADD" else from_team_id
             rows.append(
                 {
                     "activity_id": f"txn-{scoring}-{txn.get('id')}-{action}-{player_id}",
                     "date": date_iso,
                     "scoring_period": scoring,
-                    "team_id": owner_id,
-                    "team_name": team_names.get(owner_id),
+                    "team_id": base_team_id,
+                    "team_name": team_names.get(base_team_id),
                     "type": txn_type,
                     "action_type": action,
-                    "player": player_map.get(player_id, "Unknown"),
+                    "player": _player(player_id),
                     "player_id": player_id,
                     "bid_amount": txn.get("bidAmount"),
                     "status": status,
-                    "from_team_id": from_team_id,
-                    "to_team_id": to_team_id,
-                    "related_transaction_id": related,
+                    "from_team_id": item.get("fromTeamId"),
+                    "to_team_id": item.get("toTeamId"),
+                    "related_transaction_id": txn.get("relatedTransactionId"),
                 }
             )
     return rows
