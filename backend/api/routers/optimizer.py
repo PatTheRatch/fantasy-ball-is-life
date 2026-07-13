@@ -6,7 +6,7 @@ from typing import Any, List, Optional
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from backend.api.deps import _df_records, _read_excel_bytes
 from backend.config import BBM_PROJECTIONS_PATH
@@ -117,7 +117,7 @@ async def optimizer_optimize(request: Request) -> List[dict[str, Any]]:
 
 
 class MultiplePlansBody(BaseModel):
-    n_plans: int = 20
+    n_plans: int = Field(default=10, ge=1, le=10)
     base_excluded: Optional[List[str]] = None
     base_percentile: float = 0.80
     percentiles_cycle: Optional[List[float]] = None
@@ -133,17 +133,7 @@ class MultiplePlansBody(BaseModel):
     objective_focus: str = "3PM"
     target_method: str = "monte_carlo"  # 'monte_carlo' (default) | 'historical'
 
-    @field_validator("n_plans")
-    @classmethod
-    def _cap_n_plans(cls, v: int) -> int:
-        max_plans = 10
-        if v > max_plans:
-            raise ValueError(
-                f"n_plans must be ≤ {max_plans} (got {v}). "
-                "The Draft Room caps saved plans at 10; "
-                "use the Draft Room endpoint instead."
-            )
-        return v
+
 
 
 @router.post("/optimizer/multiple-plans")

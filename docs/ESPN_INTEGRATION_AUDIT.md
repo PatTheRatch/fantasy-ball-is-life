@@ -59,29 +59,29 @@ own small PRs as they're prioritized.
   defers to it (with a `tiebreak_resolved` flag) only when its own tally is
   genuinely tied -- a decisive tally is never overridden. Tests in
   `tests/test_recaps.py` and `tests/test_scoreboard_turnovers.py`.
-- [ ] **Recap turnover winners are reversed — live-confirmed.**
-  `get_current_scoreboard()` negates ESPN's positive turnover totals so
-  frontend code can compare all categories as higher-is-better.
-  `canonical_matchups()` then treats the already-negated values as
-  lower-is-better. A live 57-vs-89 category was incorrectly awarded to the
-  89-turnover side. Keep canonical turnovers positive and apply category
-  direction once.
+- [x] **Recap turnover winners are reversed — fixed (PR #25).**
+  `get_current_scoreboard()` stores TO as a natural positive count (fewer
+  is better), and `canonical_matchups()` applies lower-is-better once.
+  Confirmed by `test_scoreboard_turnovers.py`.
 - [x] **Playoff all-play rankings synthesize zero-stat teams —
   live-confirmed. Fixed (PR C).** `MyLeague.get_wins()` reindexed every week to
   all league teams and filled missing rows with zero. Week 21 had 11 unique
   active teams but returned rankings for 14; each synthetic team received 11
-  - [x] **Recap turnover winners are reversed — fixed (PR #25).**
-    `get_current_scoreboard()` stores TO as a natural positive count (fewer
-    is better), and `canonical_matchups()` applies lower-is-better once.
-    Confirmed by `test_scoreboard_turnovers.py`.
-  - [x] **Transactions are unavailable — fixed (PR #19).**
-    `recent_activity()` returned HTTP 404, then `safe_recent_activity()` failed
-    on missing `League.espn_s2`. Replaced with the working weekly
-    `mTransactions2` adapter.
-  - [x] **`get_projected_matchup_table` crashes — fixed (PR G).**
-    Referenced `current_matchup_period`, which wasn't a parameter — always
-    raised `NameError`. Now uses the `week` parameter that's actually in scope.
-    CLI-only, not FastAPI.
+  turnover wins. Fixed: weekly all-play now runs only among teams with a real
+  matchup row that week (bye/eliminated teams are excluded, never zero-filled),
+  `get_universe_wins` drops the empty per-week frames, and TO direction is
+  sourced from the shared `data_feed.LOWER_IS_BETTER_STATS` constant (the
+  downstream negated-TO convention used by power rankings and the draft
+  optimizer is preserved). Tests in `tests/test_allplay_playoff_participants.py`
+  (14 active / 12+2 bye / 10+4 eliminated, ghost exclusion, TO direction).
+- [x] **Transactions are unavailable — fixed (PR #19).**
+  `recent_activity()` returned HTTP 404, then `safe_recent_activity()` failed
+  on missing `League.espn_s2`. Replaced with the working weekly
+  `mTransactions2` adapter.
+- [x] **`get_projected_matchup_table` crashes — fixed (PR G).**
+  Referenced `current_matchup_period`, which wasn't a parameter — always
+  raised `NameError`. Now uses the `week` parameter that's actually in scope.
+  CLI-only, not FastAPI.
 
 ## Reliability — real risk, not urgent
 
@@ -89,7 +89,7 @@ own small PRs as they're prioritized.
   `generate_multiple_plans()` now reuses one `MyLeague` across a portfolio's
   plans via `get_cached_my_league()`, so 20 plans = 1 construction instead of
   20. The legacy `/optimizer/multiple-plans` endpoint now caps `n_plans` at 10
-  via a Pydantic validator (PR G).
+  via a Pydantic Field constraint (PR G).
 - [x] **No backend caching — fixed (E2 + E3 + F).** `connect()` and
   `_my_league()` are now backed by a `ContextVar`-scoped request cache; recap
   snapshot reuse has a 60s TTL. Full recap assembly: ~22 ESPN requests → ~6.
