@@ -127,6 +127,27 @@ def latest_recap_draft(
     )
 
 
+@router.get("/{season}/{week}/editions/{edition_id}")
+def recap_edition(
+    slug: str,
+    season: int,
+    week: int,
+    edition_id: str,
+    user: dict[str, Any] = Depends(require_supabase_user),
+    store: RecapStore = Depends(get_recap_store),
+) -> dict[str, Any]:
+    return _run(
+        lambda: service.get_edition_by_id(
+            store=store,
+            slug=slug,
+            user_id=_user_id(user),
+            season=season,
+            week=week,
+            edition_id=edition_id,
+        )
+    )
+
+
 @router.get("/{season}/{week}/history")
 def recap_history(
     slug: str,
