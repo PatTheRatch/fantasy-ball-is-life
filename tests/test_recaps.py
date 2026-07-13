@@ -362,6 +362,139 @@ def test_rollback_router_uses_rollback_service(monkeypatch):
     rollback.assert_called_once()
 
 
+def test_get_edition_by_id_normalizes_stored_snapshot(monkeypatch):
+    store = Mock()
+    store.get_edition_with_content_by_id.return_value = {
+        "id": "edition-1",
+        "league_id": "league-1",
+        "season": 2026,
+        "week": 21,
+        "status": "superseded",
+        "structured_content_json": {"headline": "Playoffs"},
+        "league_week_snapshots": {
+            "schema_version": "recap-facts-v1",
+            "matchups_json": [{"matchup_id": "week-21:alpha-vs-beta"}],
+            "standings_json": [{"team_name": "Alpha"}],
+            "power_rankings_json": [],
+            "transactions_json": [],
+            "season_stats_json": [],
+            "award_candidates_json": [],
+            "data_quality_json": {"ready": True},
+        },
+    }
+    monkeypatch.setattr(
+        service,
+        "require_admin",
+        lambda *_args, **_kwargs: {"id": "league-1", "slug": "test", "name": "Test"},
+    )
+
+    result = service.get_edition_by_id(
+        store=store,
+        slug="test",
+        user_id="user-1",
+        season=2026,
+        week=21,
+        edition_id="edition-1",
+    )
+
+    store.get_edition_with_content_by_id.assert_called_once_with("edition-1")
+    assert "league_week_snapshots" not in result
+    assert result["snapshot"]["matchups"] == [{"matchup_id": "week-21:alpha-vs-beta"}]
+    assert result["snapshot"]["standings"] == [{"team_name": "Alpha"}]
+    assert result["snapshot"]["league"]["id"] == "league-1"
+    assert result["snapshot"]["season"] == 2026
+    assert result["snapshot"]["week"] == 21
+
+
+def test_get_edition_by_id_404s_on_wrong_week(monkeypatch):
+    store = Mock()
+    store.get_edition_with_content_by_id.return_value = {
+        "id": "edition-1",
+        "league_id": "league-1",
+        "season": 2026,
+        "week": 20,
+        "status": "draft",
+        "structured_content_json": {},
+    }
+    monkeypatch.setattr(
+        service,
+        "require_admin",
+        lambda *_args, **_kwargs: {"id": "league-1", "slug": "test", "name": "Test"},
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        service.get_edition_by_id(
+            store=store,
+            slug="test",
+            user_id="user-1",
+            season=2026,
+            week=21,
+            edition_id="edition-1",
+        )
+
+    assert raised.value.status_code == 404
+
+
+def test_get_edition_by_id_404s_on_missing_edition(monkeypatch):
+    store = Mock()
+    store.get_edition_with_content_by_id.return_value = None
+    monkeypatch.setattr(
+        service,
+        "require_admin",
+        lambda *_args, **_kwargs: {"id": "league-1", "slug": "test", "name": "Test"},
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        service.get_edition_by_id(
+            store=store,
+            slug="test",
+            user_id="user-1",
+            season=2026,
+            week=21,
+            edition_id="missing",
+        )
+
+    assert raised.value.status_code == 404
+
+
+def test_edition_router_uses_get_edition_by_id_service(monkeypatch):
+    from backend.api.routers import recaps
+
+    fetch = Mock(return_value={"id": "edition-1", "status": "superseded"})
+    monkeypatch.setattr(recaps.service, "get_edition_by_id", fetch)
+
+    result = recaps.recap_edition(
+        slug="test",
+        season=2026,
+        week=21,
+        edition_id="edition-1",
+        user={"id": "user-1"},
+        store=Mock(),
+    )
+
+    assert result["status"] == "superseded"
+    fetch.assert_called_once()
+
+
+def test_store_get_edition_with_content_by_id_selects_snapshot_embed(monkeypatch):
+    store = RecapStore(url="https://example.supabase.co", service_role_key="key")
+    request = Mock(return_value=[{"id": "edition-1"}])
+    monkeypatch.setattr(store, "_request", request)
+
+    result = store.get_edition_with_content_by_id("edition-1")
+
+    assert result == {"id": "edition-1"}
+    request.assert_called_once_with(
+        "GET",
+        "recap_editions",
+        params={
+            "id": "eq.edition-1",
+            "select": store._EDITION_WITH_SNAPSHOT_SELECT,
+            "limit": "1",
+        },
+    )
+
+
 def test_invalid_structured_recap_uses_provider_neutral_error(monkeypatch):
     monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
     monkeypatch.setattr(

@@ -761,6 +761,20 @@ export async function generateRecapDraft(
   return data
 }
 
+export async function getRecapEdition(
+  slug: string,
+  season: number,
+  week: number,
+  editionId: string,
+  token: string,
+): Promise<RecapEdition> {
+  const { data } = await client.get(
+    `/leagues/${slug}/recaps/${season}/${week}/editions/${editionId}`,
+    { headers: bearer(token) },
+  )
+  return data
+}
+
 export async function getRecapHistory(
   slug: string,
   season: number,

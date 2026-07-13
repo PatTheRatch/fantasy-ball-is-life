@@ -153,6 +153,13 @@ class RecapStore:
         )
         return rows[0]
 
+    _EDITION_WITH_SNAPSHOT_SELECT = (
+        "*,league_week_snapshots("
+        "schema_version,matchups_json,standings_json,power_rankings_json,"
+        "transactions_json,season_stats_json,award_candidates_json,"
+        "data_quality_json)"
+    )
+
     def get_edition(
         self,
         *,
@@ -165,12 +172,7 @@ class RecapStore:
             "league_id": f"eq.{league_id}",
             "season": f"eq.{season}",
             "week": f"eq.{week}",
-            "select": (
-                "*,league_week_snapshots("
-                "schema_version,matchups_json,standings_json,power_rankings_json,"
-                "transactions_json,season_stats_json,award_candidates_json,"
-                "data_quality_json)"
-            ),
+            "select": self._EDITION_WITH_SNAPSHOT_SELECT,
             "order": "version.desc",
             "limit": "1",
         }
@@ -186,6 +188,21 @@ class RecapStore:
             params={
                 "id": f"eq.{edition_id}",
                 "select": "id,league_id,season,week,status",
+                "limit": "1",
+            },
+        )
+        return rows[0] if rows else None
+
+    def get_edition_with_content_by_id(self, edition_id: str) -> dict[str, Any] | None:
+        """Full content (structured narrative + snapshot) for one specific
+        edition, regardless of its status -- lets an admin preview any past
+        draft/superseded/published version, not just the latest."""
+        rows = self._request(
+            "GET",
+            "recap_editions",
+            params={
+                "id": f"eq.{edition_id}",
+                "select": self._EDITION_WITH_SNAPSHOT_SELECT,
                 "limit": "1",
             },
         )
