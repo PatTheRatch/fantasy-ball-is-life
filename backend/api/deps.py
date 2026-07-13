@@ -10,11 +10,13 @@ from typing import Any, List, Optional
 
 import numpy as np
 import pandas as pd
+from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 
 from backend.config import LEAGUE_ID, SEASON
 from backend.league import data_feed as feed
 from backend.league.fantasy import MyLeague
+from backend.league.gateway import espn_error_status_code
 
 
 def _my_league(year: Optional[int] = None) -> MyLeague:
@@ -47,6 +49,13 @@ def _df_records(df: Optional[pd.DataFrame]) -> List[dict[str, Any]]:
 
 def _handles():
     return feed.connect()
+
+
+def _espn_http_exception(e: Exception) -> HTTPException:
+    """Map an ESPN-origin failure to its HTTP status: 504 for a gateway
+    timeout, 502 for any other upstream/transport failure, 500 otherwise
+    (unchanged fallback for non-ESPN errors)."""
+    return HTTPException(status_code=espn_error_status_code(e), detail=str(e))
 
 
 def _read_excel_bytes(data: bytes) -> pd.DataFrame:

@@ -94,14 +94,24 @@ own small PRs as they're prioritized.
 - [ ] **No backend caching — live-confirmed and quantified.** Every request hits ESPN live
   (`backend/api/deps.py` `_handles()`/`_my_league()`). A short-TTL cache keyed by
   `(league_id, season)` would remove most of the rate-limit exposure above.
-- [ ] **Inconsistent error handling.** `/league/meta`, `/league/teams`,
-  `/league/standings` (`backend/api/routers/league.py`) have no try/except, unlike most other
-  endpoints that convert ESPN failures to a clean `HTTPException(500, ...)`.
-  Unhandled exceptions currently surface as raw framework 500s.
-- [ ] **No timeout on any ESPN read — live/code-confirmed.**
+- [x] **Inconsistent error handling — partially fixed (PR E1).**
+  `/league/meta`, `/league/teams`, `/league/standings` (`backend/api/routers/league.py`)
+  had no try/except, unlike most other endpoints. Now wrapped and routed
+  through the typed-error mapping below (504/502/500). The other ~18
+  already-try/except'd endpoints in `league.py`/`draft.py`/`optimizer.py`
+  still collapse every ESPN failure to a generic 500; broadening the typed
+  mapping to them is left for a follow-up PR to keep this one reviewable.
+- [x] **No timeout on any ESPN read — fixed (PR E1).**
   The installed `espn-api` library calls `requests.get()` without a timeout in
   its normal `league_get()` and `get()` methods. `safe_recent_activity()` does
   the same. Put all reads behind a gateway with explicit connect/read timeouts.
+  `backend/league/gateway.py` now scopes a 5s connect / 15s read timeout onto
+  espn-api's internal `requests.get` (rebinding the name inside its own module
+  namespace, not the shared `requests` module, so unrelated callers like the
+  Supabase auth check are unaffected) and translates transport failures into
+  typed `ESPNTimeoutError` / `ESPNUnavailableError`. `safe_recent_activity()`'s
+  direct call now goes through the same `espn_get()` wrapper. Tests in
+  `tests/test_espn_gateway.py`.
 - [ ] **Silent failure swallowing.** `matchups_df()`
   (`data_feed.py:1384-1388`) catches all exceptions from `league.box_scores()`
   via a bare `except: matchups = []`, which masks real ESPN failures as "no
