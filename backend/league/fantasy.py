@@ -2,6 +2,7 @@ import pandas as pd
 from espn_api.basketball import League, Matchup
 
 from backend.config import ESPN_S2, SWID
+from backend.league.data_feed import LOWER_IS_BETTER_STATS
 
 
 class MyLeague(League):
@@ -171,6 +172,12 @@ class MyLeague(League):
                 else:
                     dfs.append(self.get_wins(team, week, all_data=_matchup_table()))
 
+        # Bye / eliminated (team, week) pairs return an empty frame (they don't
+        # participate in weekly all-play); drop them before concat so they don't
+        # contribute zero-filled rows to a team's season totals.
+        dfs = [d for d in dfs if not d.empty]
+        if not dfs:
+            return pd.DataFrame()
         df = pd.concat(dfs, ignore_index=True)
         if df.columns.duplicated().any():
             df = df.loc[:, ~df.columns.duplicated()].copy()
@@ -215,18 +222,34 @@ class MyLeague(League):
         week_matchups = week_rows.set_index('Team')[self.stat_categories]
         if week_matchups.index.duplicated().any():
             week_matchups = week_matchups[~week_matchups.index.duplicated(keep='first')]
-        # Some playoff / partial weeks omit a team row; align to full league so lookups never KeyError.
-        week_matchups = week_matchups.reindex(self.team_names).fillna(0.0)
+
+        # Weekly all-play is contested ONLY among teams with a real matchup this
+        # week. Bye / eliminated teams are never zero-filled into the league:
+        # doing so handed them phantom category wins (a 0-turnover ghost "beats"
+        # every real team on TO) and dragged down active teams. (PR C, gate 2.)
+        active_teams = list(week_matchups.index)
+
+        # A hypothetical stat injection (draft what-if) may reference a team with
+        # no real matchup this week; treat that team as an active participant.
+        if additional_team_stats is not None:
+            if team_name not in week_matchups.index:
+                week_matchups.loc[team_name] = 0.0
+            if team_name not in active_teams:
+                active_teams.append(team_name)
+            for stat, value in additional_team_stats.items():
+                week_matchups.loc[team_name, stat] = value
+
+        # This team sat out (bye / eliminated): it earns no all-play record for
+        # the week rather than a zero-filled one. get_universe_wins drops the
+        # empty frame, so the team simply doesn't participate this week.
+        opponents = [t for t in active_teams if t != team_name]
+        if team_name not in active_teams or not opponents:
+            return pd.DataFrame()
 
         sched_slice = self.schedule.loc[
             (self.schedule['Week'] == week) & (self.schedule['Team'] == team_name), 'Opponent'
         ]
-        # Playoffs: some teams have no matchup row in a later week (eliminated / schedule length mismatch).
         current_opponent = None if sched_slice.empty else sched_slice.iloc[0]
-
-        if additional_team_stats is not None:
-            for stat, value in additional_team_stats.items():
-                week_matchups.loc[team_name, stat] = value
 
         stat_wins = {f'{stat} Wins': 0 for stat in self.stat_categories}
         stat_totals = {f'{stat}': 0 for stat in self.stat_categories}
@@ -235,12 +258,15 @@ class MyLeague(League):
         actual_wins, actual_losses, actual_ties = 0, 0, 0
         lost_to, tied_with, beaten = [], [], []
 
-        for opponent in [team for team in self.team_names if team != team_name]:
+        for opponent in opponents:
             local_wins, local_losses, local_ties = 0, 0, 0
             for stat in self.stat_categories:
                 team_stat = self._scalar_stat(week_matchups.loc[team_name][stat])
                 opponent_stat = self._scalar_stat(week_matchups.loc[opponent][stat])
-                if stat == 'TO':
+                # Turnovers are lower-is-better: negate so the shared ">" logic
+                # (and the downstream negated-TO convention that power rankings
+                # and the draft optimizer both rely on) award fewer turnovers.
+                if stat in LOWER_IS_BETTER_STATS:
                     team_stat = -team_stat
                     opponent_stat = -opponent_stat
                 if current_opponent is not None and opponent == current_opponent:
@@ -251,7 +277,7 @@ class MyLeague(League):
                 total_losses += int(team_stat < opponent_stat)
                 total_ties += int(team_stat == opponent_stat)
                 stat_wins[f'{stat} Wins'] += int(team_stat > opponent_stat)
-                stat_totals[stat] += team_stat / (len(self.team_names) - 1)
+                stat_totals[stat] += team_stat / len(opponents)
                 local_wins += int(team_stat > opponent_stat)
                 local_losses += int(team_stat < opponent_stat)
                 local_ties += int(team_stat == opponent_stat)
