@@ -19,9 +19,39 @@ const client: AxiosInstance = axios.create({
   timeout: 120_000,
 })
 
+function resolveDirectApiBase(): string {
+  const raw = import.meta.env.VITE_API_BASE_DIRECT
+  if (raw != null && String(raw).trim() !== '') {
+    return String(raw).replace(/\/$/, '')
+  }
+  // Dev default: bypass the Vite proxy and hit FastAPI directly. The proxy is
+  // fine for fast endpoints but drops long-running requests (recap
+  // generation: ESPN assembly + an LLM call, 10-15s) even with an extended
+  // proxy timeout in vite.config.ts, surfacing as a 502. CORS is already
+  // configured on the backend for localhost/127.0.0.1 origins.
+  if (import.meta.env.DEV) return 'http://127.0.0.1:8000'
+  // Prod builds have no Vite proxy either way, so API_BASE is already direct.
+  return API_BASE
+}
+
+/** Base URL that bypasses the Vite dev proxy — see `resolveDirectApiBase`. */
+export const DIRECT_API_BASE = resolveDirectApiBase()
+
+/** Same config as `client`, but talks to FastAPI directly instead of through
+ * the Vite dev proxy. Use for requests the proxy can't reliably hold open
+ * (currently: recap generation, which runs ESPN assembly + an LLM call). */
+const directClient: AxiosInstance = axios.create({
+  baseURL: DIRECT_API_BASE,
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 120_000,
+})
+
 /** Prefer FastAPI `detail` when present (e.g. validation errors). */
 export function formatApiError(err: unknown): string {
   if (axios.isAxiosError(err)) {
+    // The base actually used for this request (client or directClient) is more
+    // accurate than the module-level API_BASE when both are in play.
+    const usedBase = err.config?.baseURL ?? API_BASE
     if (err.response == null) {
       const code = err.code
       if (
@@ -29,7 +59,7 @@ export function formatApiError(err: unknown): string {
         code === 'ECONNREFUSED' ||
         (err.message && /network/i.test(err.message))
       ) {
-        return `Cannot reach the API (${API_BASE}). Start the backend (e.g. uvicorn backend.api.main:app --reload --port 8000) and reload the page.`
+        return `Cannot reach the API (${usedBase}). Start the backend (e.g. uvicorn backend.api.main:app --reload --port 8000) and reload the page.`
       }
     }
     const st = err.response?.status
@@ -746,12 +776,16 @@ function bearer(token: string) {
   return { Authorization: `Bearer ${token}` }
 }
 
+// Recap endpoints use `directClient` (bypasses the Vite dev proxy) — see
+// `resolveDirectApiBase` above. `getPublishedRecap` is a fast read, but kept
+// on the same client as the others for one consistent base per feature.
+
 export async function getPublishedRecap(
   slug: string,
   season: number,
   week: number,
 ): Promise<{ league: JsonRecord; edition: RecapEdition }> {
-  const { data } = await client.get(`/leagues/${slug}/recaps/${season}/${week}`)
+  const { data } = await directClient.get(`/leagues/${slug}/recaps/${season}/${week}`)
   return data
 }
 
@@ -763,7 +797,7 @@ export async function getRecapReadiness(
   weekEnd: string,
   token: string,
 ): Promise<RecapSnapshot> {
-  const { data } = await client.get(
+  const { data } = await directClient.get(
     `/leagues/${slug}/recaps/${season}/${week}/readiness`,
     {
       params: { week_start: weekStart, week_end: weekEnd },
@@ -782,7 +816,7 @@ export async function generateRecapDraft(
   generateAnyway: boolean,
   token: string,
 ): Promise<RecapEdition> {
-  const { data } = await client.post(
+  const { data } = await directClient.post(
     `/leagues/${slug}/recaps/${season}/${week}/generate`,
     {
       week_start: weekStart,
@@ -800,7 +834,7 @@ export async function getRecapHistory(
   week: number,
   token: string,
 ): Promise<RecapHistoryItem[]> {
-  const { data } = await client.get(
+  const { data } = await directClient.get(
     `/leagues/${slug}/recaps/${season}/${week}/history`,
     { headers: bearer(token) },
   )
@@ -814,7 +848,7 @@ export async function publishRecapEdition(
   editionId: string,
   token: string,
 ): Promise<RecapEdition> {
-  const { data } = await client.post(
+  const { data } = await directClient.post(
     `/leagues/${slug}/recaps/${season}/${week}/publish`,
     { edition_id: editionId },
     { headers: bearer(token) },
@@ -829,7 +863,7 @@ export async function rollbackRecapEdition(
   editionId: string,
   token: string,
 ): Promise<RecapEdition> {
-  const { data } = await client.post(
+  const { data } = await directClient.post(
     `/leagues/${slug}/recaps/${season}/${week}/rollback`,
     { edition_id: editionId },
     { headers: bearer(token) },
