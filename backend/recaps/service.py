@@ -29,6 +29,47 @@ def require_admin(
     return league
 
 
+def _edition_or_404(
+    edition: dict[str, Any] | None,
+    *,
+    league_id: str,
+    season: int,
+    week: int,
+) -> dict[str, Any]:
+    if (
+        not edition
+        or edition.get("league_id") != league_id
+        or int(edition.get("season", -1)) != season
+        or int(edition.get("week", -1)) != week
+    ):
+        raise HTTPException(status_code=404, detail="Recap edition not found.")
+    return edition
+
+
+def _normalize_stored_snapshot(edition: dict[str, Any], league: dict[str, Any]) -> None:
+    """Reshape the Supabase `league_week_snapshots` embed (raw `*_json` column
+    names) into the same `snapshot` field shape `generate_draft` returns right
+    after generation, so any stored edition previews the same way as a
+    freshly-generated one (e.g. the matchup-results grid)."""
+    stored = edition.pop("league_week_snapshots", None)
+    if not stored:
+        return
+    edition["snapshot"] = {
+        "schema_version": stored.get("schema_version"),
+        "league": league,
+        "season": edition.get("season"),
+        "week": edition.get("week"),
+        "week_dates": None,
+        "matchups": stored.get("matchups_json") or [],
+        "standings": stored.get("standings_json") or [],
+        "power_rankings": stored.get("power_rankings_json") or [],
+        "transactions": stored.get("transactions_json") or [],
+        "season_stats": stored.get("season_stats_json") or [],
+        "award_candidates": stored.get("award_candidates_json") or [],
+        "data_quality": stored.get("data_quality_json") or {},
+    }
+
+
 def build_readiness(
     *,
     store: RecapStore,
@@ -155,6 +196,7 @@ def get_public_edition(
     )
     if not edition:
         raise HTTPException(status_code=404, detail="Published recap not found.")
+    _normalize_stored_snapshot(edition, league)
     return {"league": league, "edition": edition}
 
 
@@ -168,12 +210,37 @@ def get_admin_edition(
     status: str = "draft",
 ) -> dict[str, Any] | None:
     league = require_admin(store, slug, user_id)
-    return store.get_edition(
+    edition = store.get_edition(
         league_id=league["id"],
         season=season,
         week=week,
         status=status,
     )
+    if edition:
+        _normalize_stored_snapshot(edition, league)
+    return edition
+
+
+def get_edition_by_id(
+    *,
+    store: RecapStore,
+    slug: str,
+    user_id: str,
+    season: int,
+    week: int,
+    edition_id: str,
+) -> dict[str, Any]:
+    """Full content for one specific edition -- lets an admin preview any
+    past draft/superseded/published version, not just the latest."""
+    league = require_admin(store, slug, user_id)
+    edition = _edition_or_404(
+        store.get_edition_with_content_by_id(edition_id),
+        league_id=league["id"],
+        season=season,
+        week=week,
+    )
+    _normalize_stored_snapshot(edition, league)
+    return edition
 
 
 def get_history(
@@ -200,14 +267,12 @@ def publish_edition(
     edition_id: str,
 ) -> dict[str, Any]:
     league = require_admin(store, slug, user_id)
-    edition = store.get_edition_by_id(edition_id)
-    if (
-        not edition
-        or edition.get("league_id") != league["id"]
-        or int(edition.get("season", -1)) != season
-        or int(edition.get("week", -1)) != week
-    ):
-        raise HTTPException(status_code=404, detail="Recap edition not found.")
+    _edition_or_404(
+        store.get_edition_by_id(edition_id),
+        league_id=league["id"],
+        season=season,
+        week=week,
+    )
     return store.publish(edition_id, user_id)
 
 
@@ -221,14 +286,12 @@ def rollback_edition(
     edition_id: str,
 ) -> dict[str, Any]:
     league = require_admin(store, slug, user_id)
-    edition = store.get_edition_by_id(edition_id)
-    if (
-        not edition
-        or edition.get("league_id") != league["id"]
-        or int(edition.get("season", -1)) != season
-        or int(edition.get("week", -1)) != week
-    ):
-        raise HTTPException(status_code=404, detail="Recap edition not found.")
+    _edition_or_404(
+        store.get_edition_by_id(edition_id),
+        league_id=league["id"],
+        season=season,
+        week=week,
+    )
     return store.rollback(
         edition_id,
         league_id=league["id"],

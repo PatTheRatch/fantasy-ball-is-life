@@ -7,6 +7,7 @@ import {
   generateRecapDraft,
   getLeagueSettings,
   getPublishedRecap,
+  getRecapEdition,
   getRecapHistory,
   getRecapReadiness,
   publishRecapEdition,
@@ -244,6 +245,27 @@ export function Recap() {
     }
   }
 
+  const previewVersion = async (editionId: string) => {
+    if (!token) return
+    setWorking(`preview:${editionId}`)
+    setActionError(null)
+    try {
+      const edition = await getRecapEdition(
+        recapLeagueSlug,
+        RECAP_SEASON,
+        week,
+        editionId,
+        token,
+      )
+      setDraft(edition)
+      setConfirmIncomplete(false)
+    } catch (error) {
+      setActionError(formatApiError(error))
+    } finally {
+      setWorking(null)
+    }
+  }
+
   const publish = async (editionId: string, rollback = false) => {
     if (!token) return
     setWorking(rollback ? `rollback:${editionId}` : 'publish')
@@ -281,7 +303,7 @@ export function Recap() {
   const published = publicQuery.data?.edition ?? null
   const preview = adminMode && draft ? draft : published
   const content = preview?.structured_content_json
-  const snapshot = draft?.snapshot
+  const snapshot = preview?.snapshot
 
   return (
     <div className="space-y-5 pb-8">
@@ -407,7 +429,7 @@ export function Recap() {
                   ? 'Refresh Draft'
                   : 'Generate Draft'}
             </button>
-            {draft && (
+            {draft && draft.status === 'draft' && (
               <button
                 type="button"
                 disabled={Boolean(working)}
@@ -416,6 +438,17 @@ export function Recap() {
               >
                 <Send className="h-4 w-4" />
                 {working === 'publish' ? 'Publishing…' : 'Publish Draft'}
+              </button>
+            )}
+            {draft && draft.status === 'superseded' && (
+              <button
+                type="button"
+                disabled={Boolean(working)}
+                onClick={() => void publish(draft.id, true)}
+                className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-amber-600 px-4 text-sm font-bold text-white disabled:opacity-50"
+              >
+                <Send className="h-4 w-4" />
+                {working === `rollback:${draft.id}` ? 'Restoring…' : 'Roll Back to This Version'}
               </button>
             )}
           </div>
@@ -458,23 +491,41 @@ export function Recap() {
                 {historyQuery.data.map((item) => (
                   <div
                     key={item.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 px-3 py-2 text-sm"
+                    className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${
+                      draft?.id === item.id
+                        ? 'border-amber-500 bg-amber-500/10'
+                        : 'border-slate-800'
+                    }`}
                   >
                     <span className="text-slate-300">
                       Version {item.version} · {item.status}
                     </span>
-                    {item.status === 'superseded' && (
+                    <div className="flex items-center gap-3">
                       <button
                         type="button"
-                        disabled={Boolean(working)}
-                        onClick={() => void publish(item.id, true)}
-                        className="font-semibold text-amber-300 disabled:opacity-50"
+                        disabled={Boolean(working) || draft?.id === item.id}
+                        onClick={() => void previewVersion(item.id)}
+                        className="font-semibold text-slate-300 hover:text-white disabled:opacity-50"
                       >
-                        {working === `rollback:${item.id}`
-                          ? 'Restoring…'
-                          : 'Roll back'}
+                        {working === `preview:${item.id}`
+                          ? 'Loading…'
+                          : draft?.id === item.id
+                            ? 'Previewing'
+                            : 'Preview'}
                       </button>
-                    )}
+                      {item.status === 'superseded' && (
+                        <button
+                          type="button"
+                          disabled={Boolean(working)}
+                          onClick={() => void publish(item.id, true)}
+                          className="font-semibold text-amber-300 disabled:opacity-50"
+                        >
+                          {working === `rollback:${item.id}`
+                            ? 'Restoring…'
+                            : 'Roll back'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -486,7 +537,8 @@ export function Recap() {
 
       {draft && adminMode && (
         <div className="rounded-lg border border-amber-600/50 bg-amber-950/30 px-4 py-3 text-sm font-semibold text-amber-200">
-          Draft preview · Version {draft.version} · Not visible to league members
+          Previewing version {draft.version} · {draft.status}
+          {draft.status !== 'published' && ' · not visible to league members'}
         </div>
       )}
 
