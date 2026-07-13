@@ -1407,6 +1407,11 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
                     "current_home_score": matchup.home_stats[stat].get("value"),
                     "current_away_score": matchup.away_stats[stat].get("value"),
                     "stat": stat,
+                    # ESPN's own authoritative result -- 'HOME'/'AWAY'/'UNDECIDED'.
+                    # Category-tally winners can disagree with this on a tie that
+                    # ESPN resolves by a tiebreak rule (e.g. playoff seed); callers
+                    # should prefer this field over their own tally when it's set.
+                    "espn_winner": getattr(matchup, "winner", None),
                 })
     else:
         matchups = h.league.scoreboard(scoring_period)
@@ -1421,6 +1426,7 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
                     "current_home_score": 0,
                     "current_away_score": 0,
                     "stat": stat,
+                    "espn_winner": getattr(matchup, "winner", None),
                 })
 
 

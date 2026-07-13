@@ -16,12 +16,13 @@ from backend.recaps.assemble import STAT_ORDER, canonical_matchups
 NINE_CATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
 
 
-def _matchup(home, away, home_stats, away_stats):
+def _matchup(home, away, home_stats, away_stats, winner=None):
     return SimpleNamespace(
         home_team=SimpleNamespace(team_name=home),
         away_team=SimpleNamespace(team_name=away),
         home_stats={k: {"value": v} for k, v in home_stats.items()},
         away_stats={k: {"value": v} for k, v in away_stats.items()},
+        winner=winner,
     )
 
 
@@ -56,6 +57,17 @@ def test_category_result_ties_and_nan():
 
 
 # --- get_current_scoreboard: no more TO negation -----------------------------
+
+def test_get_current_scoreboard_exposes_espn_authoritative_winner():
+    matchup = _matchup(
+        "Alpha", "Beta", {"PTS": 510}, {"PTS": 480}, winner="HOME"
+    )
+    handles = feed.ESPNHandles(league=_FakeLeague([matchup]))
+
+    df = feed.get_current_scoreboard(handles, scoring_period=1)
+
+    assert (df["espn_winner"] == "HOME").all()
+
 
 def test_get_current_scoreboard_keeps_turnovers_positive():
     matchup = _matchup(

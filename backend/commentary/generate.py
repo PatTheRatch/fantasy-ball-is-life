@@ -350,4 +350,39 @@ def generate_structured_recap(
         raise ValueError(
             "Structured recap must contain exactly one explanation per award."
         )
+
+    if snapshot.playoff_context is not None:
+        returned_playoff_matchups = {
+            item.matchup_id for item in content.playoff_matchup_recaps
+        }
+        if (
+            returned_playoff_matchups != matchup_ids
+            or len(content.playoff_matchup_recaps) != len(matchup_ids)
+        ):
+            raise ValueError(
+                "Structured recap must contain exactly one playoff_matchup_recap "
+                "per matchup for a playoff week."
+            )
+
+        advancing_teams = set(snapshot.playoff_context.advancing_teams)
+        returned_outlook_teams = {item.team for item in content.playoff_outlook}
+        if (
+            returned_outlook_teams != advancing_teams
+            or len(content.playoff_outlook) != len(advancing_teams)
+        ):
+            raise ValueError(
+                "Structured recap must contain exactly one playoff_outlook entry "
+                "per advancing team."
+            )
+
+        if not content.playoff_storylines:
+            raise ValueError(
+                "Structured recap must include at least one playoff_storyline "
+                "for a playoff week."
+            )
+        if not content.playoff_final_line:
+            raise ValueError(
+                "Structured recap must include a playoff_final_line for a "
+                "playoff week."
+            )
     return content

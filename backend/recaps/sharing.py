@@ -22,15 +22,41 @@ def format_share_text(
     award_by_id = {
         item.award_id: item.text for item in content.award_explanations
     }
+    playoff_recap_by_id = {
+        item.matchup_id: item for item in content.playoff_matchup_recaps
+    }
 
     matchup_lines = []
     for matchup in snapshot.matchups:
-        result = (
-            f"{matchup['home_team']} {matchup['home_category_wins']}–"
-            f"{matchup['away_category_wins']} {matchup['away_team']}"
+        playoff_recap = (
+            playoff_recap_by_id.get(matchup["matchup_id"])
+            if snapshot.playoff_context
+            else None
         )
-        takeaway = takeaway_by_id.get(matchup["matchup_id"])
-        matchup_lines.append(f"• {result}" + (f" — {takeaway}" if takeaway else ""))
+        if playoff_recap:
+            matchup_lines.append(f"• {playoff_recap.result_summary} — {playoff_recap.text}")
+        else:
+            result = (
+                f"{matchup['home_team']} {matchup['home_category_wins']}–"
+                f"{matchup['away_category_wins']} {matchup['away_team']}"
+            )
+            takeaway = takeaway_by_id.get(matchup["matchup_id"])
+            matchup_lines.append(f"• {result}" + (f" — {takeaway}" if takeaway else ""))
+
+    playoff_section_parts = []
+    if snapshot.playoff_context:
+        outlook_lines = [f"• {item.team}: {item.text}" for item in content.playoff_outlook]
+        if outlook_lines:
+            playoff_section_parts.append(
+                "🔮 *What This Sets Up*\n" + "\n".join(outlook_lines)
+            )
+        if content.playoff_storylines:
+            playoff_section_parts.append(
+                "📖 *Storylines*\n"
+                + "\n".join(
+                    f"• {item.title}: {item.text}" for item in content.playoff_storylines
+                )
+            )
 
     mover_lines = []
     for row in snapshot.power_rankings:
@@ -47,16 +73,25 @@ def format_share_text(
         line = f"• {award['title']}: {award['winner']}"
         award_lines.append(line + (f" — {explanation}" if explanation else ""))
 
+    matchup_header = (
+        f"🏀 *{snapshot.playoff_context.round_label} Matchups*"
+        if snapshot.playoff_context
+        else "🏀 *Matchups*"
+    )
+
     url = _public_url(snapshot)
     summary_parts = [
         f"*{content.headline}*",
         content.dek,
-        "🏀 *Matchups*\n" + "\n".join(matchup_lines),
+        f"{matchup_header}\n" + "\n".join(matchup_lines),
+        *playoff_section_parts,
     ]
     if mover_lines:
         summary_parts.append("📈 *Power Ranking Movers*\n" + "\n".join(mover_lines))
     if award_lines:
         summary_parts.append("🏆 *Awards*\n" + "\n".join(award_lines))
+    if content.playoff_final_line:
+        summary_parts.append(f"_{content.playoff_final_line}_")
     if snapshot.data_quality.warnings:
         summary_parts.append(
             "⚠️ *Data notes*\n"
@@ -68,10 +103,13 @@ def format_share_text(
         f"*{content.headline}*",
         content.dek,
         "\n\n".join(content.lead_story),
-        "🏀 *Matchups*\n" + "\n".join(matchup_lines),
+        f"{matchup_header}\n" + "\n".join(matchup_lines),
+        *playoff_section_parts,
     ]
     if award_lines:
         full_parts.append("🏆 *Awards*\n" + "\n".join(award_lines))
+    if content.playoff_final_line:
+        full_parts.append(f"_{content.playoff_final_line}_")
     full_parts.append(f"Read the published recap: {url}")
 
     content.whatsapp_summary = "\n\n".join(summary_parts)
