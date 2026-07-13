@@ -445,3 +445,43 @@ Everything after Phase 2 (multi-league onboarding, midweek reports, bot delivery
 12. WhatsApp offers Copy Summary and Copy Full Recap; summary includes every
     matchup result and a quick line, ranking movers, awards, and the app link.
 13. Re-publishing retains prior versions for admin rollback.
+
+---
+
+## Addendum: Playoff-week narrative mode (2026-07-13)
+
+Prompted by a live playoff-week generation (semifinals, round 2 of 3) where
+the recap read as a flat regular-season week despite obvious bracket stakes.
+Patrick's own hand-written recap for that week (shared as a reference) uses a
+denser structure than the regular-season narrative: a per-matchup "what
+really happened" account, a "what this sets up" note per advancing team,
+2-4 cross-team storylines, and a closing line.
+
+**Scope decisions (Patrick, 2026-07-13):**
+1. Playoff mode is **automatic** — detected from league settings
+   (`reg_season_count`, `playoff_team_count`, `playoff_matchup_period_length`),
+   not an admin toggle.
+2. Adopt the denser structure for playoff weeks specifically, as new
+   *additive* fields on `RecapGeneratedContent` (`playoff_matchup_recaps`,
+   `playoff_outlook`, `playoff_storylines`, `playoff_final_line`) — empty for
+   a regular-season week, so the existing schema/prompt/UI is unaffected
+   outside the playoffs.
+
+**What's deterministic vs. AI, same boundary as the rest of this spec:**
+- Round label (Quarterfinals/Semifinals/Championship/Round N), advancing and
+  eliminated teams, and next-round pairings are computed server-side
+  (`backend/recaps/playoffs.py`) from league settings and this week's decided
+  matchups — never inferred by the LLM.
+- Next-round pairings are only included once every advancing team appears in
+  ESPN's own schedule for that week as a distinct participant; otherwise
+  omitted rather than guessed from a reseeding assumption we don't control.
+- The LLM writes the four new narrative fields, evidence-bound to the same
+  snapshot facts as everything else (matchup evidence IDs, no invented
+  transactions/injuries -- that would require the still-open transaction-feed
+  item in `docs/ESPN_INTEGRATION_AUDIT.md`).
+
+**Known limitation:** the sample recap that prompted this leaned on
+injury-report detail (specific players out, DNPs) that isn't derivable from
+the current fact snapshot. That requires the transaction/roster-move feed,
+which is a separate, still-open audit item -- playoff mode does not depend on
+it and degrades gracefully without it.

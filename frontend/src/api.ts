@@ -668,6 +668,38 @@ export interface RecapGeneratedContent {
   }>
   whatsapp_summary: string
   whatsapp_full: string
+  // Playoff weeks only -- empty for a regular-season week.
+  playoff_matchup_recaps: Array<{
+    matchup_id: string
+    result_summary: string
+    text: string
+    evidence_ids: string[]
+  }>
+  playoff_outlook: Array<{
+    team: string
+    text: string
+    evidence_ids: string[]
+  }>
+  playoff_storylines: Array<{
+    title: string
+    text: string
+    evidence_ids: string[]
+  }>
+  playoff_final_line: string | null
+}
+
+export interface RecapPlayoffContext {
+  round_label: string
+  round_index: number
+  total_rounds: number
+  is_championship: boolean
+  advancing_teams: string[]
+  eliminated_teams: string[]
+  next_round_matchups: Array<{
+    evidence_id: string
+    home_team: string
+    away_team: string
+  }>
 }
 
 export interface RecapSnapshot {
@@ -683,6 +715,7 @@ export interface RecapSnapshot {
   season_stats: JsonRecord[]
   award_candidates: JsonRecord[]
   data_quality: RecapDataQuality
+  playoff_context?: RecapPlayoffContext | null
 }
 
 export interface RecapEdition {
