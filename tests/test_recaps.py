@@ -83,6 +83,73 @@ def test_canonical_matchups_treats_lower_turnovers_as_winner():
     assert turnover["winner"] == "home"
 
 
+def _four_four_tie_rows(espn_winner):
+    # 4 categories to home, 4 to away, 1 tied -- a real "4-4, tiebreak" week.
+    rows = []
+    for index, stat in enumerate(STAT_ORDER):
+        if stat == "TO":
+            home_value = away_value = 50  # the tied category
+        elif index < 4:
+            home_value, away_value = 10, 5  # home wins
+        else:
+            home_value, away_value = 5, 10  # away wins
+        rows.append(
+            {
+                "home_team": "Fantastic5",
+                "away_team": "Brighton",
+                "stat": stat,
+                "current_home_score": home_value,
+                "current_away_score": away_value,
+                "espn_winner": espn_winner,
+            }
+        )
+    return rows
+
+
+def test_canonical_matchups_uses_espn_winner_to_break_a_tie():
+    matchup = canonical_matchups(_four_four_tie_rows("HOME"), 21)[0]
+
+    assert matchup["home_category_wins"] == matchup["away_category_wins"] == 4
+    assert matchup["winner"] == "Fantastic5"
+    assert matchup["tiebreak_resolved"] is True
+
+
+def test_canonical_matchups_stays_tie_when_espn_winner_undecided():
+    matchup = canonical_matchups(_four_four_tie_rows("UNDECIDED"), 21)[0]
+
+    assert matchup["winner"] == "Tie"
+    assert matchup["tiebreak_resolved"] is False
+
+
+def test_canonical_matchups_stays_tie_when_espn_winner_missing():
+    matchup = canonical_matchups(_four_four_tie_rows(None), 21)[0]
+
+    assert matchup["winner"] == "Tie"
+    assert matchup["tiebreak_resolved"] is False
+
+
+def test_canonical_matchups_ignores_espn_winner_when_tally_is_decisive():
+    rows = []
+    for stat in STAT_ORDER:
+        rows.append(
+            {
+                "home_team": "Alpha",
+                "away_team": "Beta",
+                "stat": stat,
+                "current_home_score": 10,
+                "current_away_score": 5,
+                # Deliberately contradicts the tally -- should be ignored
+                # since the tally itself isn't tied.
+                "espn_winner": "AWAY",
+            }
+        )
+
+    matchup = canonical_matchups(rows, 1)[0]
+
+    assert matchup["winner"] == "Alpha"
+    assert matchup["tiebreak_resolved"] is False
+
+
 def test_awards_use_deterministic_matchup_and_standing_facts():
     awards = select_awards(_snapshot())
     by_id = {award["award_id"]: award for award in awards}

@@ -46,6 +46,19 @@ own small PRs as they're prioritized.
   period (falling back to the league's current week) when a bound is omitted,
   and the `/rosters/current` GET+POST endpoints return 400 on an explicitly
   inverted range. Tests in `tests/test_roster_week_window.py`.
+- [x] **Recap matchup winner ignores ESPN's own tiebreak resolution — found
+  reviewing a live playoff week. Fixed.** `canonical_matchups()` computed the
+  matchup winner purely from its own 9-category tally and called it `"Tie"`
+  whenever both sides won the same number of categories (e.g. 4-4 with one
+  category tied) -- but ESPN resolves that tie itself (playoff seeding, etc.)
+  via the box score's own `winner` field, which the recap facts never looked
+  at. A real playoff week landed exactly on this: a 4-4 matchup that ESPN
+  had already decided showed up in the recap snapshot as an undecided tie.
+  Fixed: `get_current_scoreboard()` now carries ESPN's authoritative
+  `winner` (`espn_winner`) alongside each stat row, and `canonical_matchups()`
+  defers to it (with a `tiebreak_resolved` flag) only when its own tally is
+  genuinely tied -- a decisive tally is never overridden. Tests in
+  `tests/test_recaps.py` and `tests/test_scoreboard_turnovers.py`.
 - [ ] **Recap turnover winners are reversed — live-confirmed.**
   `get_current_scoreboard()` negates ESPN's positive turnover totals so
   frontend code can compare all categories as higher-is-better.

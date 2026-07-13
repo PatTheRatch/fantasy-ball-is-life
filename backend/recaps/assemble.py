@@ -73,6 +73,20 @@ def canonical_matchups(scoreboard: list[dict[str, Any]], week: int) -> list[dict
                 }
             )
 
+        tally_winner = (
+            "home" if home_wins > away_wins else "away" if away_wins > home_wins else "tie"
+        )
+        # ESPN resolves a head-to-head category tie itself (e.g. a playoff
+        # seeding tiebreak) -- our own tally has no notion of that rule, so
+        # prefer ESPN's authoritative result when the two disagree on a tie.
+        espn_winner = str(rows[0].get("espn_winner") or "").upper()
+        if tally_winner == "tie" and espn_winner in ("HOME", "AWAY"):
+            winner_side = espn_winner.lower()
+            tiebreak_resolved = True
+        else:
+            winner_side = tally_winner
+            tiebreak_resolved = False
+
         matchups.append(
             {
                 "matchup_id": matchup_id,
@@ -83,8 +97,9 @@ def canonical_matchups(scoreboard: list[dict[str, Any]], week: int) -> list[dict
                 "away_category_wins": away_wins,
                 "ties": ties,
                 "winner": (
-                    home if home_wins > away_wins else away if away_wins > home_wins else "Tie"
+                    home if winner_side == "home" else away if winner_side == "away" else "Tie"
                 ),
+                "tiebreak_resolved": tiebreak_resolved,
                 "categories": categories,
             }
         )
