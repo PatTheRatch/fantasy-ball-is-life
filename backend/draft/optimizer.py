@@ -3,6 +3,7 @@ from typing import Optional
 
 import pandas as pd
 from backend.league.fantasy import MyLeague
+from backend.api.deps import _my_league
 import cvxpy as cp
 import shutup
 
@@ -54,7 +55,7 @@ class OptimizeLineup:
             games_per_week = GAMES_PER_WEEK
         if value_source not in VALUE_SOURCES:
             raise ValueError(f"value_source={value_source!r} must be one of {VALUE_SOURCES}")
-        self.league = MyLeague(LEAGUE_ID, year)
+        self.league = _my_league(year)
         self.games_per_week = games_per_week
         self.excluded_players = exclude_players or []
         self.drafted_players = drafted_players or []

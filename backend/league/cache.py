@@ -33,12 +33,13 @@ class ESPNRequestCache:
     """Per-request store that reuses one ``ESPNHandles`` per league key.
 
     The cache lives on a ``ContextVar`` — each request gets its own copy
-    via middleware. Only ``connect()`` writes entries; everyone else reads
-    transparently.
+    via middleware. ``connect()`` and ``_my_league()`` write entries;
+    everyone else reads transparently.
     """
 
     def __init__(self) -> None:
         self._store: dict[tuple[int, int], ESPNHandles] = {}
+        self._my_league_store: dict[tuple[int, int], Any] = {}
         self.hits: int = 0
         self.misses: int = 0
 
@@ -55,6 +56,20 @@ class ESPNRequestCache:
     def put(self, league_id: int, season: int, handles: ESPNHandles) -> None:
         """Cache an ``ESPNHandles`` for this request."""
         self._store[(league_id, season)] = handles
+
+    def get_my_league(self, league_id: int, season: int) -> Optional[Any]:
+        """Return the cached ``MyLeague``, or ``None`` on a miss.
+        Increments ``hits`` or ``misses`` automatically."""
+        entry = self._my_league_store.get((league_id, season))
+        if entry is not None:
+            self.hits += 1
+        else:
+            self.misses += 1
+        return entry
+
+    def put_my_league(self, league_id: int, season: int, my_league: Any) -> None:
+        """Cache a ``MyLeague`` for this request."""
+        self._my_league_store[(league_id, season)] = my_league
 
 
 def get_request_cache() -> Optional[ESPNRequestCache]:

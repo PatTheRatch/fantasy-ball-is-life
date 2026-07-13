@@ -20,9 +20,27 @@ from backend.league.gateway import espn_error_status_code
 
 
 def _my_league(year: Optional[int] = None) -> MyLeague:
-    """`MyLeague` for in-season endpoints; uses `SEASON` from config when year is omitted."""
+    """``MyLeague`` for in-season endpoints; uses ``SEASON`` from config when year is omitted.
+
+    Cached per request via ``ESPNRequestCache`` (PR F). The first call constructs
+    a new ``MyLeague`` (4 ESPN requests); subsequent calls inside the same HTTP
+    request reuse the cached instance.
+    """
+    from backend.league.cache import get_request_cache
+
     y = SEASON if year is None else year
-    return MyLeague(LEAGUE_ID, y)
+    cache = get_request_cache()
+    if cache is not None:
+        existing = cache.get_my_league(LEAGUE_ID, y)
+        if existing is not None:
+            return existing
+
+    ml = MyLeague(LEAGUE_ID, y)
+
+    if cache is not None:
+        cache.put_my_league(LEAGUE_ID, y, ml)
+
+    return ml
 
 
 def _strip_numpy(obj: Any) -> Any:

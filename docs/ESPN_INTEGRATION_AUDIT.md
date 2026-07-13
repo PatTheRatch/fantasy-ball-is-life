@@ -110,9 +110,12 @@ own small PRs as they're prioritized.
 - [x] **Recap (connect) cache partially added (PR E2).** `connect()`
   is now backed by a `ContextVar`-scoped request cache (one `League`
   construction per HTTP request instead of four). Recap's 4 `connect()`
-  calls → 1, saving 12 ESPN requests (~22 → ~10). The uncached
-  `_my_league()` calls (power rankings, season stats) will be addressed
-  in PR F.
+  calls → 1, saving 12 ESPN requests (~22 → ~10).
+- [x] **MyLeague caching (PR F).** `_my_league()` is now cache-aware via
+  the same `ContextVar` store, and the Draft optimizer routes through it.
+  Recap's power_rankings + season_stats → 1 `MyLeague` construction (was 2).
+  Draft Room: 10-plan portfolio → 1 `MyLeague` construction (was 11). Full
+  recap assembly: ~22 ESPN requests → ~6 (with E2 + E3 + F).
 - [x] **Snapshot reuse for recap readiness/generation (PR E3).** The
   readiness check and generate endpoint call ``assemble_weekly_snapshot()``
   seconds apart with the same parameters. A 60 s TTL app-level cache (max
