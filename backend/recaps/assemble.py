@@ -142,7 +142,7 @@ def assemble_weekly_snapshot(
     )
     transactions, transactions_ok = _capture(
         "Transactions",
-        lambda: league_api.transactions(start=week_start, end=week_end),
+        lambda: league_api.transactions_week(scoring_period=week),
         warnings,
     )
     season_stats, season_stats_ok = _capture(
