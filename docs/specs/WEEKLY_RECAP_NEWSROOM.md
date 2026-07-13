@@ -485,3 +485,27 @@ injury-report detail (specific players out, DNPs) that isn't derivable from
 the current fact snapshot. That requires the transaction/roster-move feed,
 which is a separate, still-open audit item -- playoff mode does not depend on
 it and degrades gracefully without it.
+
+---
+
+## Addendum: Recap voice spec + WhatsApp narrative (2026-07-13)
+
+Patrick supplied a full recap-voice specification (distilled from a year of
+his prior chatbot workflow). Universal, league-agnostic rules now live in the
+structured-recap system prompt (`backend/commentary/prompts.py`); anything
+Patriot-Games-specific (rivalries, history, notorious managers) belongs in
+the `leagues.recap_voice` column, which the prompt appends verbatim when set.
+
+**WhatsApp format decision (Patrick, 2026-07-13): hybrid.** The old
+implementation discarded the model's `whatsapp_summary`/`whatsapp_full` and
+rebuilt them as a deterministic bullet digest — complete but report-like.
+Now the model writes both fields as flowing prose (per the voice spec's
+30-second-read shape), and generation is rejected by a deterministic
+backstop (`_validate_whatsapp_completeness` in
+`backend/commentary/generate.py`) unless every matchup's team names and
+every award winner are actually named in both fields. `format_share_text`
+only appends the public URL. This updates acceptance criteria 21-22's
+"itemized" reading: completeness is still guaranteed, but by validation
+rather than by assembly. On playoff weeks the prompt requires the round,
+advancement, and final line to be woven into the same prose — no labeled
+bullet sections.

@@ -385,4 +385,37 @@ def generate_structured_recap(
                 "Structured recap must include a playoff_final_line for a "
                 "playoff week."
             )
+
+    _validate_whatsapp_completeness(snapshot, content)
     return content
+
+
+def _required_whatsapp_mentions(snapshot: WeeklyFactSnapshot) -> set[str]:
+    mentions: set[str] = set()
+    for matchup in snapshot.matchups:
+        mentions.add(str(matchup.get("home_team") or ""))
+        mentions.add(str(matchup.get("away_team") or ""))
+    for award in snapshot.award_candidates:
+        mentions.add(str(award.get("winner") or ""))
+    mentions.discard("")
+    return mentions
+
+
+def _validate_whatsapp_completeness(
+    snapshot: WeeklyFactSnapshot, content: RecapGeneratedContent
+) -> None:
+    """The WhatsApp fields are free narrative, not evidence-ID bound like the
+    rest of the edition -- this is the deterministic backstop that keeps the
+    completeness guarantee the old itemized format used to provide for free:
+    every matchup team and award winner must actually be named."""
+    required = _required_whatsapp_mentions(snapshot)
+    for field_name, text in (
+        ("whatsapp_summary", content.whatsapp_summary),
+        ("whatsapp_full", content.whatsapp_full),
+    ):
+        missing = sorted(name for name in required if name not in text)
+        if missing:
+            raise ValueError(
+                f"Structured recap {field_name} does not mention: "
+                + ", ".join(missing)
+            )
