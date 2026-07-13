@@ -51,11 +51,17 @@ own small PRs as they're prioritized.
   lower-is-better. A live 57-vs-89 category was incorrectly awarded to the
   89-turnover side. Keep canonical turnovers positive and apply category
   direction once.
-- [ ] **Playoff all-play rankings synthesize zero-stat teams —
-  live-confirmed.** `MyLeague.get_wins()` reindexes every week to all league
-  teams and fills missing rows with zero. Week 21 had 11 unique active teams
-  but returned rankings for 14; each synthetic team received 11 turnover wins.
-  Compare only teams with valid weekly facts and define bye behavior explicitly.
+- [x] **Playoff all-play rankings synthesize zero-stat teams —
+  live-confirmed. Fixed (PR C).** `MyLeague.get_wins()` reindexed every week to
+  all league teams and filled missing rows with zero. Week 21 had 11 unique
+  active teams but returned rankings for 14; each synthetic team received 11
+  turnover wins. Fixed: weekly all-play now runs only among teams with a real
+  matchup row that week (bye/eliminated teams are excluded, never zero-filled),
+  `get_universe_wins` drops the empty per-week frames, and TO direction is
+  sourced from the shared `data_feed.LOWER_IS_BETTER_STATS` constant (the
+  downstream negated-TO convention used by power rankings and the draft
+  optimizer is preserved). Tests in `tests/test_allplay_playoff_participants.py`
+  (14 active / 12+2 bye / 10+4 eliminated, ghost exclusion, TO direction).
 - [ ] **Transactions are unavailable — live-confirmed.**
   `recent_activity()` returned HTTP 404, then `safe_recent_activity()` failed
   on missing `League.espn_s2`. Replace both with the documented weekly
