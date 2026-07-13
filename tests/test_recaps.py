@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 from fastapi import HTTPException
 
-from backend.commentary import generate
+from backend.commentary import generate, prompts
 from backend.commentary.schemas import (
     DataQualityReport,
     RecapGeneratedContent,
@@ -196,6 +196,61 @@ def test_structured_generation_rejects_unknown_evidence(monkeypatch):
         generate.generate_structured_recap(snapshot)
 
 
+def _valid_structured_payload(snapshot):
+    return {
+        "headline": "Alpha owns the week",
+        "dek": "A grounded recap.",
+        "lead_story": ["Alpha won six categories against Beta."],
+        "matchup_takeaways": [
+            {
+                "matchup_id": "week-1:alpha-vs-beta",
+                "text": "Alpha took six categories.",
+                "evidence_ids": ["week-1:alpha-vs-beta"],
+            }
+        ],
+        "ranking_explanations": [],
+        "award_explanations": [
+            {
+                "award_id": award["award_id"],
+                "text": f"{award['winner']} earned it.",
+                "evidence_ids": award["evidence_ids"],
+            }
+            for award in snapshot.award_candidates
+        ],
+        "whatsapp_summary": "Alpha ran through Beta this week, and Alpha takes home the hardware too.",
+        "whatsapp_full": "Alpha ran through Beta this week, in full detail. Alpha also takes home the hardware.",
+    }
+
+
+def test_generate_rejects_whatsapp_missing_a_team_mention(monkeypatch):
+    snapshot = _snapshot()
+    snapshot.award_candidates = select_awards(snapshot)
+    payload = _valid_structured_payload(snapshot)
+    payload["whatsapp_summary"] = "Alpha had a huge week."  # Beta never named
+    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
+    monkeypatch.setattr(
+        generate, "_complete_structured", lambda *args, **kwargs: json.dumps(payload)
+    )
+
+    with pytest.raises(ValueError, match="whatsapp_summary"):
+        generate.generate_structured_recap(snapshot)
+
+
+def test_generate_accepts_whatsapp_mentioning_every_team_and_award_winner(monkeypatch):
+    snapshot = _snapshot()
+    snapshot.award_candidates = select_awards(snapshot)
+    payload = _valid_structured_payload(snapshot)
+    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
+    monkeypatch.setattr(
+        generate, "_complete_structured", lambda *args, **kwargs: json.dumps(payload)
+    )
+
+    result = generate.generate_structured_recap(snapshot)
+
+    assert "Alpha" in result.whatsapp_summary
+    assert "Beta" in result.whatsapp_summary
+
+
 def test_incomplete_data_requires_generate_anyway(monkeypatch):
     snapshot = _snapshot(ready=False)
     store = Mock()
@@ -255,7 +310,7 @@ def test_generate_endpoint_rejects_anonymous_before_store_or_anthropic():
     assert response.status_code == 401
 
 
-def test_copy_summary_contains_every_matchup_and_public_link(monkeypatch):
+def test_share_text_appends_public_link_without_altering_model_narrative(monkeypatch):
     snapshot = _snapshot()
     content = RecapGeneratedContent(
         headline="Alpha owns the week",
@@ -270,8 +325,8 @@ def test_copy_summary_contains_every_matchup_and_public_link(monkeypatch):
         ],
         ranking_explanations=[],
         award_explanations=[],
-        whatsapp_summary="model draft",
-        whatsapp_full="model draft",
+        whatsapp_summary="Alpha survived Beta in a week nobody saw coming.",
+        whatsapp_full="Alpha survived Beta in a week nobody saw coming, in full.",
     )
     monkeypatch.setattr(
         "backend.recaps.sharing.config.PUBLIC_APP_URL", "https://example.com"
@@ -279,8 +334,16 @@ def test_copy_summary_contains_every_matchup_and_public_link(monkeypatch):
 
     result = format_share_text(snapshot, content)
 
-    assert "Alpha 6–3 Beta" in result.whatsapp_summary
+    # The model's own narrative passes through untouched -- format_share_text
+    # only appends the link it's the only thing the model can't know.
+    assert result.whatsapp_summary.startswith(
+        "Alpha survived Beta in a week nobody saw coming."
+    )
+    assert result.whatsapp_full.startswith(
+        "Alpha survived Beta in a week nobody saw coming, in full."
+    )
     assert "https://example.com/recap?season=2026&week=1" in result.whatsapp_summary
+    assert "https://example.com/recap?season=2026&week=1" in result.whatsapp_full
 
 
 def test_deepseek_structured_completion_uses_json_mode(monkeypatch):
@@ -427,6 +490,25 @@ def test_rollback_router_uses_rollback_service(monkeypatch):
 
     assert result["status"] == "draft"
     rollback.assert_called_once()
+
+
+def test_structured_recap_prompt_includes_league_voice_notes_when_set():
+    snapshot_payload = {
+        "league": {"id": "league-1", "slug": "test", "name": "Test", "recap_voice": "Mention the Alpha/Beta rivalry."},
+    }
+
+    system_prompt, _ = prompts.build_structured_recap_prompts(snapshot_payload)
+
+    assert "LEAGUE-SPECIFIC VOICE NOTES" in system_prompt
+    assert "Mention the Alpha/Beta rivalry." in system_prompt
+
+
+def test_structured_recap_prompt_omits_voice_section_when_unset():
+    snapshot_payload = {"league": {"id": "league-1", "slug": "test", "name": "Test"}}
+
+    system_prompt, _ = prompts.build_structured_recap_prompts(snapshot_payload)
+
+    assert "LEAGUE-SPECIFIC VOICE NOTES" not in system_prompt
 
 
 def test_get_edition_by_id_normalizes_stored_snapshot(monkeypatch):

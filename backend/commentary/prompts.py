@@ -394,8 +394,29 @@ def build_structured_recap_prompts(
     playoff_context = snapshot.get("playoff_context")
 
     system_prompt = (
-        "You are the newsroom writer for a fantasy basketball league. "
-        "Use professional sports-journalism prose with witty, friendly trash talk. "
+        "You are the league's recap columnist -- not a stats-report generator. "
+        "Write like a commissioner who watches every matchup and knows every "
+        "owner: sports journalism with personality (ESPN recap crossed with a "
+        "feature article and group-chat banter), never an AI summary.\n\n"
+        "NARRATIVE FIRST. Facts create credibility; narrative creates "
+        "entertainment. Statistics support the story, they are not the story -- "
+        "use a number only when it makes a moment more dramatic. Before writing, "
+        "decide what actually mattered this week (an upset, a streak, a "
+        "collapse, standings chaos) and let that story lead; everything else "
+        "supports it. If nothing extraordinary happened, say so plainly instead "
+        "of manufacturing drama.\n\n"
+        "HEADLINE: should read like something ESPN would publish, with real "
+        "tension. Never 'Week N Recap' or 'League Update' -- think 'Kings "
+        "Fall.' or 'Chaos at the Top.'\n\n"
+        "TONE: punch upward at luck, randomness, bad schedules, and cursed "
+        "performances -- never at an owner personally. Roast the fantasy "
+        "outcome, not the person. Humor emerges from the facts (bad luck, "
+        "waiver-wire addiction, a last-second escape), never a joke for its "
+        "own sake.\n\n"
+        "AVOID: cliches like 'statement win', 'must win', 'absolute clinic', "
+        "'masterclass', 'gave 110%', 'at the end of the day', and AI-summary "
+        "tells like 'it's worth noting', 'ultimately', 'overall', "
+        "'in conclusion', 'showcased', 'demonstrated'.\n\n"
         "The supplied fact snapshot is your only source of truth. Never invent, "
         "infer, or import a player, team, score, result, ranking, transaction, "
         "award winner, or trend that is absent from it. Omit claims when evidence "
@@ -417,6 +438,9 @@ def build_structured_recap_prompts(
             "teams using only grounded facts (records, category strengths, how "
             "they won). Close with one playoff_final_line."
         )
+    recap_voice = (snapshot.get("league") or {}).get("recap_voice")
+    if recap_voice:
+        system_prompt += f"\n\nLEAGUE-SPECIFIC VOICE NOTES (apply on top of the above):\n{recap_voice}"
 
     schema = {
         "headline": "string",
@@ -425,7 +449,7 @@ def build_structured_recap_prompts(
         "matchup_takeaways": [
             {
                 "matchup_id": "exact snapshot matchup_id",
-                "text": "one sentence",
+                "text": "1-3 sentences: what made this matchup memorable, one supporting fact, one implication -- not a category-by-category recount",
                 "evidence_ids": ["exact snapshot evidence_id"],
             }
         ],
@@ -439,12 +463,12 @@ def build_structured_recap_prompts(
         "award_explanations": [
             {
                 "award_id": "exact deterministic award_id",
-                "text": "one grounded sentence",
+                "text": "one grounded sentence justifying the narrative behind the already-decided winner -- not restating the math",
                 "evidence_ids": ["exact snapshot evidence_id"],
             }
         ],
-        "whatsapp_summary": "few-scroll WhatsApp-ready summary",
-        "whatsapp_full": "complete WhatsApp-ready narrative without tables",
+        "whatsapp_summary": "a 30-second-read narrative in flowing prose, not a bulleted digest -- see WHATSAPP FORMAT below",
+        "whatsapp_full": "the complete narrative in flowing prose without tables -- see WHATSAPP FORMAT below",
     }
     if playoff_context:
         schema["playoff_matchup_recaps"] = [
@@ -476,11 +500,30 @@ def build_structured_recap_prompts(
         f"{json.dumps(schema, separators=(',', ':'))}\n\n"
         "FACT SNAPSHOT:\n"
         f"{json.dumps(snapshot, separators=(',', ':'), ensure_ascii=False)}\n\n"
+        "WHATSAPP FORMAT: whatsapp_summary and whatsapp_full are free narrative "
+        "prose, not itemized bullet lists -- write them the way you'd text a "
+        "group chat, not the way you'd write a report. A good shape for "
+        "whatsapp_summary: one headline-style opener, one paragraph naming the "
+        "week's storylines, a line on notable awards, a line on standings "
+        "movement, and a closing line that invites trash talk. whatsapp_full "
+        "can run longer but stays prose, no tables. Critically: every "
+        "matchup's two team names and every award's winner name must actually "
+        "appear, spelled exactly as in the fact snapshot, somewhere in BOTH "
+        "fields -- weave them into sentences rather than listing them "
+        "mechanically. Do not include a URL or link; one is appended "
+        "automatically after generation.\n\n"
         "Write the edition. Include a matchup_takeaway for every matchup and an "
-        "award_explanation for every supplied award. The WhatsApp summary must "
-        "include every matchup result, key ranking movers, selected awards, and "
-        "restrained section labels. If data_quality.ready is false, disclose the "
-        "warnings and do not fill the gaps."
+        "award_explanation for every supplied award. If data_quality.ready is "
+        "false, disclose the warnings and do not fill the gaps. lead_story "
+        "should read as one throughline (the week's biggest story, evidence "
+        "for it, why it matters going forward) rather than a paragraph per "
+        "matchup -- three "
+        "paragraphs is a good default when there's a clear headline story.\n\n"
+        "Before returning, check your own draft: does the headline create "
+        "curiosity instead of describing the document? Is there one clear "
+        "throughline the rest of the piece supports? Would a league member "
+        "quote a line of this in the group chat, or does it read like an "
+        "auto-generated summary?"
     )
     if playoff_context:
         user_prompt += (
@@ -490,6 +533,10 @@ def build_structured_recap_prompts(
             f"{playoff_context.get('total_rounds')}). Include a "
             "playoff_matchup_recap for every matchup, a playoff_outlook entry for "
             "every team in playoff_context.advancing_teams, 2-4 "
-            "playoff_storylines, and one playoff_final_line."
+            "playoff_storylines, and one playoff_final_line. The WhatsApp fields "
+            "must carry the playoff framing too: name the round, say who "
+            "advanced and who went home, and end whatsapp_summary with the "
+            "playoff_final_line -- woven into the prose, not appended as "
+            "labeled sections."
         )
     return system_prompt, user_prompt

@@ -290,8 +290,10 @@ def _base_content_kwargs(matchup_id: str) -> dict:
         ],
         ranking_explanations=[],
         award_explanations=[],
-        whatsapp_summary="s",
-        whatsapp_full="f",
+        # Free prose, but the completeness backstop requires every matchup
+        # team to be named in both fields.
+        whatsapp_summary="Alpha survived Beta in the semifinals.",
+        whatsapp_full="Alpha survived Beta in the semifinals, in full detail.",
     )
 
 
@@ -433,22 +435,29 @@ def test_generate_regular_season_week_ignores_playoff_fields(monkeypatch):
     assert result.playoff_final_line is None
 
 
-# --- sharing.format_share_text: playoff formatting --------------------------
+# --- sharing.format_share_text: playoff weeks -------------------------------
+# The playoff framing (round label, who advanced, storylines, final line) is
+# the model's job now, written directly into the WhatsApp prose per the
+# prompt; format_share_text no longer rebuilds labeled bullet sections.
 
-def test_share_text_uses_playoff_recap_and_round_label():
+def test_share_text_passes_playoff_prose_through_untouched():
     snapshot = _playoff_snapshot()
     matchup_id = snapshot.matchups[0]["matchup_id"]
+    prose = (
+        "Semifinals are done: Alpha adapted and survived Beta 6-3. "
+        "The best two teams remain."
+    )
     content = RecapGeneratedContent(
         headline="Alpha survives",
         dek="A grounded recap.",
         lead_story=["Alpha won."],
         matchup_takeaways=[
-            {"matchup_id": matchup_id, "text": "Should not appear.", "evidence_ids": [matchup_id]}
+            {"matchup_id": matchup_id, "text": "Alpha controlled it.", "evidence_ids": [matchup_id]}
         ],
         ranking_explanations=[],
         award_explanations=[],
-        whatsapp_summary="placeholder",
-        whatsapp_full="placeholder",
+        whatsapp_summary=prose,
+        whatsapp_full=prose + " In full.",
         playoff_matchup_recaps=[
             PlayoffMatchupRecap(
                 matchup_id=matchup_id,
@@ -468,10 +477,39 @@ def test_share_text_uses_playoff_recap_and_round_label():
 
     result = format_share_text(snapshot, content)
 
-    assert "Semifinals Matchups" in result.whatsapp_summary
-    assert "Alpha def. Beta 6-3 — Alpha adapted and survived." in result.whatsapp_summary
-    assert "Should not appear" not in result.whatsapp_summary
-    assert "What This Sets Up" in result.whatsapp_summary
-    assert "Battle-tested" in result.whatsapp_summary
-    assert "Storylines" in result.whatsapp_full
-    assert "The best two teams remain." in result.whatsapp_full
+    assert result.whatsapp_summary.startswith(prose)
+    assert result.whatsapp_full.startswith(prose + " In full.")
+    # Only the public link is appended; no rebuilt bullet sections.
+    assert "Read the published recap:" in result.whatsapp_summary
+    assert "🏀 *" not in result.whatsapp_summary
+    assert "What This Sets Up" not in result.whatsapp_summary
+
+
+def test_generate_playoff_week_still_enforces_whatsapp_completeness(monkeypatch):
+    import json as _json
+
+    snapshot = _playoff_snapshot()
+    matchup_id = snapshot.matchups[0]["matchup_id"]
+    payload = _base_content_kwargs(matchup_id)
+    payload.update(
+        playoff_matchup_recaps=[
+            {
+                "matchup_id": matchup_id,
+                "result_summary": "Alpha def. Beta 6-3",
+                "text": "Alpha adapted and survived.",
+                "evidence_ids": [matchup_id],
+            }
+        ],
+        playoff_outlook=[{"team": "Alpha", "text": "Peaking.", "evidence_ids": [matchup_id]}],
+        playoff_storylines=[{"title": "Survival", "text": "Barely.", "evidence_ids": [matchup_id]}],
+        playoff_final_line="Onward.",
+        whatsapp_summary="Alpha had a huge week.",  # Beta never named
+        whatsapp_full="Alpha survived Beta, in full.",
+    )
+    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
+    monkeypatch.setattr(
+        generate, "_complete_structured", lambda *a, **k: _json.dumps(payload)
+    )
+
+    with pytest.raises(ValueError, match="whatsapp_summary"):
+        generate.generate_structured_recap(snapshot)
