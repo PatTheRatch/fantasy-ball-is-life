@@ -451,21 +451,32 @@ def build_structured_recap_prompts(
                 "evidence_ids": ["exact snapshot evidence_id"],
             }
         ],
-        "whatsapp_summary": "few-scroll WhatsApp-ready summary",
-        "whatsapp_full": "complete WhatsApp-ready narrative without tables",
+        "whatsapp_summary": "a 30-second-read narrative in flowing prose, not a bulleted digest -- see WHATSAPP FORMAT below",
+        "whatsapp_full": "the complete narrative in flowing prose without tables -- see WHATSAPP FORMAT below",
     }
     user_prompt = (
         "OUTPUT SCHEMA:\n"
         f"{json.dumps(schema, separators=(',', ':'))}\n\n"
         "FACT SNAPSHOT:\n"
         f"{json.dumps(snapshot, separators=(',', ':'), ensure_ascii=False)}\n\n"
+        "WHATSAPP FORMAT: whatsapp_summary and whatsapp_full are free narrative "
+        "prose, not itemized bullet lists -- write them the way you'd text a "
+        "group chat, not the way you'd write a report. A good shape for "
+        "whatsapp_summary: one headline-style opener, one paragraph naming the "
+        "week's storylines, a line on notable awards, a line on standings "
+        "movement, and a closing line that invites trash talk. whatsapp_full "
+        "can run longer but stays prose, no tables. Critically: every "
+        "matchup's two team names and every award's winner name must actually "
+        "appear, spelled exactly as in the fact snapshot, somewhere in BOTH "
+        "fields -- weave them into sentences rather than listing them "
+        "mechanically. Do not include a URL or link; one is appended "
+        "automatically after generation.\n\n"
         "Write the edition. Include a matchup_takeaway for every matchup and an "
-        "award_explanation for every supplied award. The WhatsApp summary must "
-        "include every matchup result, key ranking movers, selected awards, and "
-        "restrained section labels. If data_quality.ready is false, disclose the "
-        "warnings and do not fill the gaps. lead_story should read as one "
-        "throughline (the week's biggest story, evidence for it, why it "
-        "matters going forward) rather than a paragraph per matchup -- three "
+        "award_explanation for every supplied award. If data_quality.ready is "
+        "false, disclose the warnings and do not fill the gaps. lead_story "
+        "should read as one throughline (the week's biggest story, evidence "
+        "for it, why it matters going forward) rather than a paragraph per "
+        "matchup -- three "
         "paragraphs is a good default when there's a clear headline story.\n\n"
         "Before returning, check your own draft: does the headline create "
         "curiosity instead of describing the document? Is there one clear "
