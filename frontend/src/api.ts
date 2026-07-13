@@ -24,12 +24,9 @@ function resolveDirectApiBase(): string {
   if (raw != null && String(raw).trim() !== '') {
     return String(raw).replace(/\/$/, '')
   }
-  // Dev default: bypass the Vite proxy and hit FastAPI directly. The proxy is
-  // fine for fast endpoints but drops long-running requests (recap
-  // generation: ESPN assembly + an LLM call, 10-15s) even with an extended
-  // proxy timeout in vite.config.ts, surfacing as a 502. CORS is already
-  // configured on the backend for localhost/127.0.0.1 origins.
-  if (import.meta.env.DEV) return 'http://127.0.0.1:8000'
+  // Dev default: use the Vite proxy (/api) so the browser only needs port 5173
+  // open through Tailscale. Port 8000 is not exposed externally.
+  if (import.meta.env.DEV) return '/api'
   // Prod builds have no Vite proxy either way, so API_BASE is already direct.
   return API_BASE
 }
