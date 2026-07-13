@@ -1,8 +1,16 @@
-"""Build a canonical, evidence-addressable weekly fact snapshot."""
+"""Build a canonical, evidence-addressable weekly fact snapshot.
+
+E3 snapshot cache: the recap readiness and generation endpoints are separate
+HTTP requests, but both call ``assemble_weekly_snapshot()`` with the same
+parameters. A short-TTL app-level cache (60 s, max 3 entries, LRU eviction)
+avoids redoing the full ESPN assembly when the two requests arrive within
+seconds of each other.
+"""
 from __future__ import annotations
 
 import math
 import re
+import time
 from typing import Any, Callable, Optional
 
 from backend.api.routers import league as league_api
@@ -14,6 +22,42 @@ from backend.commentary.schemas import (
 from backend.recaps import playoffs
 
 STAT_ORDER = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
+
+# --- snapshot cache -----------------------------------------------------------
+
+_CACHE_MAX_ENTRIES = 3
+_CACHE_TTL_SECONDS = 60
+_CACHE: dict[tuple[int, int, int], tuple[float, WeeklyFactSnapshot]] = {}
+"""App-level snapshot cache: key = (league_id, season, week), value = (epoch, snapshot)."""
+
+
+def _cache_key(league: dict[str, Any], season: int, week: int) -> tuple[int, int, int]:
+    return (int(league.get("id") or 0), season, week)
+
+
+def _cache_get(key: tuple[int, int, int]) -> Optional[WeeklyFactSnapshot]:
+    entry = _CACHE.get(key)
+    if entry is None:
+        return None
+    ts, snapshot = entry
+    if time.monotonic() - ts > _CACHE_TTL_SECONDS:
+        _CACHE.pop(key, None)
+        return None
+    return snapshot
+
+
+def _cache_put(key: tuple[int, int, int], snapshot: WeeklyFactSnapshot) -> None:
+    _CACHE[key] = (time.monotonic(), snapshot)
+    while len(_CACHE) > _CACHE_MAX_ENTRIES:
+        oldest_key = min(_CACHE, key=lambda k: _CACHE[k][0])
+        _CACHE.pop(oldest_key, None)
+
+
+def _clear_snapshot_cache() -> None:
+    _CACHE.clear()
+
+
+# --- helpers ------------------------------------------------------------------
 
 
 def _slug(value: Any) -> str:
@@ -143,7 +187,17 @@ def assemble_weekly_snapshot(
     week_start: str,
     week_end: str,
 ) -> WeeklyFactSnapshot:
-    """Collect facts server-side; callers provide only the selected week/date window."""
+    """Collect facts server-side; callers provide only the selected week/date window.
+
+    A short-TTL app-level cache (60 s) avoids redoing the full ESPN assembly when
+    the readiness and generation endpoints arrive seconds apart.
+    """
+    # --- E3 snapshot cache check ---
+    ck = _cache_key(league, season, week)
+    cached = _cache_get(ck)
+    if cached is not None:
+        return cached
+
     warnings: list[str] = []
     weeks_csv = ",".join(str(value) for value in range(1, week + 1))
 
@@ -213,7 +267,7 @@ def assemble_weekly_snapshot(
 
     playoff_context = _build_playoff_context(week, matchups, warnings)
 
-    return WeeklyFactSnapshot(
+    snapshot = WeeklyFactSnapshot(
         league={
             "id": league["id"],
             "slug": league["slug"],
@@ -237,6 +291,10 @@ def assemble_weekly_snapshot(
         ),
         playoff_context=playoff_context,
     )
+
+    # Cache the result so the follow-up generate request reuses this assembly.
+    _cache_put(ck, snapshot)
+    return snapshot
 
 
 def _build_playoff_context(

@@ -113,6 +113,11 @@ own small PRs as they're prioritized.
   calls → 1, saving 12 ESPN requests (~22 → ~10). The uncached
   `_my_league()` calls (power rankings, season stats) will be addressed
   in PR F.
+- [x] **Snapshot reuse for recap readiness/generation (PR E3).** The
+  readiness check and generate endpoint call ``assemble_weekly_snapshot()``
+  seconds apart with the same parameters. A 60 s TTL app-level cache (max
+  3 entries, LRU eviction) avoids redoing the full assembly when the two
+  requests arrive back-to-back.
 - [x] **Inconsistent error handling — partially fixed (PR E1).**
   `/league/meta`, `/league/teams`, `/league/standings` (`backend/api/routers/league.py`)
   had no try/except, unlike most other endpoints. Now wrapped and routed
