@@ -1,7 +1,7 @@
 """Validated contracts for weekly recap facts and generated narrative."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,19 @@ class AwardExplanation(EvidenceNarrative):
     award_id: str
 
 
+class PlayoffMatchupRecap(EvidenceNarrative):
+    matchup_id: str
+    result_summary: str = Field(min_length=1)
+
+
+class PlayoffOutlook(EvidenceNarrative):
+    team: str
+
+
+class PlayoffStoryline(EvidenceNarrative):
+    title: str = Field(min_length=1)
+
+
 class RecapGeneratedContent(BaseModel):
     headline: str = Field(min_length=1)
     dek: str = Field(min_length=1)
@@ -32,6 +45,12 @@ class RecapGeneratedContent(BaseModel):
     award_explanations: list[AwardExplanation] = Field(default_factory=list)
     whatsapp_summary: str = Field(min_length=1)
     whatsapp_full: str = Field(min_length=1)
+    # Playoff weeks only (see WeeklyFactSnapshot.playoff_context) -- empty/omitted
+    # for a regular-season week.
+    playoff_matchup_recaps: list[PlayoffMatchupRecap] = Field(default_factory=list)
+    playoff_outlook: list[PlayoffOutlook] = Field(default_factory=list)
+    playoff_storylines: list[PlayoffStoryline] = Field(default_factory=list)
+    playoff_final_line: Optional[str] = None
 
 
 class DataQualityReport(BaseModel):
@@ -39,6 +58,21 @@ class DataQualityReport(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     checks: dict[str, bool] = Field(default_factory=dict)
     transaction_quality: str = "counts_only"
+
+
+class PlayoffContext(BaseModel):
+    """Bracket facts for a playoff week, derived from league settings and this
+    week's decided matchups. Absent entirely for a regular-season week."""
+
+    round_label: str
+    round_index: int
+    total_rounds: int
+    is_championship: bool
+    advancing_teams: list[str] = Field(default_factory=list)
+    eliminated_teams: list[str] = Field(default_factory=list)
+    # Only populated once every advancing team appears in ESPN's own schedule
+    # for the next round -- never guessed from seeding rules.
+    next_round_matchups: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class WeeklyFactSnapshot(BaseModel):
@@ -54,6 +88,7 @@ class WeeklyFactSnapshot(BaseModel):
     season_stats: list[dict[str, Any]]
     award_candidates: list[dict[str, Any]]
     data_quality: DataQualityReport
+    playoff_context: Optional[PlayoffContext] = None
 
 
 def validate_generated_content(value: Any) -> RecapGeneratedContent:

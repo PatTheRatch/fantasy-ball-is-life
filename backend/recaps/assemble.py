@@ -6,7 +6,12 @@ import re
 from typing import Any, Callable, Optional
 
 from backend.api.routers import league as league_api
-from backend.commentary.schemas import DataQualityReport, WeeklyFactSnapshot
+from backend.commentary.schemas import (
+    DataQualityReport,
+    PlayoffContext,
+    WeeklyFactSnapshot,
+)
+from backend.recaps import playoffs
 
 STAT_ORDER = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
 
@@ -206,6 +211,8 @@ def assemble_weekly_snapshot(
     for row in ranking_facts:
         row["team_id"] = _slug(row.get("team") or row.get("Team"))
 
+    playoff_context = _build_playoff_context(week, matchups, warnings)
+
     return WeeklyFactSnapshot(
         league={
             "id": league["id"],
@@ -228,4 +235,46 @@ def assemble_weekly_snapshot(
             checks=checks,
             transaction_quality="counts_only" if transactions_ok else "unavailable",
         ),
+        playoff_context=playoff_context,
+    )
+
+
+def _build_playoff_context(
+    week: int, matchups: list[dict[str, Any]], warnings: list[str]
+) -> Optional[PlayoffContext]:
+    """None for a regular-season week or when settings/round derivation fail --
+    playoff context is additive and must never block generation."""
+    try:
+        settings = league_api.league_settings()
+    except Exception as exc:
+        warnings.append(f"League settings unavailable: {exc}")
+        return None
+
+    round_info = playoffs.playoff_round(
+        week=week,
+        reg_season_count=settings.get("reg_season_count"),
+        playoff_team_count=settings.get("playoff_team_count"),
+        playoff_matchup_period_length=settings.get("playoff_matchup_period_length"),
+    )
+    if round_info is None:
+        return None
+
+    advancing, eliminated = playoffs.playoff_advancement(matchups)
+    next_matchups: list[dict[str, Any]] = []
+    if not round_info["is_championship"]:
+        next_matchups = playoffs.next_round_matchups(
+            week=week,
+            next_round_week=round_info["next_round_week"],
+            advancing_teams=advancing,
+            schedule_loader=league_api.my_league_schedule,
+        )
+
+    return PlayoffContext(
+        round_label=round_info["round_label"],
+        round_index=round_info["round_index"],
+        total_rounds=round_info["total_rounds"],
+        is_championship=round_info["is_championship"],
+        advancing_teams=advancing,
+        eliminated_teams=eliminated,
+        next_round_matchups=next_matchups,
     )

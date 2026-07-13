@@ -391,6 +391,8 @@ def build_season_commentary_prompts(
 def build_structured_recap_prompts(
     snapshot: Dict[str, Any],
 ) -> Tuple[str, str]:
+    playoff_context = snapshot.get("playoff_context")
+
     system_prompt = (
         "You are the newsroom writer for a fantasy basketball league. "
         "Use professional sports-journalism prose with witty, friendly trash talk. "
@@ -401,6 +403,21 @@ def build_structured_recap_prompts(
         "text before or after it. Preserve every referenced matchup_id, team_id, "
         "award_id, and evidence_id exactly."
     )
+    if playoff_context:
+        system_prompt += (
+            " This is a PLAYOFF week (see the snapshot's playoff_context). Lean "
+            "heavily into playoff stakes: survival, elimination, and what each "
+            "matchup sets up next. For every matchup write a playoff_matchup_recap "
+            "with a punchy result_summary (e.g. 'TTW def. Optimize 6-3') and a "
+            "grounded account of what happened, using only facts present in the "
+            "snapshot -- never invent injuries, moves, or events absent from it. "
+            "Write a playoff_outlook entry for every team in "
+            "playoff_context.advancing_teams describing what advancing sets up "
+            "for them. Write 2-4 playoff_storylines contrasting the surviving "
+            "teams using only grounded facts (records, category strengths, how "
+            "they won). Close with one playoff_final_line."
+        )
+
     schema = {
         "headline": "string",
         "dek": "string",
@@ -429,6 +446,31 @@ def build_structured_recap_prompts(
         "whatsapp_summary": "few-scroll WhatsApp-ready summary",
         "whatsapp_full": "complete WhatsApp-ready narrative without tables",
     }
+    if playoff_context:
+        schema["playoff_matchup_recaps"] = [
+            {
+                "matchup_id": "exact snapshot matchup_id",
+                "result_summary": "e.g. 'TTW def. Optimize 6-3'",
+                "text": "2-4 grounded sentences on what happened in this matchup",
+                "evidence_ids": ["exact snapshot evidence_id"],
+            }
+        ]
+        schema["playoff_outlook"] = [
+            {
+                "team": "exact team name from playoff_context.advancing_teams",
+                "text": "1-2 sentences: what advancing sets up for this team",
+                "evidence_ids": ["exact snapshot evidence_id"],
+            }
+        ]
+        schema["playoff_storylines"] = [
+            {
+                "title": "short storyline title",
+                "text": "1-2 grounded sentences",
+                "evidence_ids": ["exact snapshot evidence_id"],
+            }
+        ]
+        schema["playoff_final_line"] = "one punchy closing line"
+
     user_prompt = (
         "OUTPUT SCHEMA:\n"
         f"{json.dumps(schema, separators=(',', ':'))}\n\n"
@@ -440,4 +482,14 @@ def build_structured_recap_prompts(
         "restrained section labels. If data_quality.ready is false, disclose the "
         "warnings and do not fill the gaps."
     )
+    if playoff_context:
+        user_prompt += (
+            "\n\nThis is a PLAYOFF week: "
+            f"{playoff_context.get('round_label')} "
+            f"(round {playoff_context.get('round_index')} of "
+            f"{playoff_context.get('total_rounds')}). Include a "
+            "playoff_matchup_recap for every matchup, a playoff_outlook entry for "
+            "every team in playoff_context.advancing_teams, 2-4 "
+            "playoff_storylines, and one playoff_final_line."
+        )
     return system_prompt, user_prompt

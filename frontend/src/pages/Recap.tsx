@@ -500,9 +500,16 @@ export function Recap() {
 
           {snapshot?.matchups && snapshot.matchups.length > 0 && (
             <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
-              <h2 className="text-lg font-bold text-white">Matchup results</h2>
+              <h2 className="text-lg font-bold text-white">
+                {snapshot.playoff_context
+                  ? `${snapshot.playoff_context.round_label} results`
+                  : 'Matchup results'}
+              </h2>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 {snapshot.matchups.map((row) => {
+                  const playoffRecap = content.playoff_matchup_recaps.find(
+                    (item) => item.matchup_id === row.matchup_id,
+                  )
                   const takeaway = content.matchup_takeaways.find(
                     (item) => item.matchup_id === row.matchup_id,
                   )
@@ -511,16 +518,63 @@ export function Recap() {
                       key={String(row.matchup_id)}
                       className="rounded-xl border border-slate-800 bg-slate-950/40 p-4"
                     >
-                      <p className="font-bold text-white">{matchupLabel(row)}</p>
-                      {takeaway && (
+                      <p className="font-bold text-white">
+                        {playoffRecap?.result_summary ?? matchupLabel(row)}
+                      </p>
+                      {playoffRecap ? (
                         <p className="mt-2 text-sm leading-6 text-slate-400">
-                          {takeaway.text}
+                          {playoffRecap.text}
                         </p>
+                      ) : (
+                        takeaway && (
+                          <p className="mt-2 text-sm leading-6 text-slate-400">
+                            {takeaway.text}
+                          </p>
+                        )
                       )}
                     </div>
                   )
                 })}
               </div>
+            </section>
+          )}
+
+          {snapshot?.playoff_context && (
+            <section className="space-y-4 rounded-2xl border border-amber-800/40 bg-amber-950/10 p-5">
+              {content.playoff_outlook.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-bold text-white">What This Sets Up</h2>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {content.playoff_outlook.map((item) => (
+                      <div
+                        key={item.team}
+                        className="rounded-xl border border-amber-800/30 bg-slate-950/40 p-4"
+                      >
+                        <p className="font-bold text-white">{item.team}</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-400">{item.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {content.playoff_storylines.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-bold text-white">Storylines</h2>
+                  <div className="mt-3 space-y-3">
+                    {content.playoff_storylines.map((item) => (
+                      <div key={item.title}>
+                        <p className="font-semibold text-amber-200">{item.title}</p>
+                        <p className="mt-1 text-sm leading-6 text-slate-400">{item.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {content.playoff_final_line && (
+                <p className="border-t border-amber-800/30 pt-4 text-base font-semibold italic text-amber-100">
+                  {content.playoff_final_line}
+                </p>
+              )}
             </section>
           )}
         </>
