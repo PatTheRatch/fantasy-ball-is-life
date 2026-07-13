@@ -559,7 +559,7 @@ export function Recap() {
               </h2>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 {snapshot.matchups.map((row) => {
-                  const playoffRecap = content.playoff_matchup_recaps.find(
+                  const playoffRecap = (content.playoff_matchup_recaps || []).find(
                     (item) => item.matchup_id === row.matchup_id,
                   )
                   const takeaway = content.matchup_takeaways.find(
@@ -593,7 +593,7 @@ export function Recap() {
 
           {snapshot?.playoff_context && (
             <section className="space-y-4 rounded-2xl border border-amber-800/40 bg-amber-950/10 p-5">
-              {content.playoff_outlook.length > 0 && (
+              {(content.playoff_outlook || []).length > 0 && (
                 <div>
                   <h2 className="text-lg font-bold text-white">What This Sets Up</h2>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -609,7 +609,7 @@ export function Recap() {
                   </div>
                 </div>
               )}
-              {content.playoff_storylines.length > 0 && (
+              {(content.playoff_storylines || []).length > 0 && (
                 <div>
                   <h2 className="text-lg font-bold text-white">Storylines</h2>
                   <div className="mt-3 space-y-3">
