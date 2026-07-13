@@ -1096,9 +1096,9 @@ def get_projected_matchup_table(
     current_scoreboard = get_current_scoreboard(h, scoring_period=scoring_period)
     rosters = get_current_rosters(
         h,
-        MATCHUP_WEEKS_2025_26[current_matchup_period]["start"],
-        MATCHUP_WEEKS_2025_26[current_matchup_period]["end"],
-        current_matchup_period=current_matchup_period,
+        MATCHUP_WEEKS_2025_26[week]["start"],
+        MATCHUP_WEEKS_2025_26[week]["end"],
+        current_matchup_period=week,
         projections=projections,
     ).copy()
 
@@ -1657,6 +1657,11 @@ def matchups_df(h, scoring_period=None):
     try:
         matchups = h.league.box_scores(scoring_period=scoring_period)
     except Exception:
+        import logging
+        logging.warning(
+            "matchups_df: ESPN box_scores failed, returning empty frame",
+            exc_info=True,
+        )
         matchups = []
 
     def clean_key(k: str) -> str:

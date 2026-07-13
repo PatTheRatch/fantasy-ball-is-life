@@ -70,43 +70,29 @@ own small PRs as they're prioritized.
   live-confirmed. Fixed (PR C).** `MyLeague.get_wins()` reindexed every week to
   all league teams and filled missing rows with zero. Week 21 had 11 unique
   active teams but returned rankings for 14; each synthetic team received 11
-  turnover wins. Fixed: weekly all-play now runs only among teams with a real
-  matchup row that week (bye/eliminated teams are excluded, never zero-filled),
-  `get_universe_wins` drops the empty per-week frames, and TO direction is
-  sourced from the shared `data_feed.LOWER_IS_BETTER_STATS` constant (the
-  downstream negated-TO convention used by power rankings and the draft
-  optimizer is preserved). Tests in `tests/test_allplay_playoff_participants.py`
-  (14 active / 12+2 bye / 10+4 eliminated, ghost exclusion, TO direction).
-- [ ] **Transactions are unavailable — live-confirmed.**
-  `recent_activity()` returned HTTP 404, then `safe_recent_activity()` failed
-  on missing `League.espn_s2`. Replace both with the documented weekly
-  `mTransactions2` adapter before enabling transaction recap awards.
-- [ ] **`get_projected_matchup_table` crashes** (`data_feed.py:876-878`) —
-  references `current_matchup_period`, which isn't a parameter or local
-  variable, so it always raises `NameError`. Its only caller is the
-  `python data_feed.py` CLI entrypoint (`run()`, line ~1979), not the FastAPI
-  app, so this doesn't affect the running API today — but the CLI is currently
-  broken.
+  - [x] **Recap turnover winners are reversed — fixed (PR #25).**
+    `get_current_scoreboard()` stores TO as a natural positive count (fewer
+    is better), and `canonical_matchups()` applies lower-is-better once.
+    Confirmed by `test_scoreboard_turnovers.py`.
+  - [x] **Transactions are unavailable — fixed (PR #19).**
+    `recent_activity()` returned HTTP 404, then `safe_recent_activity()` failed
+    on missing `League.espn_s2`. Replaced with the working weekly
+    `mTransactions2` adapter.
+  - [x] **`get_projected_matchup_table` crashes — fixed (PR G).**
+    Referenced `current_matchup_period`, which wasn't a parameter — always
+    raised `NameError`. Now uses the `week` parameter that's actually in scope.
+    CLI-only, not FastAPI.
 
 ## Reliability — real risk, not urgent
 
-- [ ] **Repeated, uncached ESPN calls in plan generation — live-confirmed.**
-  `generate_multiple_plans()` (`optimize_lineup.py`) constructs a brand-new
-  `MyLeague` → live `League()` fetch **per plan**, and `POST
-  /optimizer/multiple-plans` (`backend/api/routers/optimizer.py`) exposes `n_plans` as a client-supplied
-  int with no upper bound — one request can trigger unbounded live ESPN
-  traffic. Each plan can also call `get_universe_wins` up to
-  `reg_season_count` times inside `get_target_stats`. **Relevant to the Draft
-  Room spec:** confirm whether Aisha's `~3.77s/solve` benchmark included a real
-  ESPN round-trip — if `MyLeague` construction is part of the per-plan cost in
-  production, the spec's "0-2 re-solves, 0-8s between picks" model may be
-  optimistic. The modern Draft Room caps `n_plans` at 10, but its default
-  portfolio still has an inferred 44 ESPN requests (27.3 MB) before page
-  bootstrap. Fix: reuse one `MyLeague` across a portfolio's plans and cap or
-  retire the legacy unbounded endpoint.
-- [ ] **No backend caching — live-confirmed and quantified.** Every request hits ESPN live
-  (`backend/api/deps.py` `_handles()`/`_my_league()`). A short-TTL cache keyed by
-  `(league_id, season)` would remove most of the rate-limit exposure above.
+- [x] **Repeated, uncached ESPN calls in plan generation — fixed (PR F + G).**
+  `generate_multiple_plans()` now reuses one `MyLeague` across a portfolio's
+  plans via `get_cached_my_league()`, so 20 plans = 1 construction instead of
+  20. The legacy `/optimizer/multiple-plans` endpoint now caps `n_plans` at 10
+  via a Pydantic validator (PR G).
+- [x] **No backend caching — fixed (E2 + E3 + F).** `connect()` and
+  `_my_league()` are now backed by a `ContextVar`-scoped request cache; recap
+  snapshot reuse has a 60s TTL. Full recap assembly: ~22 ESPN requests → ~6.
 - [x] **Recap (connect) cache partially added (PR E2).** `connect()`
   is now backed by a `ContextVar`-scoped request cache (one `League`
   construction per HTTP request instead of four). Recap's 4 `connect()`
@@ -139,10 +125,11 @@ own small PRs as they're prioritized.
   typed `ESPNTimeoutError` / `ESPNUnavailableError`. `safe_recent_activity()`'s
   direct call now goes through the same `espn_get()` wrapper. Tests in
   `tests/test_espn_gateway.py`.
-- [ ] **Silent failure swallowing.** `matchups_df()`
-  (`data_feed.py:1384-1388`) catches all exceptions from `league.box_scores()`
-  via a bare `except: matchups = []`, which masks real ESPN failures as "no
-  data" instead of surfacing them.
+- [x] **Silent failure swallowing — fixed (PR G).** `matchups_df()`
+  (`data_feed.py:1656-1660`) caught all exceptions from `league.box_scores()`
+  via a bare `except Exception: matchups = []`, masking real ESPN failures.
+  Now logs the error with `logging.warning(exc_info=True)` while preserving
+  the empty fallback for UI resilience.
 
 ## Minor
 
@@ -156,7 +143,8 @@ own small PRs as they're prioritized.
 - [ ] `MultiplePlansBody.out_prefix` (`backend/api/routers/optimizer.py`) is caller-controlled and used
   unsanitized in a file path (`optimize_lineup.py`, `generate_multiple_plans`)
   — a plausible path-traversal opening if this endpoint is ever exposed beyond
-  a trusted single user.
+  a trusted single user. **Deferred; revisit before any multi-user or external
+  exposure.**
 - [ ] `league_id` is not overridable per-request in the API — every endpoint
   uses the module-level `config.LEAGUE_ID` constant. Expected for a
   single-league v1 (per the dossier's Decision A), but confirms multi-league
