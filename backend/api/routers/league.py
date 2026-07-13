@@ -351,8 +351,9 @@ def matchup_confidence(
                     player_avg = float("nan")
                 else:
                     if stat_key == "to":
-                        # Matchup-scoreboard encodes TO so "higher is better" => it's negative.
-                        # The confidence model expects positive turnover counts for LOWER_IS_BETTER handling.
+                        # TO is a natural positive count; abs() defends against any
+                        # legacy negative encoding so the confidence model always
+                        # sees positive turnover counts for LOWER_IS_BETTER handling.
                         x = abs(x)
                     projected_value = x / games
                     player_avg = projected_value

@@ -96,7 +96,7 @@ export function projectedRecord(stats: JsonRecord[]): { home: number; away: numb
   return { home: hw, away: aw }
 }
 
-/** Winner for current/live stats (TO uses ESPN-style negative values; higher is better). */
+/** Winner for current/live stats (TO is a natural positive count, fewer is better; all others higher is better). */
 export function currentStatWinner(
   stat: string,
   homeRaw: number,
@@ -108,8 +108,9 @@ export function currentStatWinner(
     return { home: 'T', away: 'T' }
   }
   if (stat === 'TO') {
-    if (h > a) return { home: 'W', away: 'L' }
-    if (a > h) return { home: 'L', away: 'W' }
+    // Turnovers are a natural positive count; fewer is better.
+    if (h < a) return { home: 'W', away: 'L' }
+    if (a < h) return { home: 'L', away: 'W' }
     return { home: 'T', away: 'T' }
   }
   if (h > a) return { home: 'W', away: 'L' }
