@@ -3,7 +3,7 @@
 Every FastAPI request that touches ESPN constructs a fresh ``League`` object
 via ``connect()``, which makes 4 HTTP calls (~2.5 MB) regardless of the view
 the caller actually needs. In the recap path, ``assemble_weekly_snapshot()``
-calls ``connect()`` 5 separate times → 20 redundant requests. In the Draft
+calls ``connect()`` 4 separate times → 12 redundant requests. In the Draft
 Room, a default 10-plan portfolio infers 11 ``MyLeague`` constructions →
 44 requests.
 
