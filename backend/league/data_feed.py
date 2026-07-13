@@ -218,13 +218,35 @@ def _date_range(start: date, end: date) -> List[date]:
 # --------------------------- DATA LAYER -------------------------------------
 
 def connect() -> ESPNHandles:
+    """Return (possibly cached) league handles for the configured league.
+
+    When running inside an HTTP request with the request-scoped cache middleware
+    active (``ESPNRequestCacheMiddleware``), only the first call constructs a
+    new ``League`` (4 ESPN requests); subsequent ``connect()`` calls inside the
+    same request reuse the cached handles.
+    """
+    from backend.league.cache import ESPNRequestCache, get_request_cache
+
+    cache = get_request_cache()
+    if cache is not None:
+        existing = cache.get(LEAGUE_ID, SEASON)
+        if existing is not None:
+            cache.load(LEAGUE_ID, SEASON)
+            return existing
+        cache.load_miss(LEAGUE_ID, SEASON)
+
     league = League(
         league_id=LEAGUE_ID,
         year=SEASON,
         espn_s2=ESPN_S2,
         swid=SWID,
     )
-    return ESPNHandles(league=league)
+    handles = ESPNHandles(league=league)
+
+    if cache is not None:
+        cache.put(LEAGUE_ID, SEASON, handles)
+
+    return handles
 
 
 def pull_league_meta(h: ESPNHandles) -> Dict[str, Any]:

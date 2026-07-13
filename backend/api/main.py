@@ -36,7 +36,13 @@ except Exception:
     # If `python-dotenv` isn't installed or .env doesn't exist, we'll just rely on real env vars.
     pass
 
+from backend.league.cache import ESPNRequestCacheMiddleware
+
 app = FastAPI(title="PatriotGames Fantasy API", version="0.1.0")
+
+# ESPN request cache: reuses one League construction per request, saves ~16 of
+# the 22 ESPN calls in recap assembly and ~40 of 44 in a Draft Room portfolio.
+app.add_middleware(ESPNRequestCacheMiddleware)
 
 # Browser dev: any localhost / 127.0.0.1 port (Vite may use 5174+, etc.) + common LAN preview IPs.
 app.add_middleware(
