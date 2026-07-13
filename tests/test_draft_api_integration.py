@@ -18,6 +18,7 @@ import pytest
 pd = pytest.importorskip("pandas")
 pytest.importorskip("fastapi")
 ol = pytest.importorskip("backend.draft.optimizer")
+from backend.league import cache
 
 try:
     from backend.config import BBM_PROJECTIONS_PATH
@@ -44,7 +45,7 @@ class _FakeLeague:
 def test_draft_plans_then_pick_round_trip(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     # set_requirements needs live ESPN history; stub it to a no-op so the
     # solve proceeds unconstrained by category targets (same lower-bound
     # caveat as test_plan_diversity_integration.py — real category targets
@@ -195,7 +196,7 @@ def _synthetic_plan(plan_id="balanced", health="broken", roster=None):
 def test_draft_relax_runs_the_sweep_and_returns_a_feasible_proposal(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
 
     from fastapi.testclient import TestClient
@@ -245,7 +246,7 @@ def test_draft_relax_requires_prior_plans():
 def test_exclude_players_never_appear_in_any_plan(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
     from fastapi.testclient import TestClient
 
@@ -267,7 +268,7 @@ def test_exclude_players_never_appear_in_any_plan(monkeypatch):
 def test_favorite_team_representation_is_respected(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
     from fastapi.testclient import TestClient
 
@@ -305,7 +306,7 @@ def test_favorite_team_representation_is_respected(monkeypatch):
 def test_target_player_is_pre_locked_onto_every_plan_at_projected_price(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
     from fastapi.testclient import TestClient
 
@@ -350,7 +351,7 @@ def test_target_player_is_pre_locked_onto_every_plan_at_projected_price(monkeypa
 def test_target_categories_and_stat_to_maximize_are_respected(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
     from fastapi.testclient import TestClient
 
@@ -394,7 +395,7 @@ def test_draft_plans_custom_solves_one_hand_tuned_plan(monkeypatch):
     caller."""
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
 
     from fastapi.testclient import TestClient
@@ -480,7 +481,7 @@ def test_value_source_forge_prices_the_value_board_differently(monkeypatch):
 
             self.settings = _Settings()
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeagueWithSettings)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeagueWithSettings)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
 
     from fastapi.testclient import TestClient
@@ -513,7 +514,7 @@ def test_value_source_rejects_unknown_value():
 def test_draft_players_search_matches_by_substring(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)
@@ -530,7 +531,7 @@ def test_draft_players_search_matches_by_substring(monkeypatch):
 def test_draft_players_search_requires_two_chars(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)
@@ -544,7 +545,7 @@ def test_draft_players_search_requires_two_chars(monkeypatch):
 def test_draft_players_search_no_match_returns_empty(monkeypatch):
     import backend.api.main as api
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     from fastapi.testclient import TestClient
 
     client = TestClient(api.app)

@@ -30,6 +30,7 @@ from backend.draft.strategies import build_plan_configs, generate_portfolio
 
 pd = pytest.importorskip("pandas")
 ol = pytest.importorskip("backend.draft.optimizer")
+from backend.league import cache
 
 try:
     from backend.config import BBM_PROJECTIONS_PATH
@@ -52,7 +53,7 @@ class _FakeLeague:
 
 
 def _make_solver(projections_df, monkeypatch):
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
 
     def solve(cfg):
         opt = ol.OptimizeLineup(
@@ -119,7 +120,7 @@ def test_default_recipe_solves_for_real_with_mc_targets_and_stays_bounded(monkey
 
     from backend.config import SOLVER_TIME_LIMIT_SECONDS
 
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
 
     configs = build_plan_configs(10)
     failures = []

@@ -10,6 +10,7 @@ the engine deps or the projections file aren't available.
 import contextlib
 import io
 import os
+from backend.league import cache
 
 import pytest
 
@@ -52,7 +53,7 @@ class _FakeLeagueNoSettings:
 
 
 def _build(monkeypatch, league_cls, **kwargs):
-    monkeypatch.setattr(ol, "MyLeague", league_cls)
+    monkeypatch.setattr(cache, "MyLeague", league_cls)
     with contextlib.redirect_stdout(io.StringIO()):
         return ol.OptimizeLineup(
             initial_budget=200,
@@ -106,6 +107,6 @@ def test_forge_value_falls_back_when_league_settings_unavailable(monkeypatch):
 
 
 def test_invalid_value_source_rejected(monkeypatch):
-    monkeypatch.setattr(ol, "MyLeague", _fake_league(10))
+    monkeypatch.setattr(cache, "MyLeague", _fake_league(10))
     with pytest.raises(ValueError):
         ol.OptimizeLineup(value_source="yahoo")

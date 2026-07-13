@@ -69,12 +69,12 @@ def test_my_league_reuses_cached_instance(monkeypatch):
 
     from backend.api.main import app
     from backend.api.deps import _my_league
-    from backend.api import deps as dmod
+    from backend.league import cache
 
     client = TestClient(app)
     call_count = 0
 
-    original_ml = dmod.MyLeague
+    original_ml = cache.MyLeague
 
     def _counting_ml(*args, **kwargs):
         nonlocal call_count
@@ -88,7 +88,7 @@ def test_my_league_reuses_cached_instance(monkeypatch):
         ml.length_of_schedule = 20
         return ml
 
-    monkeypatch.setattr(dmod, "MyLeague", _counting_ml)
+    monkeypatch.setattr(cache, "MyLeague", _counting_ml)
 
     @app.get("/__test_my_league_reuse__")
     def _reuse():
@@ -105,12 +105,12 @@ def test_my_league_reuses_cached_instance(monkeypatch):
 def test_my_league_works_without_cache_outside_request(monkeypatch):
     """CLI / Streamlit contexts have no middleware → _my_league() must still work."""
     from backend.league.cache import set_request_cache
-    from backend.api import deps as dmod
+    from backend.league import cache
 
     set_request_cache(None)
 
     mock_ml = Mock()
-    monkeypatch.setattr(dmod, "MyLeague", Mock(return_value=mock_ml))
+    monkeypatch.setattr(cache, "MyLeague", Mock(return_value=mock_ml))
 
     from backend.api.deps import _my_league
 
@@ -124,7 +124,7 @@ def test_my_league_isolation_between_requests(monkeypatch):
 
     from backend.api.main import app
     from backend.api.deps import _my_league
-    from backend.api import deps as dmod
+    from backend.league import cache
 
     client = TestClient(app)
     call_count = 0
@@ -140,7 +140,7 @@ def test_my_league_isolation_between_requests(monkeypatch):
         ml.length_of_schedule = 20
         return ml
 
-    monkeypatch.setattr(dmod, "MyLeague", _counting_ml)
+    monkeypatch.setattr(cache, "MyLeague", _counting_ml)
 
     @app.get("/__test_ml_req_a__")
     def _req_a():

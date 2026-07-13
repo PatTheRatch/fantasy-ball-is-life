@@ -23,6 +23,7 @@ import contextvars
 from typing import Optional
 
 from backend.league.data_feed import ESPNHandles
+from backend.league.fantasy import MyLeague  # exported so tests can patch it
 
 _CACHE_VAR: contextvars.ContextVar[Optional["ESPNRequestCache"]] = (
     contextvars.ContextVar("espn_request_cache", default=None)
@@ -80,6 +81,30 @@ def get_request_cache() -> Optional[ESPNRequestCache]:
 def set_request_cache(cache: Optional[ESPNRequestCache]) -> None:
     """Set (or clear) the per-request cache."""
     _CACHE_VAR.set(cache)
+
+
+def get_cached_my_league(league_id: int, year: int) -> Any:
+    """Return a (possibly cached) ``MyLeague`` for the given league and season.
+
+    Checks the per-request cache first; constructs a new ``MyLeague`` (4 ESPN
+    requests) on a miss, then stores it. Returns the uncached result when no
+    request cache is active (CLI / Streamlit).
+
+    Lives in the league layer (not ``api.deps``) so the Draft optimizer can
+    import it without an upward dependency.
+    """
+    cache = get_request_cache()
+    if cache is not None:
+        existing = cache.get_my_league(league_id, year)
+        if existing is not None:
+            return existing
+
+    ml = MyLeague(league_id, year)
+
+    if cache is not None:
+        cache.put_my_league(league_id, year, ml)
+
+    return ml
 
 
 class ESPNRequestCacheMiddleware:

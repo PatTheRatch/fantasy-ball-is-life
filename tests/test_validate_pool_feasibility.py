@@ -13,6 +13,7 @@ import os
 import pytest
 
 ol = pytest.importorskip("backend.draft.optimizer")
+from backend.league import cache
 
 try:
     from backend.config import BBM_PROJECTIONS_PATH
@@ -33,7 +34,7 @@ class _FakeLeague:
 
 @pytest.fixture(autouse=True)
 def _isolate_espn(monkeypatch):
-    monkeypatch.setattr(ol, "MyLeague", _FakeLeague)
+    monkeypatch.setattr(cache, "MyLeague", _FakeLeague)
     monkeypatch.setattr(ol.OptimizeLineup, "set_requirements", lambda self, cats, percentile=0.75: None)
 
 
