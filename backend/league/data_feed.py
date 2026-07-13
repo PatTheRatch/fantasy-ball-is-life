@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import requests
 from dataclasses import dataclass
 from datetime import datetime, timedelta, date
 from typing import List, Optional, Dict, Any, Tuple, Iterable
@@ -64,6 +63,13 @@ except Exception as e:
     raise SystemExit(
         "You need the `espn-api` package. Install with: pip install espn-api"
     )
+
+from backend.league.gateway import espn_get, install_espn_timeout_patch
+
+# Every ESPN call in this module (and anything built on `connect()`/`League`)
+# goes through espn-api's internal `requests.get`, which has no timeout. Patch
+# it before any request can fire.
+install_espn_timeout_patch()
 
 from backend.config import (
     BBM_PROJECTIONS_PATH,
@@ -468,7 +474,7 @@ def safe_recent_activity(h, limit=200):
     if h.league.swid:
         cookies["SWID"] = h.league.swid
 
-    r = requests.get(url, cookies=cookies)
+    r = espn_get(url, cookies=cookies)
     r.raise_for_status()
 
     data = r.json()

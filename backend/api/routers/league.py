@@ -8,7 +8,13 @@ import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 
-from backend.api.deps import _df_records, _handles, _my_league, _read_excel_bytes
+from backend.api.deps import (
+    _df_records,
+    _espn_http_exception,
+    _handles,
+    _my_league,
+    _read_excel_bytes,
+)
 from backend.league import data_feed as feed
 
 router = APIRouter(tags=["league"])
@@ -38,8 +44,11 @@ def _validate_week_range(week_start_date: Optional[str], week_end_date: Optional
 
 @router.get("/league/meta")
 def league_meta() -> dict[str, Any]:
-    h = _handles()
-    return feed.pull_league_meta(h)
+    try:
+        h = _handles()
+        return feed.pull_league_meta(h)
+    except Exception as e:
+        raise _espn_http_exception(e) from e
 
 
 @router.get("/league/my-league/schedule")
@@ -417,14 +426,20 @@ def matchup_confidence(
 
 @router.get("/league/teams")
 def league_teams() -> List[dict[str, Any]]:
-    h = _handles()
-    return _df_records(feed.teams_df(h))
+    try:
+        h = _handles()
+        return _df_records(feed.teams_df(h))
+    except Exception as e:
+        raise _espn_http_exception(e) from e
 
 
 @router.get("/league/standings")
 def league_standings() -> List[dict[str, Any]]:
-    h = _handles()
-    return _df_records(feed.standings_df(h))
+    try:
+        h = _handles()
+        return _df_records(feed.standings_df(h))
+    except Exception as e:
+        raise _espn_http_exception(e) from e
 
 
 @router.get("/league/settings")
