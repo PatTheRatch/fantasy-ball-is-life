@@ -35,15 +35,17 @@ own small PRs as they're prioritized.
 
 ## Correctness — should fix before relying on the affected path
 
-- [ ] **`GET /rosters/current` silently zeroes games-left for every player
-  — live-confirmed**
-  when the optional `week_start_date`/`week_end_date` query params are omitted.
-  `data_feed.py:1052-1053` defaults `week_start_date="2026-10-15"` *after*
-  `week_end_date="2026-04-30"`, so `count_games_in_range`'s range check is
-  always false. No validation catches the inverted default. Fix: derive sane
-  defaults from the current matchup period, or validate `start <= end` and
-  400 if not. Live result: 181 roster rows, zero positive games-left by
-  default; the correct week-21 dates produced 649 player-games.
+- [x] **`GET /rosters/current` silently zeroes games-left for every player
+  — live-confirmed. Fixed (PR D).**
+  When the optional `week_start_date`/`week_end_date` query params were omitted,
+  `get_current_rosters` defaulted `week_start_date="2026-10-15"` *after*
+  `week_end_date="2026-04-30"`, so `count_games_in_range`'s range check was
+  always false (live: 181 roster rows, zero games-left by default; the correct
+  week-21 dates produced 649 player-games). Fixed both ways: a new
+  `resolve_roster_week_window()` derives a forward window from the matchup
+  period (falling back to the league's current week) when a bound is omitted,
+  and the `/rosters/current` GET+POST endpoints return 400 on an explicitly
+  inverted range. Tests in `tests/test_roster_week_window.py`.
 - [ ] **Recap turnover winners are reversed — live-confirmed.**
   `get_current_scoreboard()` negates ESPN's positive turnover totals so
   frontend code can compare all categories as higher-is-better.

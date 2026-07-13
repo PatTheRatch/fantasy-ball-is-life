@@ -1230,6 +1230,40 @@ def get_projected_matchup_table(
 
     return out
 
+def resolve_roster_week_window(
+    week_start_date: Optional[str],
+    week_end_date: Optional[str],
+    current_matchup_period: Optional[int] = None,
+    league_current_week: Optional[int] = None,
+) -> Tuple[pd.Timestamp, pd.Timestamp]:
+    """Resolve the ``(start, end)`` window used to count a roster's games left.
+
+    Explicit dates win. When either is missing it is derived from the matchup
+    period (falling back to the league's current week) via
+    ``MATCHUP_WEEKS_2025_26``. The previous hardcoded defaults were inverted —
+    ``week_start_date`` (2026-10-15) fell *after* ``week_end_date`` (2026-04-30),
+    so ``count_games_in_range`` was always false and every player reported zero
+    games left. Returns pandas Timestamps (either may be ``NaT`` if a bound is
+    genuinely unresolvable, e.g. an out-of-range period with no explicit date).
+    """
+    start = week_start_date
+    end = week_end_date
+    if start is None or end is None:
+        period = current_matchup_period if current_matchup_period is not None else league_current_week
+        meta = None
+        if period is not None:
+            try:
+                meta = MATCHUP_WEEKS_2025_26.get(int(period))
+            except (TypeError, ValueError):
+                meta = None
+        if meta:
+            if start is None:
+                start = meta["start"]
+            if end is None:
+                end = meta["end"]
+    return pd.to_datetime(start), pd.to_datetime(end)
+
+
 def get_current_rosters(
     h: ESPNHandles,
     week_start_date: Optional[str] = None,
@@ -1245,9 +1279,15 @@ def get_current_rosters(
         f"[get_current_rosters] projections={projections!r} current_matchup_period={current_matchup_period!r} "
         f"bbm_df_provided={bbm_df is not None} bbm_path={bbm_path!r}"
     )
-    # --- Date setup (kept your defaults) ---
-    week_end_date = pd.to_datetime(week_end_date or "2026-04-30")
-    week_start_date = pd.to_datetime(week_start_date or "2026-10-15")
+    # --- Date setup ---
+    # Derive a sane week window (the old hardcoded defaults were inverted, which
+    # zeroed games-left for every player when the dates were omitted).
+    week_start_date, week_end_date = resolve_roster_week_window(
+        week_start_date,
+        week_end_date,
+        current_matchup_period=current_matchup_period,
+        league_current_week=getattr(h.league, "currentMatchupPeriod", None),
+    )
 
     # configurable windows / stats
     WINDOWS = [15, 30]

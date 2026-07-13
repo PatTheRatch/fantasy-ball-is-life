@@ -13,6 +13,29 @@ from backend.league import data_feed as feed
 
 router = APIRouter(tags=["league"])
 
+
+def _validate_week_range(week_start_date: Optional[str], week_end_date: Optional[str]) -> None:
+    """Reject an explicitly inverted roster date window with a 400.
+
+    Only validates when the caller supplies both bounds; when either is omitted
+    the data layer derives a sane window from the matchup period.
+    """
+    if not week_start_date or not week_end_date:
+        return
+    try:
+        start = pd.to_datetime(week_start_date)
+        end = pd.to_datetime(week_end_date)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(
+            status_code=422,
+            detail="week_start_date/week_end_date must be valid dates (YYYY-MM-DD).",
+        ) from e
+    if start > end:
+        raise HTTPException(
+            status_code=400,
+            detail=f"week_start_date ({week_start_date}) must be on or before week_end_date ({week_end_date}).",
+        )
+
 @router.get("/league/meta")
 def league_meta() -> dict[str, Any]:
     h = _handles()
@@ -561,6 +584,7 @@ def rosters_current(
     ),
 ) -> List[dict[str, Any]]:
     """Load weekly BBM file from disk via ``bbm_path`` (or config default). For uploads use ``POST /rosters/current``."""
+    _validate_week_range(week_start_date, week_end_date)
     h = _handles()
     effective_projections = projections or "BBM"
     return _df_records(
@@ -589,6 +613,7 @@ async def rosters_current_upload(
     ),
 ) -> List[dict[str, Any]]:
     """Pass weekly BBM projections as an uploaded file, or use ``bbm_path`` / config default on disk."""
+    _validate_week_range(week_start_date, week_end_date)
     h = _handles()
     bbm_df = None
     if bbm_file is not None and bbm_file.filename:
