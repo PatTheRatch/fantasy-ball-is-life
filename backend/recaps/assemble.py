@@ -2,7 +2,7 @@
 
 E3 snapshot cache: the recap readiness and generation endpoints are separate
 HTTP requests, but both call ``assemble_weekly_snapshot()`` with the same
-parameters. A short-TTL app-level cache (60 s, max 3 entries, LRU eviction)
+parameters. A short-TTL app-level cache (60 s, max 3 entries, FIFO eviction)
 avoids redoing the full ESPN assembly when the two requests arrive within
 seconds of each other.
 """
@@ -28,10 +28,15 @@ STAT_ORDER = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
 _CACHE_MAX_ENTRIES = 3
 _CACHE_TTL_SECONDS = 60
 _CACHE: dict[tuple[int, int, int], tuple[float, WeeklyFactSnapshot]] = {}
-"""App-level snapshot cache: key = (league_id, season, week), value = (epoch, snapshot)."""
+"""App-level snapshot cache: key = (league_id, season, week), value = (monotonic timestamp, snapshot)."""
 
 
 def _cache_key(league: dict[str, Any], season: int, week: int) -> tuple[int, int, int]:
+    # Note: week_start / week_end are NOT in the key because both call sites
+    # (readiness and generate) derive them deterministically from the same
+    # `week` and `MATCHUP_WEEKS_2025_26` calendar. A caller passing custom
+    # dates for the same week would get a stale hit — this assumes the two
+    # recap endpoints always agree on the date window.
     return (int(league.get("id") or 0), season, week)
 
 
@@ -293,7 +298,10 @@ def assemble_weekly_snapshot(
     )
 
     # Cache the result so the follow-up generate request reuses this assembly.
-    _cache_put(ck, snapshot)
+    # Only cache when the data is actually ready — a degraded snapshot from a
+    # transient ESPN blip should not block recovery for the full TTL.
+    if snapshot.data_quality.ready:
+        _cache_put(ck, snapshot)
     return snapshot
 
 
