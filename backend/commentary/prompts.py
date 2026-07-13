@@ -392,8 +392,29 @@ def build_structured_recap_prompts(
     snapshot: Dict[str, Any],
 ) -> Tuple[str, str]:
     system_prompt = (
-        "You are the newsroom writer for a fantasy basketball league. "
-        "Use professional sports-journalism prose with witty, friendly trash talk. "
+        "You are the league's recap columnist -- not a stats-report generator. "
+        "Write like a commissioner who watches every matchup and knows every "
+        "owner: sports journalism with personality (ESPN recap crossed with a "
+        "feature article and group-chat banter), never an AI summary.\n\n"
+        "NARRATIVE FIRST. Facts create credibility; narrative creates "
+        "entertainment. Statistics support the story, they are not the story -- "
+        "use a number only when it makes a moment more dramatic. Before writing, "
+        "decide what actually mattered this week (an upset, a streak, a "
+        "collapse, standings chaos) and let that story lead; everything else "
+        "supports it. If nothing extraordinary happened, say so plainly instead "
+        "of manufacturing drama.\n\n"
+        "HEADLINE: should read like something ESPN would publish, with real "
+        "tension. Never 'Week N Recap' or 'League Update' -- think 'Kings "
+        "Fall.' or 'Chaos at the Top.'\n\n"
+        "TONE: punch upward at luck, randomness, bad schedules, and cursed "
+        "performances -- never at an owner personally. Roast the fantasy "
+        "outcome, not the person. Humor emerges from the facts (bad luck, "
+        "waiver-wire addiction, a last-second escape), never a joke for its "
+        "own sake.\n\n"
+        "AVOID: cliches like 'statement win', 'must win', 'absolute clinic', "
+        "'masterclass', 'gave 110%', 'at the end of the day', and AI-summary "
+        "tells like 'it's worth noting', 'ultimately', 'overall', "
+        "'in conclusion', 'showcased', 'demonstrated'.\n\n"
         "The supplied fact snapshot is your only source of truth. Never invent, "
         "infer, or import a player, team, score, result, ranking, transaction, "
         "award winner, or trend that is absent from it. Omit claims when evidence "
@@ -401,6 +422,10 @@ def build_structured_recap_prompts(
         "text before or after it. Preserve every referenced matchup_id, team_id, "
         "award_id, and evidence_id exactly."
     )
+    recap_voice = (snapshot.get("league") or {}).get("recap_voice")
+    if recap_voice:
+        system_prompt += f"\n\nLEAGUE-SPECIFIC VOICE NOTES (apply on top of the above):\n{recap_voice}"
+
     schema = {
         "headline": "string",
         "dek": "string",
@@ -408,7 +433,7 @@ def build_structured_recap_prompts(
         "matchup_takeaways": [
             {
                 "matchup_id": "exact snapshot matchup_id",
-                "text": "one sentence",
+                "text": "1-3 sentences: what made this matchup memorable, one supporting fact, one implication -- not a category-by-category recount",
                 "evidence_ids": ["exact snapshot evidence_id"],
             }
         ],
@@ -422,7 +447,7 @@ def build_structured_recap_prompts(
         "award_explanations": [
             {
                 "award_id": "exact deterministic award_id",
-                "text": "one grounded sentence",
+                "text": "one grounded sentence justifying the narrative behind the already-decided winner -- not restating the math",
                 "evidence_ids": ["exact snapshot evidence_id"],
             }
         ],
@@ -438,6 +463,14 @@ def build_structured_recap_prompts(
         "award_explanation for every supplied award. The WhatsApp summary must "
         "include every matchup result, key ranking movers, selected awards, and "
         "restrained section labels. If data_quality.ready is false, disclose the "
-        "warnings and do not fill the gaps."
+        "warnings and do not fill the gaps. lead_story should read as one "
+        "throughline (the week's biggest story, evidence for it, why it "
+        "matters going forward) rather than a paragraph per matchup -- three "
+        "paragraphs is a good default when there's a clear headline story.\n\n"
+        "Before returning, check your own draft: does the headline create "
+        "curiosity instead of describing the document? Is there one clear "
+        "throughline the rest of the piece supports? Would a league member "
+        "quote a line of this in the group chat, or does it read like an "
+        "auto-generated summary?"
     )
     return system_prompt, user_prompt

@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 from fastapi import HTTPException
 
-from backend.commentary import generate
+from backend.commentary import generate, prompts
 from backend.commentary.schemas import (
     DataQualityReport,
     RecapGeneratedContent,
@@ -360,6 +360,25 @@ def test_rollback_router_uses_rollback_service(monkeypatch):
 
     assert result["status"] == "draft"
     rollback.assert_called_once()
+
+
+def test_structured_recap_prompt_includes_league_voice_notes_when_set():
+    snapshot_payload = {
+        "league": {"id": "league-1", "slug": "test", "name": "Test", "recap_voice": "Mention the Alpha/Beta rivalry."},
+    }
+
+    system_prompt, _ = prompts.build_structured_recap_prompts(snapshot_payload)
+
+    assert "LEAGUE-SPECIFIC VOICE NOTES" in system_prompt
+    assert "Mention the Alpha/Beta rivalry." in system_prompt
+
+
+def test_structured_recap_prompt_omits_voice_section_when_unset():
+    snapshot_payload = {"league": {"id": "league-1", "slug": "test", "name": "Test"}}
+
+    system_prompt, _ = prompts.build_structured_recap_prompts(snapshot_payload)
+
+    assert "LEAGUE-SPECIFIC VOICE NOTES" not in system_prompt
 
 
 def test_invalid_structured_recap_uses_provider_neutral_error(monkeypatch):
