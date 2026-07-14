@@ -59,6 +59,10 @@ class PlayerProjection:
     value: Optional[float] = None   # source's overall value/rank
     injury_status: Optional[str] = None
 
+    # Non-canonical metadata (used by live adapters to attach context
+    # that consumers need, e.g. the fantasy roster team for aggregation)
+    roster_team: Optional[str] = None  # fantasy team name (ESPN adapter)
+
 
 # ---------------------------------------------------------------------------
 # Protocol
@@ -235,6 +239,7 @@ class EspnAdapter:
                     ft_pct=ft_pct,
                     value=None,           # ESPN has no native value/rank
                     injury_status=injury_str,
+                    roster_team=team.team_name,  # fantasy team for aggregation
                 )
 
                 # Zero out OUT players

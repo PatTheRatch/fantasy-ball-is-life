@@ -1551,6 +1551,63 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
     return pd.DataFrame(current_scoreboards)
 
 
+def _build_projected_team_stats_from_rows(
+    proj_rows: list,
+) -> pd.DataFrame:
+    """Convert ``list[PlayerProjection]`` (per-game) into the
+    ``projected_future_stats`` DataFrame shape expected by
+    ``get_projected_scoreboard()``.
+
+    Per-game stats are multiplied by ``games`` to produce weekly totals,
+    then aggregated by fantasy team (``roster_team``).  OUT players
+    (injury_status='OUT') are zeroed.
+
+    Returns a DataFrame with columns ``team_name`` + one column per
+    counting stat (PTS, BLK, AST, ..., TO).
+    """
+    from backend.projections.adapter import PlayerProjection
+
+    COUNTING_STATS = ['PTS', 'BLK', 'AST', 'STL', 'REB', '3PM', 'FTA', 'FTM', 'FGM', 'FGA', 'TO']
+    PG_TO_COUNTING = {
+        'pts_pg': 'PTS', 'blk_pg': 'BLK', 'ast_pg': 'AST', 'stl_pg': 'STL',
+        'reb_pg': 'REB', 'tpm_pg': '3PM', 'fta_pg': 'FTA', 'to_pg': 'TO',
+        'fga_pg': 'FGA',
+    }
+
+    # Build per-team accumulators
+    team_stats: dict[str, dict[str, float]] = {}
+    for r in proj_rows:
+        team = getattr(r, 'roster_team', None) or 'Unknown'
+        is_out = (getattr(r, 'injury_status', None) or '').upper() == 'OUT'
+        games = float(getattr(r, 'games', 0) or 0)
+
+        if team not in team_stats:
+            team_stats[team] = {s: 0.0 for s in COUNTING_STATS}
+
+        if is_out or games <= 0:
+            continue
+
+        for pg_attr, cat in PG_TO_COUNTING.items():
+            per_game = float(getattr(r, pg_attr, 0) or 0)
+            team_stats[team][cat] += per_game * games
+
+        # Derived: FGM = FGA * FG%
+        fga = float(getattr(r, 'fga_pg', 0) or 0)
+        fg_pct = float(getattr(r, 'fg_pct', 0) or 0)
+        team_stats[team]['FGM'] += fga * fg_pct * games
+
+        # Derived: FTM = FTA * FT%
+        fta = float(getattr(r, 'fta_pg', 0) or 0)
+        ft_pct = float(getattr(r, 'ft_pct', 0) or 0)
+        team_stats[team]['FTM'] += fta * ft_pct * games
+
+    # Build DataFrame
+    if not team_stats:
+        return pd.DataFrame(columns=['team_name'] + COUNTING_STATS)
+    records = [{'team_name': t, **s} for t, s in team_stats.items()]
+    return pd.DataFrame(records)
+
+
 def get_projected_scoreboard(
     h: ESPNHandles,
     week_end_date=None,
@@ -1586,49 +1643,71 @@ def get_projected_scoreboard(
 
     # --- Pull current data ---
     current_scoreboard = get_current_scoreboard(h, scoring_period=current_matchup_period)
-    team_rosters = get_current_rosters(
-        h,
-        pd.to_datetime('now'),
-        week_end_date,
-        bbm_df=bbm_df,
-        current_matchup_period=current_matchup_period,
-        projections=projections,
-    )
-    team_rosters.to_csv(f"week_{current_matchup_period+1}_roster.csv", index=False)  # debug output
 
-    # --- Build projected future stats per team (counting stats only) ---
+    # --- Try the framework path first (P-3: get_active_projections) ----
+    projected_future_stats = None
+    try:
+        from backend.projections import get_active_projections
+        week_start_dt, _ = resolve_roster_week_window(
+            pd.to_datetime('now'), week_end_date,
+            current_matchup_period=current_matchup_period,
+            league_current_week=getattr(h.league, "currentMatchupPeriod", None),
+        )
+        proj_rows = get_active_projections(
+            "week",
+            handles=h,
+            window=int(projections) if projections.isdigit() else 15,
+            week_end_date=week_end_date,
+            week_start_date=str(week_start_dt.date()) if pd.notna(week_start_dt) else None,
+            current_matchup_period=current_matchup_period,
+        )
+        if proj_rows:
+            projected_future_stats = _build_projected_team_stats_from_rows(proj_rows)
+            if not projected_future_stats.empty:
+                # Convert to the shape the rest of the function expects
+                # (team-level, columns = counting stats)
+                pass  # _build_projected_team_stats_from_rows already returns correct shape
+    except Exception:
+        projected_future_stats = None
 
-    # map stat -> source column name
-    if projections != 'BBM':
-        proj_col_map = {
-            stat: f'Projected {stat} Last {projections}'
-            for stat in COUNTING_STATS
-        }
-    else:
-        proj_col_map = {
-            stat: f'Projected {stat} BBM'
-            for stat in COUNTING_STATS
-        }
+    # --- Fallback: legacy path (get_current_rosters) ----
+    if projected_future_stats is None or projected_future_stats.empty:
+        team_rosters = get_current_rosters(
+            h,
+            pd.to_datetime('now'),
+            week_end_date,
+            bbm_df=bbm_df,
+            current_matchup_period=current_matchup_period,
+            projections=projections,
+        )
+        team_rosters.to_csv(f"week_{current_matchup_period+1}_roster.csv", index=False)  # debug output
 
-    # zero out projections for OUT players in a vectorized way
-    rosters = team_rosters.copy()
-    out_mask = rosters['injuryStatus'] == 'OUT'
-    if projections != 'BBM':
+        # Build projected future stats from legacy roster columns
+        if projections != 'BBM':
+            proj_col_map = {
+                stat: f'Projected {stat} Last {projections}'
+                for stat in COUNTING_STATS
+            }
+        else:
+            proj_col_map = {
+                stat: f'Projected {stat} BBM'
+                for stat in COUNTING_STATS
+            }
+        rosters = team_rosters.copy()
+        out_mask = rosters['injuryStatus'] == 'OUT'
+        if projections != 'BBM':
+            for col in proj_col_map.values():
+                rosters.loc[out_mask, col] = 0
+        no_games_mask = rosters['num_games_left'] == 0
         for col in proj_col_map.values():
-            rosters.loc[out_mask, col] = 0
-    # zero out projections for players with no num_games_left
-    no_games_mask = rosters['num_games_left'] == 0
-    for col in proj_col_map.values():
-        rosters.loc[no_games_mask, col] = 0
-
-    # aggregate projections by team
-    projected_future_stats = (
-        rosters
-        .groupby('team_name')[list(proj_col_map.values())]
-        .sum()
-        .reset_index()
-        .rename(columns={v: k for k, v in proj_col_map.items()})  # columns become 'PTS','BLK',...,'TO'
-    )
+            rosters.loc[no_games_mask, col] = 0
+        projected_future_stats = (
+            rosters
+            .groupby('team_name')[list(proj_col_map.values())]
+            .sum()
+            .reset_index()
+            .rename(columns={v: k for k, v in proj_col_map.items()})
+        )
 
     # --- Current scores per team/stat (home + away) ---
 

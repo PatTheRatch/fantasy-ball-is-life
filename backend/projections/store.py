@@ -260,6 +260,7 @@ def _rows_to_dataframe(rows: list[PlayerProjection]) -> pd.DataFrame:
             "ft_pct": r.ft_pct,
             "value": r.value,
             "injury_status": r.injury_status,
+            "roster_team": r.roster_team,
         })
     return pd.DataFrame(records)
 
@@ -290,5 +291,6 @@ def _dataframe_to_rows(df: pd.DataFrame) -> list[PlayerProjection]:
             ft_pct=float(rec["ft_pct"]) if pd.notna(rec.get("ft_pct")) else None,
             value=float(rec["value"]) if pd.notna(rec.get("value")) else None,
             injury_status=str(rec.get("injury_status")) if pd.notna(rec.get("injury_status")) else None,
+            roster_team=str(rec.get("roster_team")) if pd.notna(rec.get("roster_team")) else None,
         ))
     return rows
