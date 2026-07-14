@@ -37,10 +37,10 @@ def _cache_key(league: dict[str, Any], season: int, week: int) -> tuple[int, int
     # `week` and `MATCHUP_WEEKS_2025_26` calendar. A caller passing custom
     # dates for the same week would get a stale hit — this assumes the two
     # recap endpoints always agree on the date window.
-    return (int(league.get("id") or 0), season, week)
+    return (str(league.get("id") or ""), season, week)
 
 
-def _cache_get(key: tuple[int, int, int]) -> Optional[WeeklyFactSnapshot]:
+def _cache_get(key: tuple[str, int, int]) -> Optional[WeeklyFactSnapshot]:
     entry = _CACHE.get(key)
     if entry is None:
         return None
