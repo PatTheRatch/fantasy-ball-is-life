@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getPublishedArchive } from '../api'
 import { recapLeagueSlug } from '../lib/supabase'
@@ -14,10 +14,11 @@ const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 export function Recap() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [resolved, setResolved] = useState(false)
+  const resolvedRef = useRef(false)
 
   useEffect(() => {
-    if (resolved) return
+    if (resolvedRef.current) return
+    resolvedRef.current = true
 
     const requestedWeek = Number(searchParams.get('week'))
 
@@ -50,8 +51,7 @@ export function Recap() {
     }
 
     void redirect()
-    setResolved(true)
-  }, [searchParams, navigate, resolved])
+  }, [searchParams, navigate])
 
   return (
     <div className="flex min-h-[200px] items-center justify-center">
