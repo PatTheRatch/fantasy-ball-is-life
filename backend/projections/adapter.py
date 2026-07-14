@@ -10,7 +10,7 @@ Design per ``docs/specs/PROJECTION_SOURCE_FRAMEWORK.md``, Design sketch.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, Sequence, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 import pandas as pd
 
@@ -152,9 +152,8 @@ class EspnAdapter:
 
         Requires ``handles`` (``ESPNHandles``).  The other params
         control the game-counting window and are forwarded through to
-        ``_resolve_window`` / ``_count_games_in_range``.
+        ``resolve_roster_week_window`` / ``_count_games_in_range``.
 
-        ----------
         Returns one ``PlayerProjection`` per rostered player (active
         and bench).  OUT players get zeroed projections.
         """
