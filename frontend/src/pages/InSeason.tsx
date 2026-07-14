@@ -12,6 +12,7 @@ import {
   postProjectedScoreboard,
 } from '../api'
 import { AiCommentaryCard } from '../components/AiCommentaryCard'
+import { ProjectionBadge } from '../components/ProjectionBadge'
 import {
   clampDateToWeekWindow,
   currentRecord,
@@ -703,6 +704,11 @@ export function InSeason() {
           Toggle between live box scores and full-week projections. Power rankings
           below.
         </p>
+        {scoreboardView === 'projected' && (
+          <div className="mt-2">
+            <ProjectionBadge horizon="week" />
+          </div>
+        )}
       </div>
 
       {/* Compact settings — full controls in bottom sheet */}

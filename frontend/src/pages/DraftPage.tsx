@@ -25,6 +25,7 @@ import {
 } from '../api'
 import type { DraftPlayerResult } from '../api'
 import { Card } from '../components/Card'
+import { ProjectionBadge } from '../components/ProjectionBadge'
 
 /* -------------------------------------------------------------------------- */
 /* Draft Room — docs/specs/DRAFT_ROOM.md. Scoped "data-dense terminal" look   */
@@ -377,6 +378,9 @@ export function DraftPage() {
         <p className="mt-1 text-sm text-slate-400">
           Build and pivot your target roster live, against the real optimizer.
         </p>
+        <div className="mt-2">
+          <ProjectionBadge horizon="season" />
+        </div>
       </div>
 
       <SetupPanel

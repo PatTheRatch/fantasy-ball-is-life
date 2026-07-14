@@ -372,8 +372,38 @@ export async function postRostersCurrent(
   return data
 }
 
+export interface ProjectionUploadResult {
+  set_id: string
+  source: string
+  horizon: string
+  uploaded_at: string
+  filename: string | null
+  row_count: number
+  matched_count: number
+  unmatched_players: string[]
+}
+
 export async function getProjections(): Promise<JsonRecord[]> {
   const { data } = await client.get<JsonRecord[]>('/projections')
+  return data
+}
+
+export async function postProjectionsUpload(
+  formData: FormData,
+): Promise<ProjectionUploadResult> {
+  const { data } = await client.post<ProjectionUploadResult>('/projections', formData)
+  return data
+}
+
+export interface ProjectionSetsParams {
+  source?: string
+  horizon?: string
+}
+
+export async function getProjectionsSets(
+  params?: ProjectionSetsParams,
+): Promise<JsonRecord[]> {
+  const { data } = await client.get<JsonRecord[]>('/projections/sets', { params })
   return data
 }
 
