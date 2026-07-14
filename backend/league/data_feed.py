@@ -556,10 +556,15 @@ def week_transactions(
     scoring_period: int,
     types: Optional[Iterable[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Normalized, executed player-movement transactions for one scoring period.
+    """Normalized, executed player-movement transactions for one ESPN scoring
+    period (one calendar day -- NOT one matchup week; see
+    ``week_transactions_for_week`` for the whole-week version).
 
-    In this league one ``scoringPeriodId`` equals one matchup week, so a single
-    ``mTransactions2`` request returns the whole week's transactions.
+    ESPN's ``scoringPeriodId`` is a daily counter (e.g. 175 on a league whose
+    ``currentMatchupPeriod`` -- the fantasy week -- is only 22), completely
+    independent from the fantasy week number. Passing a week number in here
+    silently returns whatever arbitrary day happens to share that number
+    (usually very early in the season), not that week's transactions.
 
     Reads ESPN's ``mTransactions2`` view — the stable transaction feed — through
     the league's own authenticated request helper (``espn_request.league_get``),
@@ -688,6 +693,99 @@ def week_transactions(
                     "related_transaction_id": txn.get("relatedTransactionId"),
                 }
             )
+    return rows
+
+
+def _scoring_periods_for_week(
+    h: "ESPNHandles", week: int, *, pad: int = 3
+) -> List[int]:
+    """ESPN daily ``scoringPeriodId`` values that could fall within fantasy
+    week ``week``'s real calendar range (``MATCHUP_WEEKS_2025_26``).
+
+    ``scoringPeriodId`` doesn't align cleanly with UTC calendar-day
+    boundaries (verified live: the same UTC date can appear under two
+    different scoringPeriodIds, and days with zero NBA games consume no
+    listed id at all), so this deliberately does not try to compute an exact
+    id-to-date mapping. It uses the per-team pro schedule
+    (``proGamesByScoringPeriod``, which does carry real game timestamps) only
+    to find a generously padded candidate range; the caller is expected to
+    filter the resulting transactions by their own timestamp, not trust this
+    range to be exact.
+    """
+    date_range = MATCHUP_WEEKS_2025_26.get(week)
+    if not date_range:
+        return []
+    start, end = date_range["start"], date_range["end"]
+
+    try:
+        schedule = h.league.espn_request.get_pro_schedule()
+    except Exception:
+        return []
+    pro_teams = ((schedule or {}).get("settings") or {}).get("proTeams") or []
+
+    anchors: List[int] = []
+    for team in pro_teams:
+        for sp, games in (team.get("proGamesByScoringPeriod") or {}).items():
+            if not games:
+                continue
+            game_date = _epoch_ms_to_iso_date(games[0].get("date"))
+            if game_date and start <= game_date <= end:
+                anchors.append(int(sp))
+
+    if not anchors:
+        return []
+    lo, hi = min(anchors) - pad, max(anchors) + pad
+    return list(range(max(1, lo), hi + 1))
+
+
+def week_transactions_for_week(
+    h: "ESPNHandles",
+    week: int,
+    types: Optional[Iterable[str]] = None,
+) -> List[Dict[str, Any]]:
+    """All executed player-movement transactions within fantasy week
+    ``week``'s real calendar range (``MATCHUP_WEEKS_2025_26``).
+
+    This is the function callers actually want (``week_transactions`` takes a
+    single ESPN scoring period, i.e. one day). It queries every candidate
+    scoring period in the week's window (``_scoring_periods_for_week``) --
+    each an independent ESPN request, fired concurrently, since a week's
+    padded candidate range is ~10 periods and doing them serially would
+    reintroduce the kind of N-sequential-ESPN-calls latency this app has
+    otherwise worked to eliminate -- keeps only rows whose own ``date``
+    genuinely falls within the week's ``[start, end]`` bounds, and
+    deduplicates by ``activity_id``. Correctness never depends on the
+    id-to-date mapping being exact, only on the candidate range being wide
+    enough (it's deliberately generous).
+    """
+    date_range = MATCHUP_WEEKS_2025_26.get(week)
+    if not date_range:
+        return []
+    start, end = date_range["start"], date_range["end"]
+
+    periods = _scoring_periods_for_week(h, week)
+    if not periods:
+        return []
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(8, len(periods))) as pool:
+        per_period = list(
+            pool.map(lambda sp: week_transactions(h, scoring_period=sp, types=types), periods)
+        )
+
+    seen: set = set()
+    rows: List[Dict[str, Any]] = []
+    for period_rows in per_period:
+        for row in period_rows:
+            row_date = row.get("date") or ""
+            if not (start <= row_date <= end):
+                continue
+            activity_id = row.get("activity_id")
+            if activity_id in seen:
+                continue
+            seen.add(activity_id)
+            rows.append(row)
     return rows
 
 

@@ -245,3 +245,98 @@ def test_adapter_holds_against_live_fixture():
     # None of the excluded types leak through.
     leaked = {r["type"] for r in rows} & {"FUTURE_ROSTER", "DRAFT", "ROSTER", "TRADE_PROPOSAL"}
     assert not leaked
+
+
+# --- _scoring_periods_for_week / week_transactions_for_week -------------------
+# Regression: week_transactions(scoring_period=week) fed the FANTASY WEEK
+# number into ESPN's scoringPeriodId param, a completely different daily
+# counter (confirmed live: week 6's real calendar range is Nov 24-30, but
+# scoringPeriodId=6 is an arbitrary day in late October). These cover the fix:
+# resolving the real scoringPeriodId range for a week from the pro schedule,
+# then merging + date-filtering + deduplicating across every candidate day.
+
+def _epoch_ms(date_str):
+    from datetime import datetime, timezone
+    return int(datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
+class _FakeScheduleRequest:
+    def __init__(self, schedule):
+        self.schedule = schedule
+
+    def get_pro_schedule(self):
+        return self.schedule
+
+
+def _schedule_with(entries):
+    """entries: {scoringPeriodId: date_str}"""
+    games_by_sp = {
+        str(sp): [{"date": _epoch_ms(d)}] for sp, d in entries.items()
+    }
+    return {"settings": {"proTeams": [{"proGamesByScoringPeriod": games_by_sp}]}}
+
+
+def test_scoring_periods_for_week_pads_around_real_game_days(monkeypatch):
+    monkeypatch.setitem(
+        feed.MATCHUP_WEEKS_2025_26, 900, {"start": "2025-11-24", "end": "2025-11-30"}
+    )
+    schedule = _schedule_with({
+        35: "2025-11-25", 37: "2025-11-27", 40: "2025-11-30",
+        20: "2025-11-01",  # well outside the week -- must not widen the range
+    })
+    h = feed.ESPNHandles(league=SimpleNamespace(espn_request=_FakeScheduleRequest(schedule)))
+
+    periods = feed._scoring_periods_for_week(h, 900, pad=2)
+
+    assert periods == list(range(33, 43))  # min(35)-2 .. max(40)+2
+
+
+def test_scoring_periods_for_week_empty_when_no_games_in_range(monkeypatch):
+    monkeypatch.setitem(
+        feed.MATCHUP_WEEKS_2025_26, 900, {"start": "2025-11-24", "end": "2025-11-30"}
+    )
+    schedule = _schedule_with({20: "2025-11-01"})  # nothing in the target week
+    h = feed.ESPNHandles(league=SimpleNamespace(espn_request=_FakeScheduleRequest(schedule)))
+
+    assert feed._scoring_periods_for_week(h, 900) == []
+
+
+def test_scoring_periods_for_week_unknown_week_returns_empty():
+    h = feed.ESPNHandles(league=SimpleNamespace(espn_request=_FakeScheduleRequest({})))
+    assert feed._scoring_periods_for_week(h, 9999) == []
+
+
+def test_week_transactions_for_week_merges_filters_and_dedupes(monkeypatch):
+    monkeypatch.setitem(
+        feed.MATCHUP_WEEKS_2025_26, 900, {"start": "2025-11-24", "end": "2025-11-30"}
+    )
+    monkeypatch.setattr(feed, "_scoring_periods_for_week", lambda h, week, **kw: [34, 35, 36])
+
+    per_period = {
+        34: [{"activity_id": "a", "date": "2025-11-23"}],  # outside range -> dropped
+        35: [
+            {"activity_id": "b", "date": "2025-11-25"},
+            {"activity_id": "c", "date": "2025-11-25"},
+        ],
+        36: [{"activity_id": "b", "date": "2025-11-25"}],  # duplicate of b -> deduped
+    }
+    monkeypatch.setattr(
+        feed, "week_transactions",
+        lambda h, scoring_period, types=None: per_period.get(scoring_period, []),
+    )
+
+    rows = feed.week_transactions_for_week(object(), week=900)
+
+    assert sorted(r["activity_id"] for r in rows) == ["b", "c"]
+
+
+def test_week_transactions_for_week_unknown_week_returns_empty():
+    assert feed.week_transactions_for_week(object(), week=9999) == []
+
+
+def test_week_transactions_for_week_no_periods_returns_empty(monkeypatch):
+    monkeypatch.setitem(
+        feed.MATCHUP_WEEKS_2025_26, 900, {"start": "2025-11-24", "end": "2025-11-30"}
+    )
+    monkeypatch.setattr(feed, "_scoring_periods_for_week", lambda h, week, **kw: [])
+    assert feed.week_transactions_for_week(object(), week=900) == []

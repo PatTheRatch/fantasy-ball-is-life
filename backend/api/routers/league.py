@@ -510,15 +510,19 @@ def transactions(
 
 @router.get("/transactions/week")
 def transactions_week(
-    scoring_period: int = Query(..., description="Matchup week / scoring period (one ESPN scoringPeriodId == one week)"),
+    scoring_period: int = Query(..., description="Fantasy matchup week number (e.g. 6), NOT an ESPN scoringPeriodId"),
 ) -> List[dict[str, Any]]:
     """Executed player-movement transactions (adds/drops + completed trades) for
-    a single matchup week, via the ``mTransactions2`` adapter. This is the
+    a whole matchup week, via the ``mTransactions2`` adapter. This is the
     recap-facing path; unlike the legacy date-range ``/transactions`` it is not
-    projection-dependent and does not rely on the broken communication feed."""
+    projection-dependent and does not rely on the broken communication feed.
+
+    Query param is named ``scoring_period`` for URL back-compat with existing
+    callers, but the value is the fantasy week number -- ``week_transactions_
+    for_week`` resolves the real ESPN scoringPeriodId(s) internally."""
     try:
         h = _handles()
-        return feed.week_transactions(h, scoring_period=scoring_period)
+        return feed.week_transactions_for_week(h, week=scoring_period)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
 
