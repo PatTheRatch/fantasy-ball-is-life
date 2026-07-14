@@ -186,7 +186,7 @@ class BbmAdapter:
                 player_key=player_key,
                 display_name=name,
                 team=team,
-                positions=[],   # BBM doesn't provide positions
+                positions=_read_positions(row),
                 games=games,
                 minutes_pg=None,
                 pts_pg=pts, reb_pg=reb, ast_pg=ast, stl_pg=stl,
@@ -245,3 +245,11 @@ def _infer_horizon(columns: pd.Index) -> str:
     if len(_WEEKLY_SIGNATURE & cols) >= 7:
         return "week"
     return "season"  # best-effort default
+
+
+def _read_positions(row) -> list[str]:
+    """Extract positions from a BBM row (``Pos`` column, space-separated)."""
+    pos_val = row.get("Pos")
+    if pd.isna(pos_val) or not str(pos_val).strip():
+        return []
+    return [p.strip() for p in str(pos_val).split() if p.strip()]

@@ -32,6 +32,47 @@ VALUE_SOURCE_FORGE = 'forge'
 VALUE_SOURCES = (VALUE_SOURCE_BBM, VALUE_SOURCE_FORGE)
 
 
+def _projections_to_optimizer_df(rows: list) -> pd.DataFrame:
+    """Convert ``list[PlayerProjection]`` into the DataFrame shape
+    ``OptimizeLineup.process_draft_data()`` expects.
+
+    Maps canonical per-game PlayerProjection fields back to BBM-style
+    column names so the existing optimizer pipeline (renames, merge,
+    calculate_stats) works unchanged.
+    """
+    records = []
+    for r in rows:
+        # Join positions as a space-separated string (BBM convention)
+        positions = getattr(r, "positions", None)
+        if isinstance(positions, list):
+            pos_str = " ".join(positions)
+        elif positions:
+            pos_str = str(positions)
+        else:
+            pos_str = ""
+
+        records.append({
+            "Name": getattr(r, "display_name", ""),
+            "Team": getattr(r, "team", None) or "",
+            "Pos": pos_str,
+            "g": float(getattr(r, "games", 0) or 0),
+            "p/g": float(getattr(r, "pts_pg", 0) or 0),
+            "3/g": float(getattr(r, "tpm_pg", 0) or 0),
+            "r/g": float(getattr(r, "reb_pg", 0) or 0),
+            "a/g": float(getattr(r, "ast_pg", 0) or 0),
+            "s/g": float(getattr(r, "stl_pg", 0) or 0),
+            "b/g": float(getattr(r, "blk_pg", 0) or 0),
+            "fga/g": float(getattr(r, "fga_pg", 0) or 0),
+            "fta/g": float(getattr(r, "fta_pg", 0) or 0),
+            "to/g": float(getattr(r, "to_pg", 0) or 0),
+            "fg%": float(getattr(r, "fg_pct", 0) or 0),
+            "ft%": float(getattr(r, "ft_pct", 0) or 0),
+            "$": float(getattr(r, "value", 0) or 0),
+            "Inj": getattr(r, "injury_status", None) or "",
+        })
+    return pd.DataFrame(records)
+
+
 class OptimizeLineup:
     def __init__(
         self,
@@ -48,6 +89,7 @@ class OptimizeLineup:
         value_col='$',
         value_source=VALUE_SOURCE_BBM,
         projections_df: Optional[pd.DataFrame] = None,
+        projections_rows: Optional[list] = None,
     ):
         if year is None:
             year = DRAFT_LEAGUE_YEAR_DEFAULT
@@ -63,6 +105,9 @@ class OptimizeLineup:
         self.minimum_value_players = minimum_value_players
         self.initial_budget = initial_budget
         self.value_source = value_source
+        # projections_rows takes precedence over projections_df (P-3 consumer swap)
+        if projections_rows is not None:
+            projections_df = _projections_to_optimizer_df(projections_rows)
         self._projections_df = projections_df
         self.player_data_df = self.process_draft_data()
         self.current_roster = self.init_current_roster()
