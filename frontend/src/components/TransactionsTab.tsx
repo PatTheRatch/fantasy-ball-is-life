@@ -61,7 +61,10 @@ export function TransactionsTab({
 
   // ── Group transactions by txnId ─────────────────────────────────
   const groups: Map<string, Record<string, unknown>[]> = new Map()
-  for (const txn of transactions) {
+  const sorted = [...transactions].sort(
+    (a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')),
+  )
+  for (const txn of sorted) {
     const id = parseTxnId(txn.activity_id)
     const existing = groups.get(id) || []
     existing.push(txn)
@@ -79,9 +82,12 @@ export function TransactionsTab({
           <p className="text-slate-500">No transactions this week.</p>
         ) : (
           <div className="space-y-3">
-            {Array.from(groups.entries()).map(([txnId, items]) => (
-              <TransactionCard key={txnId} items={items} teamMap={buildTeamMap(standings)} />
-            ))}
+            {(() => {
+              const teamMap = buildTeamMap(standings)
+              return Array.from(groups.entries()).map(([txnId, items]) => (
+                <TransactionCard key={txnId} items={items} teamMap={teamMap} />
+              ))
+            })()}
           </div>
         )}
       </section>
