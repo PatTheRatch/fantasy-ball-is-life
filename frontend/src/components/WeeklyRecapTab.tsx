@@ -411,8 +411,8 @@ export function WeeklyRecapTab({
                 : 'Matchup results'}
             </h2>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {snapshot.matchups.map((row) => {
-                const takeaway = content.matchup_takeaways.find(
+              {(snapshot.matchups ?? []).map((row) => {
+                const takeaway = (content.matchup_takeaways ?? []).find(
                   (item) => item.matchup_id === row.matchup_id,
                 )
                 return (
