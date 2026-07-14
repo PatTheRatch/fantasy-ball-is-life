@@ -458,9 +458,10 @@ export function WeeklyRecapTab({
                   <h2 className="text-lg font-bold text-white">Storylines</h2>
                   <div className="mt-3 space-y-3">
                     {content.playoff_storylines.map((item) => (
-                      <p key={item.text.slice(0, 40)} className="text-sm leading-relaxed text-slate-200">
-                        {item.text}
-                      </p>
+                      <div key={item.title}>
+                        <p className="font-semibold text-amber-200">{item.title}</p>
+                        <p className="mt-1 text-sm leading-relaxed text-slate-200">{item.text}</p>
+                      </div>
                     ))}
                   </div>
                 </div>

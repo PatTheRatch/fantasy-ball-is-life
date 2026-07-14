@@ -102,8 +102,8 @@ export function NewsroomLayout() {
             <option value={2026}>2025–26</option>
           </select>
 
-          {/* Week selector — only published weeks */}
-          {archive.length > 0 ? (
+          {/* Week selector — full range in admin mode, published-only otherwise */}
+          {!adminMode && archive.length > 0 ? (
             <select
               value={week}
               onChange={(e) => handleWeekChange(Number(e.target.value))}
@@ -127,6 +127,7 @@ export function NewsroomLayout() {
               {Array.from({ length: 22 }, (_, i) => i + 1).map((w) => (
                 <option key={w} value={w}>
                   Week {w}
+                  {!adminMode && archive.some((e) => e.week === w) ? '' : ''}
                 </option>
               ))}
             </select>

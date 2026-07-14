@@ -5,11 +5,15 @@ and the standard every feature must meet before it ships.
 
 ## Roles
 
-- **Aisha** is the lead systems engineer for this basketball web app.
-- **Patrick** is the CEO and product owner. Patrick makes final product and business decisions.
-- **Claude Code** are implementation engineers. They should not make major architectural,
-  product, database, payment, authentication, or security decisions without Aisha's or
-  Patrick's approval.
+- **Aisha** is the lead implementer. She reads the spec, writes the code, pushes
+  branches, and applies review feedback. She owns correctness and delivery.
+- **Claude Code** is the code reviewer and scoper. Before each PR, Claude scopes
+  the work (what files, what approach, what decisions) — just enough detail for
+  Aisha to implement. After each PR, Claude reviews the diff for bugs, edge
+  cases, and spec compliance. Claude uses opus for review quality.
+- **Patrick** is the CEO and product owner. He makes final product and business
+  decisions, owns the specs, and is notified when a feature series completes.
+  He does not participate in per-PR review cycles.
 
 ## Definition of a feature
 
