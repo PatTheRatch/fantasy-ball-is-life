@@ -1,6 +1,8 @@
 """League / standings / rosters / scoreboard endpoints."""
 from __future__ import annotations
 
+import logging
+import time
 from datetime import date
 from typing import Any, List, Optional
 
@@ -138,8 +140,15 @@ def power_rankings(
             if not all_weeks:
                 raise HTTPException(status_code=422, detail=f"Week {bad} is not available for this league.")
             recent_list = all_weeks[-rw:] if len(all_weeks) >= 1 else all_weeks
+            _t0 = time.perf_counter()
             df_full = ml.get_universe_wins(weeks=all_weeks)
+            _t1 = time.perf_counter()
             df_recent = ml.get_universe_wins(weeks=recent_list)
+            logging.info(
+                "power_rankings: get_universe_wins(full=%d weeks) took %.2fs, "
+                "get_universe_wins(recent=%d weeks) took %.2fs",
+                len(all_weeks), _t1 - _t0, len(recent_list), time.perf_counter() - _t1,
+            )
 
         if df_full is None or df_full.empty or "Team" not in df_full.columns:
             raise HTTPException(status_code=500, detail="get_universe_wins returned empty full-window data.")
@@ -205,8 +214,15 @@ def power_rankings(
         if len(all_weeks) >= 2:
             prev_weeks = all_weeks[:-1]
             prev_recent = prev_weeks[-rw:] if prev_weeks else prev_weeks
+            _t2 = time.perf_counter()
             df_full_prev = ml.get_universe_wins(weeks=prev_weeks)
+            _t3 = time.perf_counter()
             df_recent_prev = ml.get_universe_wins(weeks=prev_recent)
+            logging.info(
+                "power_rankings: rank-change get_universe_wins(full=%d weeks) took %.2fs, "
+                "get_universe_wins(recent=%d weeks) took %.2fs",
+                len(prev_weeks), _t3 - _t2, len(prev_recent), time.perf_counter() - _t3,
+            )
 
             for col in ["Total Win %", "Actual Win %"]:
                 if col in df_full_prev.columns:

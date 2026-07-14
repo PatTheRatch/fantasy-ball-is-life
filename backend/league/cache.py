@@ -20,6 +20,8 @@ no caller needs to pass a cache handle or change its signature.
 from __future__ import annotations
 
 import contextvars
+import logging
+import time
 from typing import Optional
 
 from backend.league.data_feed import ESPNHandles
@@ -97,9 +99,17 @@ def get_cached_my_league(league_id: int, year: int) -> Any:
     if cache is not None:
         existing = cache.get_my_league(league_id, year)
         if existing is not None:
+            logging.info(
+                "get_cached_my_league: request-cache hit for (%s, %s)", league_id, year
+            )
             return existing
 
+    started = time.perf_counter()
     ml = MyLeague(league_id, year)
+    logging.info(
+        "get_cached_my_league: MyLeague(%s, %s) construction took %.2fs",
+        league_id, year, time.perf_counter() - started,
+    )
 
     if cache is not None:
         cache.put_my_league(league_id, year, ml)
