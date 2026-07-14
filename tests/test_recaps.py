@@ -652,3 +652,56 @@ def test_invalid_structured_recap_uses_provider_neutral_error(monkeypatch):
 
     with pytest.raises(ValueError, match="LLM returned an invalid structured recap"):
         generate.generate_structured_recap(_snapshot())
+
+
+# ── F2-1 archive endpoint ──────────────────────────────────────────
+
+def test_store_list_published_returns_weeks_ordered(monkeypatch):
+    """list_published selects published weeks sorted by week.asc."""
+    store = RecapStore(url='https://example.supabase.co', service_role_key='key')
+    request = Mock(return_value=[
+        {'week': 1, 'headline': 'Week One', 'published_at': '2026-01-15T00:00:00Z'},
+        {'week': 3, 'headline': 'Week Three', 'published_at': '2026-01-29T00:00:00Z'},
+    ])
+    monkeypatch.setattr(store, '_request', request)
+    result = store.list_published('league-1', 2026)
+    assert result == [
+        {'week': 1, 'headline': 'Week One', 'published_at': '2026-01-15T00:00:00Z'},
+        {'week': 3, 'headline': 'Week Three', 'published_at': '2026-01-29T00:00:00Z'},
+    ]
+    request.assert_called_once_with(
+        'GET', 'recap_editions',
+        params={
+            'league_id': 'eq.league-1', 'season': 'eq.2026',
+            'status': 'eq.published',
+            'select': 'week,structured_content_json->headline,published_at',
+            'order': 'week.asc',
+        },
+    )
+
+def test_store_list_published_returns_empty_on_none(monkeypatch):
+    store = RecapStore(url='https://example.supabase.co', service_role_key='key')
+    monkeypatch.setattr(store, '_request', Mock(return_value=[]))
+    assert store.list_published('league-1', 2026) == []
+
+def test_store_list_published_handles_missing_headline(monkeypatch):
+    store = RecapStore(url='https://example.supabase.co', service_role_key='key')
+    monkeypatch.setattr(store, '_request', Mock(return_value=[
+        {'week': 1, 'published_at': '2026-01-15T00:00:00Z'},
+    ]))
+    result = store.list_published('league-1', 2026)
+    assert result == [{'week': 1, 'published_at': '2026-01-15T00:00:00Z'}]
+
+def test_service_get_published_archive_404s_on_non_public_league(monkeypatch):
+    store = Mock()
+    store.get_league_by_slug.return_value = {'id': 'league-1', 'visibility': 'private'}
+    with pytest.raises(HTTPException, match='Published recap not found.'):
+        service.get_published_archive(store=store, slug='test', season=2026)
+
+def test_service_get_published_archive_returns_list_on_public(monkeypatch):
+    store = Mock()
+    store.get_league_by_slug.return_value = {'id': 'league-1', 'visibility': 'public'}
+    store.list_published.return_value = [{'week': 1, 'headline': 'Week One'}]
+    result = service.get_published_archive(store=store, slug='test', season=2026)
+    assert result == [{'week': 1, 'headline': 'Week One'}]
+    store.list_published.assert_called_once_with('league-1', 2026)

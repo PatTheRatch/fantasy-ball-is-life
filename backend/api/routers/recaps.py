@@ -46,6 +46,20 @@ def _validate_dates(start: date, end: date) -> None:
         )
 
 
+@router.get("/{season}")
+def published_archive(
+    slug: str,
+    season: int,
+    store: RecapStore = Depends(get_recap_store),
+) -> list[dict[str, Any]]:
+    """Return all published weeks for a league/season (public, no auth)."""
+    return _run(
+        lambda: service.get_published_archive(
+            store=store, slug=slug, season=season
+        )
+    )
+
+
 @router.get("/{season}/{week}")
 def published_recap(
     slug: str,

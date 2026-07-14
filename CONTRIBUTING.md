@@ -11,27 +11,26 @@ Aisha (lead systems engineer) has approved. `main` stays deployable at all times
 
 ## The flow
 
-1. **Spec first.** A feature needs a spec that meets the six-part definition of
-   done (user story, acceptance criteria, data model impact, API/UI impact, test
-   plan, rollback/failure) before code is written. Specs live in `docs/specs/`.
-   Major architecture, product, database, payment, auth, or security decisions
-   need Aisha's or Patrick's sign-off on the spec first — see the operating manual.
-2. **Branch.** Cut a branch from `main`:
+Aisha (lead implementer) and Claude (reviewer/scoper) work in a tight loop.
+Patrick is notified when a feature series completes — he does not participate
+in per-PR cycles.
+
+1. **Claude scopes.** Aisha asks Claude to scope the next PR from the spec.
+   Claude returns: files to create/modify, approach, key decisions. Concise —
+   just enough for Aisha to implement correctly on the first try.
+2. **Aisha builds.** Aisha implements per Claude's scope. Branch off `main`:
    - `feat/<short-name>` — new feature
    - `fix/<short-name>` — bug fix
    - `chore/<short-name>` — tooling, deps, cleanup
    - `docs/<short-name>` — docs only
-3. **Build small.** Keep the branch focused on one spec. Smallest paid-worthy
-   version first — skip "cool" extras that don't support subscription value.
-4. **Open a PR** into `main`. The description must:
-   - link the spec it implements,
-   - check off the six definition-of-done parts (or say why one is N/A),
-   - note how it was tested.
-5. **Review.** Aisha reviews. At least **one approving review** is required to
-   merge. Implementation engineers (Claude Code) do not self-merge; they don't
-   make major architectural/product/DB/payment/auth/security calls without Aisha
-   or Patrick approving in the PR.
-6. **Merge.** Squash-merge once approved and green. Delete the branch.
+3. **Claude reviews.** Aisha pushes and asks Claude to review the diff against
+   the spec. Claude checks for bugs, edge cases, spec compliance, and test
+   coverage.
+4. **Aisha fixes.** Aisha applies Claude's review feedback, pushes, and
+   re-reviews until approved.
+5. **Aisha merges.** Once Claude approves and suite is green, squash-merge
+   and delete the branch.
+6. **Repeat.** Back to step 1 for the next PR in the series.
 
 ## Commit messages
 
@@ -56,8 +55,14 @@ through review.
 
 ## Cross-agent handoffs
 
-This project is built by multiple agents (Aisha, Claude, Codex, Cursor).
-When you pick up where another agent left off:
+Aisha and Claude work in a cost-efficient split:
+- **Claude (opus) does the expensive thinking:** scope (what to build, approach,
+  decisions) and review (bugs, edge cases, spec compliance).
+- **Aisha does the cheap implementation:** reading files, writing code, running
+  tests, pushing branches.
+
+The per-PR cycle: Aisha asks Claude for scope → Aisha builds → Aisha asks
+Claude for review → Aisha fixes → next PR.
 
 - **Read the spec first.** Every feature has an approved spec in `docs/specs/`.
   The spec is the single source of truth. Do not implement from memory or from

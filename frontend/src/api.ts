@@ -885,4 +885,12 @@ export async function rollbackRecapEdition(
   return data
 }
 
+export async function getPublishedArchive(
+  slug: string,
+  season: number,
+): Promise<{ week: number; headline?: string; published_at?: string }[]> {
+  const { data } = await directClient.get(`/leagues/${slug}/recaps/${season}`)
+  return data
+}
+
 export { client as apiClient }

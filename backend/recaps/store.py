@@ -181,6 +181,37 @@ class RecapStore:
         rows = self._request("GET", "recap_editions", params=params)
         return rows[0] if rows else None
 
+    def list_published(
+        self, league_id: str, season: int
+    ) -> list[dict[str, Any]]:
+        """Return all published editions for a league/season, ordered by week.
+
+        Each row: ``{week, headline, published_at}``. Unpublished weeks are
+        absent. Used by the public archive navigation.
+        """
+        rows = self._request(
+            "GET",
+            "recap_editions",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "status": "eq.published",
+                "select": "week,structured_content_json->headline,published_at",
+                "order": "week.asc",
+            },
+        )
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            entry: dict[str, Any] = {
+                "week": r["week"],
+                "published_at": r.get("published_at"),
+            }
+            headline = r.get("headline")
+            if headline and isinstance(headline, str):
+                entry["headline"] = headline
+            out.append(entry)
+        return out
+
     def get_edition_by_id(self, edition_id: str) -> dict[str, Any] | None:
         rows = self._request(
             "GET",

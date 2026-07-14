@@ -200,6 +200,19 @@ def get_public_edition(
     return {"league": league, "edition": edition}
 
 
+def get_published_archive(
+    *,
+    store: RecapStore,
+    slug: str,
+    season: int,
+) -> list[dict[str, Any]]:
+    """Return all published weeks for a league/season (public)."""
+    league = _league_or_404(store, slug)
+    if league.get("visibility") != "public":
+        raise HTTPException(status_code=404, detail="Published recap not found.")
+    return store.list_published(league["id"], season)
+
+
 def get_admin_edition(
     *,
     store: RecapStore,
