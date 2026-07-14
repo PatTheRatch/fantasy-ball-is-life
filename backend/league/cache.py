@@ -86,6 +86,77 @@ def _clear_my_league_ttl_cache() -> None:
     _MY_LEAGUE_TTL_CACHE.clear()
 
 
+# --- cross-request WeeklyScoreboard TTL cache ---------------------------------
+# Power rankings / season stats need only the box-score matchup view, not the
+# full MyLeague (pro schedule, player map, draft). They fetch a narrow, single-
+# call WeeklyScoreboard; this caches it with the same TTL + single-flight policy
+# as MyLeague above so readiness -> generate and week-to-week clicks reuse it.
+
+_SCOREBOARD_TTL_SECONDS = 90
+_SCOREBOARD_TTL_CACHE: dict[tuple[int, int], tuple[float, Any]] = {}
+_SCOREBOARD_LOCKS: dict[tuple[int, int], threading.Lock] = {}
+_SCOREBOARD_LOCKS_GUARD = threading.Lock()
+
+
+def _get_scoreboard_lock(key: tuple[int, int]) -> threading.Lock:
+    with _SCOREBOARD_LOCKS_GUARD:
+        lock = _SCOREBOARD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _SCOREBOARD_LOCKS[key] = lock
+        return lock
+
+
+def _scoreboard_ttl_get(key: tuple[int, int]):
+    entry = _SCOREBOARD_TTL_CACHE.get(key)
+    if entry is None:
+        return None
+    ts, sb = entry
+    if time.monotonic() - ts > _SCOREBOARD_TTL_SECONDS:
+        _SCOREBOARD_TTL_CACHE.pop(key, None)
+        return None
+    return sb
+
+
+def _clear_scoreboard_ttl_cache() -> None:
+    """Test hook: reset the cross-request scoreboard TTL cache."""
+    _SCOREBOARD_TTL_CACHE.clear()
+
+
+def get_cached_scoreboard(league_id: int, year: int) -> Any:
+    """Return a (possibly cached) ``WeeklyScoreboard`` via the narrow fetch.
+
+    Mirrors :func:`get_cached_my_league`'s 90s TTL + per-key single-flight, but
+    builds a ``WeeklyScoreboard`` from a single-call ESPN fetch (box scores
+    only) instead of the full 4-call ``MyLeague``.
+    """
+    from backend.league.scoreboard_fetch import fetch_scoreboard
+
+    key = (league_id, year)
+    sb = _scoreboard_ttl_get(key)
+    if sb is not None:
+        logging.info("get_cached_scoreboard: TTL-cache hit for (%s, %s)", league_id, year)
+        return sb
+
+    lock = _get_scoreboard_lock(key)
+    with lock:
+        sb = _scoreboard_ttl_get(key)
+        if sb is not None:
+            logging.info(
+                "get_cached_scoreboard: TTL-cache hit for (%s, %s) after lock wait",
+                league_id, year,
+            )
+            return sb
+        started = time.perf_counter()
+        sb = fetch_scoreboard(league_id, year)
+        logging.info(
+            "get_cached_scoreboard: narrow fetch for (%s, %s) took %.2fs",
+            league_id, year, time.perf_counter() - started,
+        )
+        _SCOREBOARD_TTL_CACHE[key] = (time.monotonic(), sb)
+        return sb
+
+
 class ESPNRequestCache:
     """Per-request store that reuses one ``ESPNHandles`` per league key.
 

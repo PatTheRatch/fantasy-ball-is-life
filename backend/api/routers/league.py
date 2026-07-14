@@ -16,6 +16,7 @@ from backend.api.deps import (
     _handles,
     _my_league,
     _read_excel_bytes,
+    _scoreboard,
 )
 from backend.league import data_feed as feed
 
@@ -81,12 +82,12 @@ def power_rankings(
     recent_weeks: int = Query(3, description="How many trailing weeks count as 'recent'"),
 ) -> List[dict[str, Any]]:
     """
-    Composite power rankings using only two `get_universe_wins` calls:
+    Composite power rankings from the narrow-fetch WeeklyScoreboard:
     - full window (all requested weeks)
     - recent window (last N weeks from the requested set)
     """
     try:
-        ml = _my_league()
+        board = _scoreboard()
 
         all_weeks: List[int] = []
         for tok in (weeks or "").split(","):
@@ -99,17 +100,7 @@ def power_rankings(
             raise HTTPException(status_code=422, detail="`weeks` must include at least one week number.")
 
         # Clamp to weeks that actually exist in this league's matchup data.
-        # Some leagues report a `currentMatchupPeriod` that exceeds the schedule length; `MyLeague`
-        # can raise KeyError(week) if the week isn't present in `league_matchups`.
-        max_week = 0
-        try:
-            lm = getattr(ml, "league_matchups", None)
-            if isinstance(lm, dict) and lm:
-                max_week = max(int(k) for k in lm.keys())
-        except Exception:
-            max_week = 0
-        if max_week <= 0:
-            max_week = int(getattr(ml, "length_of_schedule", 0) or 0)
+        max_week = int(getattr(board, "max_week", 0) or 0)
 
         if max_week > 0:
             all_weeks = [w for w in all_weeks if 1 <= int(w) <= max_week]
@@ -122,11 +113,12 @@ def power_rankings(
         rw = max(1, int(recent_weeks))
         recent_list = all_weeks[-rw:] if len(all_weeks) >= 1 else all_weeks
 
-        # ESPN schedule weeks can be shorter than our UI's 1..22 range; `MyLeague`
-        # can raise KeyError(week) when a requested week isn't present.
+        # Weeks are already clamped to board.max_week above; this guards the
+        # residual case of a requested week with no matchup rows (e.g. an
+        # All-Star gap week) that the board reports as unavailable.
         try:
-            df_full = ml.get_universe_wins(weeks=all_weeks)
-            df_recent = ml.get_universe_wins(weeks=recent_list)
+            df_full = board.all_play(weeks=all_weeks)
+            df_recent = board.all_play(weeks=recent_list)
         except KeyError as ke:
             bad = None
             try:
@@ -141,19 +133,19 @@ def power_rankings(
                 raise HTTPException(status_code=422, detail=f"Week {bad} is not available for this league.")
             recent_list = all_weeks[-rw:] if len(all_weeks) >= 1 else all_weeks
             _t0 = time.perf_counter()
-            df_full = ml.get_universe_wins(weeks=all_weeks)
+            df_full = board.all_play(weeks=all_weeks)
             _t1 = time.perf_counter()
-            df_recent = ml.get_universe_wins(weeks=recent_list)
+            df_recent = board.all_play(weeks=recent_list)
             logging.info(
-                "power_rankings: get_universe_wins(full=%d weeks) took %.2fs, "
-                "get_universe_wins(recent=%d weeks) took %.2fs",
+                "power_rankings: all_play(full=%d weeks) took %.2fs, "
+                "all_play(recent=%d weeks) took %.2fs",
                 len(all_weeks), _t1 - _t0, len(recent_list), time.perf_counter() - _t1,
             )
 
         if df_full is None or df_full.empty or "Team" not in df_full.columns:
-            raise HTTPException(status_code=500, detail="get_universe_wins returned empty full-window data.")
+            raise HTTPException(status_code=500, detail="all_play returned empty full-window data.")
         if df_recent is None or df_recent.empty or "Team" not in df_recent.columns:
-            raise HTTPException(status_code=500, detail="get_universe_wins returned empty recent-window data.")
+            raise HTTPException(status_code=500, detail="all_play returned empty recent-window data.")
 
         # Normalize required columns.
         for col in ["Total Win %", "Actual Win %"]:
@@ -173,7 +165,7 @@ def power_rankings(
         for c in stat_cols:
             if c not in stats.columns:
                 continue
-            # Higher is better for all categories here (TO is already inverted upstream in MyLeague.get_wins).
+            # Higher is better for all categories here (TO is already inverted upstream in the scoreboard).
             ranks[c] = stats[c].rank(method="min", ascending=False).astype("Int64")
 
         rank_df = pd.DataFrame({"Team": stats["Team"]})
@@ -215,12 +207,12 @@ def power_rankings(
             prev_weeks = all_weeks[:-1]
             prev_recent = prev_weeks[-rw:] if prev_weeks else prev_weeks
             _t2 = time.perf_counter()
-            df_full_prev = ml.get_universe_wins(weeks=prev_weeks)
+            df_full_prev = board.all_play(weeks=prev_weeks)
             _t3 = time.perf_counter()
-            df_recent_prev = ml.get_universe_wins(weeks=prev_recent)
+            df_recent_prev = board.all_play(weeks=prev_recent)
             logging.info(
-                "power_rankings: rank-change get_universe_wins(full=%d weeks) took %.2fs, "
-                "get_universe_wins(recent=%d weeks) took %.2fs",
+                "power_rankings: rank-change all_play(full=%d weeks) took %.2fs, "
+                "all_play(recent=%d weeks) took %.2fs",
                 len(prev_weeks), _t3 - _t2, len(prev_recent), time.perf_counter() - _t3,
             )
 
@@ -484,7 +476,7 @@ def season_stats(
     weeks: str = Query(..., description="Comma-separated list of week numbers, e.g. '1,2,3'"),
 ) -> List[dict[str, Any]]:
     try:
-        ml = _my_league()
+        board = _scoreboard()
         week_list = []
         for tok in (weeks or "").split(","):
             t = tok.strip()
@@ -493,7 +485,7 @@ def season_stats(
             week_list.append(int(t))
         if not week_list:
             raise HTTPException(status_code=422, detail="`weeks` must contain at least one integer week number.")
-        df = ml.get_universe_wins(weeks=week_list)
+        df = board.all_play(weeks=week_list)
         return _df_records(df)
     except HTTPException:
         raise

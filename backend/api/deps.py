@@ -30,6 +30,16 @@ def _my_league(year: Optional[int] = None) -> MyLeague:
     return get_cached_my_league(LEAGUE_ID, y)
 
 
+def _scoreboard(year: Optional[int] = None):
+    """``WeeklyScoreboard`` for the all-play endpoints (power rankings, season
+    stats). Uses the narrow single-call ESPN fetch + TTL cache, avoiding the
+    full ``MyLeague`` construction those endpoints don't need."""
+    from backend.league.cache import get_cached_scoreboard
+
+    y = SEASON if year is None else year
+    return get_cached_scoreboard(LEAGUE_ID, y)
+
+
 def _strip_numpy(obj: Any) -> Any:
     """Convert numpy/pandas scalar values to native Python for jsonable_encoder."""
     if isinstance(obj, np.generic):

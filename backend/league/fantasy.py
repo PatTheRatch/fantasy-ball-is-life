@@ -1,8 +1,14 @@
 import pandas as pd
-from espn_api.basketball import League, Matchup
+from espn_api.basketball import League
 
 from backend.config import ESPN_S2, SWID
 from backend.league.data_feed import LOWER_IS_BETTER_STATS
+from backend.league.scoreboard import WeeklyScoreboard
+from backend.league.scoreboard_fetch import (
+    league_matchups_of,
+    matchup_scores_df,
+    schedule_df,
+)
 
 
 class MyLeague(League):
@@ -26,38 +32,24 @@ class MyLeague(League):
         self.current_scoreboard = self.league_matchups.get(self.effective_current_week, [])
         self.stat_categories = ['PTS', 'REB', 'AST', 'STL', 'BLK', '3PM', 'FG%', 'FT%', 'TO']
 
-    def _max_schedule_week(self) -> int:
-        """Largest week index present in `league_matchups` (full season incl. playoffs)."""
-        try:
-            if self.league_matchups:
-                return max(int(k) for k in self.league_matchups.keys())
-        except Exception:
-            pass
-        return max(int(self.effective_current_week), int(self.length_of_schedule or 0), 1)
-
     def get_all_matchups(self):
-        all_matchups = {}
-        for team in self.teams:
-            for i, matchup in enumerate(team.schedule):
-                if matchup.home_team.team_name == team.team_name:
-                    all_matchups.setdefault(i + 1, []).append(matchup)
-        return all_matchups
+        return league_matchups_of(self)
 
     def get_all_matchup_data(self):
-        # Include every scheduled week (not only through `effective_current_week`), so historical
-        # `get_universe_wins(weeks=[...])` calls still see playoff weeks when ESPN's "current" week is off.
-        max_w = max(1, int(self._max_schedule_week()))
-        data = [
-            self.get_matchup_data(match_up, i + 1, team)
-            for i, matchups in enumerate(
-                [self.league_matchups.get(x, []) for x in range(1, max_w + 1)]
-            )
-            for match_up in matchups
-            for team in ["home", "away"]
-        ]
-        data = pd.concat(data, ignore_index=True)
-        data['Week'] = pd.to_numeric(data['Week'])
-        return data
+        # Tidy `[Week, Team, <cats>]`, one row per team per played matchup across
+        # every scheduled week (incl. playoffs), via the shared shaping helper.
+        return matchup_scores_df(self, self.league_matchups, self.stat_categories)
+
+    def _scoreboard(self, all_data=None):
+        """A :class:`WeeklyScoreboard` over this league's matchup data.
+
+        ``all_data`` lets callers (and tests) inject a pre-shaped table; it
+        defaults to :meth:`get_all_matchup_data`.
+        """
+        data = self.get_all_matchup_data() if all_data is None else all_data
+        return WeeklyScoreboard(
+            data, self.schedule, self.stat_categories, LOWER_IS_BETTER_STATS
+        )
 
     def get_power_rankings(self,
                            week=None,
@@ -116,193 +108,32 @@ class MyLeague(League):
 
         return pd.concat([pd.DataFrame(data) for data in power_rankings]).sort_values(by='Current Rank').set_index('Team')
 
-    def get_matchup_data(self, matchup: Matchup, week, team='away'):
-        team_data = {
-            'away': (matchup.away_team.team_name, matchup.home_team.team_name, matchup.away_team_live_score,
-                     matchup.home_team_live_score, matchup.away_team_cats),
-            'home': (matchup.home_team.team_name, matchup.away_team.team_name, matchup.home_team,
-                     matchup.away_team_live_score, matchup.home_team_cats),
-        }
-        team_name, opponent_name, team_total_score, opponent_total_score, cats = team_data[team]
-        data = {
-            'Week': [week],
-            'Team': [team_name],
-            'Opponent': [opponent_name],
-            'Team Total Score': [team_total_score],
-            'Opponent Total Score': [opponent_total_score],
-            **{cat: [cats[cat]['score']] for cat in self.stat_categories}
-        }
-
-        return pd.DataFrame(data)
-
     def get_schedule(self):
-        schedule = {'Week': [], 'Team': [], 'Opponent': []}
-        for team in self.teams:
-            for i, matchup in enumerate(team.schedule):
-                schedule['Week'].append(i + 1)
-                schedule['Team'].append(team.team_name)
-                schedule['Opponent'].append(matchup.away_team.team_name if matchup.home_team.team_name == team.team_name
-                                            else matchup.home_team.team_name)
-
-        return pd.DataFrame(schedule)
+        return schedule_df(self)
 
     def get_universe_wins(self, include_current=False, weeks=None, order_by='Total Wins', ascending=False,
                           additional_team_stats=None):
+        """All-play standings over ``weeks`` (defaults to weeks played so far).
+
+        Thin wrapper over :class:`~backend.league.scoreboard.WeeklyScoreboard`,
+        which owns the vectorized all-play computation. ``additional_team_stats``
+        maps ``(week, team) -> {stat: value}`` for the draft what-if path.
+        """
         if weeks is None:
             weeks = range(1, self.currentMatchupPeriod + include_current)
-
-        weeks_list = list(weeks)
-
-        additional_team_stats = {} if additional_team_stats is None else additional_team_stats
-
-        # One `get_all_matchup_data()` per call — previously every (team, week) pair rebuilt the full table.
-        cached_all_data = None
-
-        def _matchup_table():
-            nonlocal cached_all_data
-            if cached_all_data is None:
-                cached_all_data = self.get_all_matchup_data()
-            return cached_all_data
-
-        dfs = []
-        for team in self.team_names:
-            for week in weeks_list:
-                if (week, team) in additional_team_stats.keys():
-                    dfs.append(self.get_wins(team, week, additional_team_stats[(week, team)], all_data=_matchup_table()))
-                else:
-                    dfs.append(self.get_wins(team, week, all_data=_matchup_table()))
-
-        # Bye / eliminated (team, week) pairs return an empty frame (they don't
-        # participate in weekly all-play); drop them before concat so they don't
-        # contribute zero-filled rows to a team's season totals.
-        dfs = [d for d in dfs if not d.empty]
-        if not dfs:
-            return pd.DataFrame()
-        df = pd.concat(dfs, ignore_index=True)
-        if df.columns.duplicated().any():
-            df = df.loc[:, ~df.columns.duplicated()].copy()
-
-        """df = pd.concat(
-            [self.get_wins(team, week, additional_team_stats[week]) for team in self.team_names for week in weeks],
-            ignore_index=True
-        )"""
-
-        if len(weeks_list) > 1:
-            agg_func = {col: 'sum' for col in df.columns if
-                        col not in ['Avg Wins', 'Avg Losses', 'Avg Ties', 'Team',
-                                    'Lost To', 'Tied With', 'Beaten', 'FG%', 'FT%']}
-            agg_func.update(
-                {'Avg Wins': 'mean', 'Avg Losses': 'mean', 'Avg Ties': 'mean', 'FG%': 'mean', 'FT%': 'mean'})
-            df = df.groupby('Team', as_index=False).agg(agg_func)
-
-        df['Total Win %'] = round((df['Total Wins'] + 0.5 * df['Total Ties']) / (
-                df['Total Wins'] + df['Total Losses'] + df['Total Ties']) * 100, 2)
-        df['Matchup Win %'] = round((df['Matchup Wins'] + 0.5 * df['Matchup Ties']) / (
-                df['Matchup Wins'] + df['Matchup Losses'] + df['Matchup Ties']) * 100, 2)
-        df['Actual Win %'] = round((df['Actual Wins'] + 0.5 * df['Actual Ties']) / (
-                df['Actual Wins'] + df['Actual Losses'] + df['Actual Ties']) * 100, 2)
-        df['Avg Win %'] = round((df['Avg Wins'] + 0.5 * df['Avg Ties']) / (
-                df['Avg Wins'] + df['Avg Losses'] + df['Avg Ties']) * 100, 2)
-        df['Win % Ratio'] = round(df['Actual Win %'] / df['Total Win %'], 2)
-
-        return df.sort_values(by=order_by, ascending=ascending).reset_index(drop=True)
-
-    @staticmethod
-    def _scalar_stat(val):
-        """Ensure a single numeric value (duplicate Team rows can make `.loc` return a Series)."""
-        if isinstance(val, pd.Series):
-            return float(val.iloc[0])
-        return float(val)
+        return self._scoreboard().all_play(
+            weeks=weeks, order_by=order_by, ascending=ascending,
+            inject=additional_team_stats or None,
+        )
 
     def get_wins(self, team_name, week, additional_team_stats=None, all_data=None):
-        all_data = self.get_all_matchup_data() if all_data is None else all_data
-        week_rows = all_data.loc[all_data['Week'] == week]
-        if week_rows.empty:
-            raise ValueError(f"No matchup data for week {week}.")
-        week_matchups = week_rows.set_index('Team')[self.stat_categories]
-        if week_matchups.index.duplicated().any():
-            week_matchups = week_matchups[~week_matchups.index.duplicated(keep='first')]
+        """One team's raw all-play row for one week (empty frame on a bye).
 
-        # Weekly all-play is contested ONLY among teams with a real matchup this
-        # week. Bye / eliminated teams are never zero-filled into the league:
-        # doing so handed them phantom category wins (a 0-turnover ghost "beats"
-        # every real team on TO) and dragged down active teams. (PR C, gate 2.)
-        active_teams = list(week_matchups.index)
-
-        # A hypothetical stat injection (draft what-if) may reference a team with
-        # no real matchup this week; treat that team as an active participant.
-        if additional_team_stats is not None:
-            if team_name not in week_matchups.index:
-                week_matchups.loc[team_name] = 0.0
-            if team_name not in active_teams:
-                active_teams.append(team_name)
-            for stat, value in additional_team_stats.items():
-                week_matchups.loc[team_name, stat] = value
-
-        # This team sat out (bye / eliminated): it earns no all-play record for
-        # the week rather than a zero-filled one. get_universe_wins drops the
-        # empty frame, so the team simply doesn't participate this week.
-        opponents = [t for t in active_teams if t != team_name]
-        if team_name not in active_teams or not opponents:
-            return pd.DataFrame()
-
-        sched_slice = self.schedule.loc[
-            (self.schedule['Week'] == week) & (self.schedule['Team'] == team_name), 'Opponent'
-        ]
-        current_opponent = None if sched_slice.empty else sched_slice.iloc[0]
-
-        stat_wins = {f'{stat} Wins': 0 for stat in self.stat_categories}
-        stat_totals = {f'{stat}': 0 for stat in self.stat_categories}
-        total_wins, total_losses, total_ties = 0, 0, 0
-        matchup_wins, matchup_losses, matchup_ties = 0, 0, 0
-        actual_wins, actual_losses, actual_ties = 0, 0, 0
-        lost_to, tied_with, beaten = [], [], []
-
-        for opponent in opponents:
-            local_wins, local_losses, local_ties = 0, 0, 0
-            for stat in self.stat_categories:
-                team_stat = self._scalar_stat(week_matchups.loc[team_name][stat])
-                opponent_stat = self._scalar_stat(week_matchups.loc[opponent][stat])
-                # Turnovers are lower-is-better: negate so the shared ">" logic
-                # (and the downstream negated-TO convention that power rankings
-                # and the draft optimizer both rely on) award fewer turnovers.
-                if stat in LOWER_IS_BETTER_STATS:
-                    team_stat = -team_stat
-                    opponent_stat = -opponent_stat
-                if current_opponent is not None and opponent == current_opponent:
-                    actual_wins += int(team_stat > opponent_stat)
-                    actual_losses += int(team_stat < opponent_stat)
-                    actual_ties += int(team_stat == opponent_stat)
-                total_wins += int(team_stat > opponent_stat)
-                total_losses += int(team_stat < opponent_stat)
-                total_ties += int(team_stat == opponent_stat)
-                stat_wins[f'{stat} Wins'] += int(team_stat > opponent_stat)
-                stat_totals[stat] += team_stat / len(opponents)
-                local_wins += int(team_stat > opponent_stat)
-                local_losses += int(team_stat < opponent_stat)
-                local_ties += int(team_stat == opponent_stat)
-            if local_wins > local_losses:
-                matchup_wins += 1
-                beaten.append(opponent)
-            elif local_wins < local_losses:
-                matchup_losses += 1
-                lost_to.append(opponent)
-            else:
-                matchup_ties += 1
-                tied_with.append(opponent)
-
-        data = {
-            'Team': [team_name],
-            'Actual Wins': [actual_wins], 'Actual Losses': [actual_losses], 'Actual Ties': [actual_ties],
-            'Matchup Wins': [matchup_wins], 'Matchup Losses': [matchup_losses], 'Matchup Ties': [matchup_ties],
-            'Total Wins': [total_wins], 'Total Losses': [total_losses], 'Total Ties': [total_ties],
-            'Lost To': [lost_to], 'Tied With': [tied_with], 'Beaten': [beaten],
-            'Avg Wins': [sum([1 for x in stat_wins.values() if x > 0])],
-            'Avg Losses': [sum([1 for x in stat_wins.values() if x < 0])],
-            'Avg Ties': [sum([1 for x in stat_wins.values() if x == 0])],
-            **stat_wins, **stat_totals
-        }
-        return pd.DataFrame(data)
+        Delegates to :meth:`WeeklyScoreboard.team_week`; ``all_data`` overrides
+        the matchup table (used by tests and the historical call path)."""
+        return self._scoreboard(all_data).team_week(
+            team_name, week, inject=additional_team_stats,
+        )
 
     def get_current_week_matchups(self):
         matchups = {
