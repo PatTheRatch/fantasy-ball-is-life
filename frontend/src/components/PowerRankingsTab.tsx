@@ -47,7 +47,7 @@ export function PowerRankingsTab({
 
   const standingMap: Record<string, { wins: number; losses: number; ties: number }> = {}
   for (const s of standings) {
-    standingMap[String(s.team_id)] = {
+    standingMap[String(s.team_name)] = {
       wins: Number(s.wins ?? 0),
       losses: Number(s.losses ?? 0),
       ties: Number(s.ties ?? 0),
@@ -65,7 +65,7 @@ export function PowerRankingsTab({
           <RankingCard
             key={String(row.team_id ?? '')}
             row={row as Record<string, unknown>}
-            standing={standingMap[String(row.team_id)] ?? null}
+            standing={standingMap[String(row.team)] ?? null}
             content={content ?? null}
           />
         ))}
