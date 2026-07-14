@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from backend.commentary.generate import generate_structured_recap
-from backend.commentary.schemas import dump_model
+from backend.commentary.schemas import RankingExplanation, dump_model
 from backend.league.data_feed import MATCHUP_WEEKS_2025_26
 from backend.recaps.assemble import assemble_weekly_snapshot
 from backend.recaps.awards import select_awards
@@ -149,9 +149,20 @@ def generate_draft(
         }
     )
 
+    # Power rankings are generated once per (league, season, week) and reused
+    # on every later recap regeneration for that week -- the recap narrative
+    # can be redrafted repeatedly (an admin iterating on wording, a retry
+    # after a bad LLM response) without re-asking the LLM for rankings text
+    # that has no reason to change.
+    cached_rankings = store.get_power_rankings(
+        league_id=league["id"], season=season, week=week
+    )
+
     llm_started = time.perf_counter()
     try:
-        generated = generate_structured_recap(snapshot)
+        generated = generate_structured_recap(
+            snapshot, skip_ranking_explanations=cached_rankings is not None
+        )
         generated = format_share_text(snapshot, generated)
     except Exception as exc:
         # Surface the real cause in the server logs — the detail below only
@@ -168,6 +179,34 @@ def generate_draft(
             "recap assembly: LLM generate_structured_recap took %.2fs",
             time.perf_counter() - llm_started,
         )
+
+    if cached_rankings is not None:
+        generated.ranking_explanations = [
+            RankingExplanation(**row)
+            for row in (cached_rankings.get("ranking_explanations_json") or [])
+        ]
+    elif generated.ranking_explanations:
+        try:
+            store.insert_power_rankings(
+                {
+                    "league_id": league["id"],
+                    "season": season,
+                    "week": week,
+                    "ranking_explanations_json": dump_model(generated)["ranking_explanations"],
+                    "created_by": user_id,
+                }
+            )
+        except RecapStoreError:
+            # A concurrent generate_draft call for the same brand-new week can
+            # win the insert first (unique constraint on league/season/week) --
+            # this generation still succeeded, so don't fail the whole draft
+            # over a lost cache-write race. The next regeneration will read
+            # whichever row won.
+            logging.warning(
+                "power_ranking_editions insert lost a race for (%s, %s, %s); "
+                "this generation's blurbs were not persisted",
+                league["id"], season, week,
+            )
 
     edition_version = store.next_version(
         "recap_editions",

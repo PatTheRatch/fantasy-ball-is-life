@@ -153,6 +153,34 @@ class RecapStore:
         )
         return rows[0]
 
+    def get_power_rankings(
+        self, *, league_id: str, season: int, week: int
+    ) -> dict[str, Any] | None:
+        """The persisted power-rankings blurbs for one week, or ``None`` if
+        this week hasn't been generated yet. One row per (league, season,
+        week) -- no versioning, since the point is to never redo it."""
+        rows = self._request(
+            "GET",
+            "power_ranking_editions",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "week": f"eq.{week}",
+                "select": "id,ranking_explanations_json,created_at",
+                "limit": "1",
+            },
+        )
+        return rows[0] if rows else None
+
+    def insert_power_rankings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        rows = self._request(
+            "POST",
+            "power_ranking_editions",
+            json=payload,
+            prefer="return=representation",
+        )
+        return rows[0]
+
     _EDITION_WITH_SNAPSHOT_SELECT = (
         "*,league_week_snapshots("
         "schema_version,matchups_json,standings_json,power_rankings_json,"

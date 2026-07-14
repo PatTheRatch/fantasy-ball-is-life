@@ -390,7 +390,14 @@ def build_season_commentary_prompts(
 
 def build_structured_recap_prompts(
     snapshot: Dict[str, Any],
+    *,
+    skip_ranking_explanations: bool = False,
 ) -> Tuple[str, str]:
+    """``skip_ranking_explanations``: the power-rankings blurbs are persisted
+    per (league, season, week) and reused across recap regenerations (see
+    ``backend.recaps.service.generate_draft``) -- when a week's blurbs already
+    exist, drop that section from the schema/example so the LLM doesn't waste
+    tokens writing content that will be discarded."""
     playoff_context = snapshot.get("playoff_context")
 
     system_prompt = (
@@ -475,12 +482,6 @@ def build_structured_recap_prompts(
                 "insight": "one grounded line on what decided it at the category level",
             }
         ],
-        "ranking_explanations": [
-            {
-                "team": "exact team name from power_rankings",
-                "text": "1-2 grounded sentences on why this team sits where it does",
-            }
-        ],
         "award_explanations": [
             {
                 "award_id": "exact snapshot award_id",
@@ -488,6 +489,13 @@ def build_structured_recap_prompts(
             }
         ],
     }
+    if not skip_ranking_explanations:
+        schema["ranking_explanations"] = [
+            {
+                "team": "exact team name from power_rankings",
+                "text": "1-2 grounded sentences on why this team sits where it does",
+            }
+        ]
 
     example = {
         "headline": "Separation Week.",
@@ -505,13 +513,26 @@ def build_structured_recap_prompts(
                 "insight": "Team A took enough volume categories to neutralize Team B's efficiency edge and never let the matchup flip.",
             }
         ],
-        "ranking_explanations": [
-            {"team": "Team A", "text": "Still the class of the league -- best all-play win rate and no obvious category hole."}
-        ],
         "award_explanations": [
             {"award_id": "team-of-week", "text": "Led the league in points and rebounds on the way to the week's most complete win."}
         ],
     }
+    if not skip_ranking_explanations:
+        example["ranking_explanations"] = [
+            {"team": "Team A", "text": "Still the class of the league -- best all-play win rate and no obvious category hole."}
+        ]
+
+    ranking_instruction = (
+        "RANKING EXPLANATIONS: write one for EVERY team in power_rankings, using "
+        "the exact team name. Ground each in that team's ranking, all-play rate, "
+        "recent form, or category profile. These are the team-by-team blurbs the "
+        f"power-rankings tab shows. The teams to cover: {ranked_teams}.\n\n"
+        if not skip_ranking_explanations
+        else (
+            "Do NOT include a ranking_explanations field -- this week's "
+            "power-rankings blurbs were already generated and are reused as-is.\n\n"
+        )
+    )
 
     user_prompt = (
         "OUTPUT SCHEMA (shape only):\n"
@@ -525,10 +546,7 @@ def build_structured_recap_prompts(
         "story of the week the way NBA.com frames its power-rankings column: "
         "who's separating, who's collapsing, what the numbers reveal that the "
         "box scores don't. Narrative, grounded in the data, not a stat dump.\n\n"
-        "RANKING EXPLANATIONS: write one for EVERY team in power_rankings, using "
-        "the exact team name. Ground each in that team's ranking, all-play rate, "
-        "recent form, or category profile. These are the team-by-team blurbs the "
-        f"power-rankings tab shows. The teams to cover: {ranked_teams}.\n\n"
+        f"{ranking_instruction}"
         "COVERAGE: emit exactly one matchup_takeaways entry per matchup_id and "
         "one award_explanations entry per award_id -- none missing, extra, or "
         "duplicated. Do not restate the score in your matchup beats; the header "

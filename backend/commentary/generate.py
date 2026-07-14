@@ -353,6 +353,7 @@ def generate_structured_recap(
     snapshot: WeeklyFactSnapshot,
     *,
     max_attempts: int = 3,
+    skip_ranking_explanations: bool = False,
 ) -> RecapGeneratedContent:
     """Generate the voice-driven weekly recap for a persisted fact snapshot.
 
@@ -360,11 +361,17 @@ def generate_structured_recap(
     line per award; the factual headers (who beat whom, the score) come from the
     deterministic snapshot, not the model. Coverage is the only hard constraint,
     so on a miss we re-prompt with the exact ids and retry rather than discarding
-    the generation."""
+    the generation.
+
+    ``skip_ranking_explanations``: when this week's power-rankings blurbs are
+    already persisted (see ``backend.recaps.service.generate_draft``), drop
+    that section from the prompt entirely -- the caller splices the reused
+    blurbs into the result afterward, so asking the LLM to write (and then
+    discard) new ones would just waste tokens and latency."""
     _require_recap_api_key()
     snapshot_payload = dump_model(snapshot)
     system_prompt, base_user_prompt = prompts.build_structured_recap_prompts(
-        snapshot_payload
+        snapshot_payload, skip_ranking_explanations=skip_ranking_explanations,
     )
     last_error: Exception | None = None
     corrective = ""

@@ -248,6 +248,125 @@ def test_incomplete_data_requires_generate_anyway(monkeypatch):
     store.insert_snapshot.assert_not_called()
 
 
+# --- generate_draft: power-rankings persistence + reuse ----------------------
+# Recap + power rankings generate together in one LLM call (the point of this
+# suite), but rankings are persisted per (league, season, week) and reused on
+# every later regeneration for that week, so redrafting the narrative doesn't
+# re-ask the LLM for rankings text that has no reason to change.
+
+def _generated_payload(matchup_id: str, ranking_team: str = "Alpha") -> dict:
+    return {
+        "headline": "Headline",
+        "intro": "Intro.",
+        "synopsis": [],
+        "matchup_takeaways": [
+            {
+                "matchup_id": matchup_id,
+                "woj": "w", "barkley": "b", "stephen_a": "s", "insight": "i",
+            }
+        ],
+        "ranking_explanations": [{"team": ranking_team, "text": "grounded take"}],
+        "award_explanations": [],
+    }
+
+
+def _mock_generate_draft_deps(monkeypatch, snapshot):
+    monkeypatch.setattr(
+        service, "require_admin",
+        lambda *a, **k: {"id": "league-1", "slug": "test", "name": "Test"},
+    )
+    monkeypatch.setattr(service, "assemble_weekly_snapshot", lambda **kw: snapshot)
+    monkeypatch.setattr(service, "select_awards", lambda s: [])
+    monkeypatch.setattr(service, "format_share_text", lambda snap, content: content)
+
+
+def test_generate_draft_persists_rankings_on_first_generation(monkeypatch):
+    snapshot = _snapshot()
+    store = Mock()
+    store.get_power_rankings.return_value = None  # nothing cached for this week yet
+    store.next_version.return_value = 1
+    store.insert_snapshot.return_value = {"id": "snap-1"}
+    store.insert_edition.return_value = {"id": "ed-1"}
+    _mock_generate_draft_deps(monkeypatch, snapshot)
+
+    captured: dict = {}
+
+    def fake_generate(snap, **kwargs):
+        captured.update(kwargs)
+        return RecapGeneratedContent(**_generated_payload("week-1:alpha-vs-beta"))
+
+    monkeypatch.setattr(service, "generate_structured_recap", fake_generate)
+
+    service.generate_draft(
+        store=store, slug="test", user_id="user-1", season=2026, week=1,
+        week_start="2025-10-20", week_end="2025-10-26", generate_anyway=False,
+    )
+
+    assert captured["skip_ranking_explanations"] is False
+    store.insert_power_rankings.assert_called_once()
+    inserted = store.insert_power_rankings.call_args[0][0]
+    assert inserted["league_id"] == "league-1"
+    assert inserted["season"] == 2026
+    assert inserted["week"] == 1
+    assert inserted["ranking_explanations_json"] == [{"team": "Alpha", "text": "grounded take"}]
+
+
+def test_generate_draft_reuses_cached_rankings_and_skips_llm_section(monkeypatch):
+    snapshot = _snapshot()
+    store = Mock()
+    store.get_power_rankings.return_value = {
+        "ranking_explanations_json": [{"team": "Cached Team", "text": "from storage"}]
+    }
+    store.next_version.return_value = 2
+    store.insert_snapshot.return_value = {"id": "snap-2"}
+    store.insert_edition.return_value = {"id": "ed-2"}
+    _mock_generate_draft_deps(monkeypatch, snapshot)
+
+    captured: dict = {}
+
+    def fake_generate(snap, **kwargs):
+        captured.update(kwargs)
+        # Even if the model wrote something here, the cached blurbs must win.
+        payload = _generated_payload("week-1:alpha-vs-beta", ranking_team="Fresh Team")
+        return RecapGeneratedContent(**payload)
+
+    monkeypatch.setattr(service, "generate_structured_recap", fake_generate)
+
+    edition = service.generate_draft(
+        store=store, slug="test", user_id="user-1", season=2026, week=1,
+        week_start="2025-10-20", week_end="2025-10-26", generate_anyway=False,
+    )
+
+    assert captured["skip_ranking_explanations"] is True
+    store.insert_power_rankings.assert_not_called()  # already cached -- don't redo it
+    saved = store.insert_edition.call_args[0][0]["structured_content_json"]
+    assert saved["ranking_explanations"] == [{"team": "Cached Team", "text": "from storage"}]
+
+
+def test_generate_draft_survives_power_rankings_insert_race(monkeypatch):
+    """A concurrent generate_draft for the same brand-new week can win the
+    insert first (unique constraint on league/season/week); this generation
+    still succeeded and must not fail the whole draft over a lost cache-write."""
+    snapshot = _snapshot()
+    store = Mock()
+    store.get_power_rankings.return_value = None
+    store.next_version.return_value = 1
+    store.insert_snapshot.return_value = {"id": "snap-1"}
+    store.insert_edition.return_value = {"id": "ed-1"}
+    store.insert_power_rankings.side_effect = RecapStoreError("conflict")
+    _mock_generate_draft_deps(monkeypatch, snapshot)
+    monkeypatch.setattr(
+        service, "generate_structured_recap",
+        lambda snap, **kw: RecapGeneratedContent(**_generated_payload("week-1:alpha-vs-beta")),
+    )
+
+    edition = service.generate_draft(
+        store=store, slug="test", user_id="user-1", season=2026, week=1,
+        week_start="2025-10-20", week_end="2025-10-26", generate_anyway=False,
+    )
+    assert edition["id"] == "ed-1"
+
+
 def test_supabase_auth_rejects_missing_bearer_before_network(monkeypatch):
     request = Mock()
     monkeypatch.setattr(auth.requests, "get", request)
@@ -474,6 +593,33 @@ def test_structured_recap_prompt_omits_voice_section_when_unset():
     system_prompt, _ = prompts.build_structured_recap_prompts(snapshot_payload)
 
     assert "LEAGUE-SPECIFIC VOICE NOTES" not in system_prompt
+
+
+def test_structured_recap_prompt_includes_ranking_explanations_by_default():
+    snapshot_payload = {
+        "league": {"id": "league-1", "slug": "test", "name": "Test"},
+        "power_rankings": [{"team": "Alpha"}, {"team": "Beta"}],
+    }
+
+    _, user_prompt = prompts.build_structured_recap_prompts(snapshot_payload)
+
+    assert '"ranking_explanations"' in user_prompt
+    assert "write one for EVERY team in power_rankings" in user_prompt
+    assert "['Alpha', 'Beta']" in user_prompt
+
+
+def test_structured_recap_prompt_skips_ranking_explanations_when_cached():
+    snapshot_payload = {
+        "league": {"id": "league-1", "slug": "test", "name": "Test"},
+        "power_rankings": [{"team": "Alpha"}, {"team": "Beta"}],
+    }
+
+    _, user_prompt = prompts.build_structured_recap_prompts(
+        snapshot_payload, skip_ranking_explanations=True
+    )
+
+    assert '"ranking_explanations"' not in user_prompt
+    assert "already generated and are reused as-is" in user_prompt
 
 
 def test_get_edition_by_id_normalizes_stored_snapshot(monkeypatch):
