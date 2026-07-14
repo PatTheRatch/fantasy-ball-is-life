@@ -40,6 +40,11 @@ PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/"
 # that a lightweight model (deepseek-v4-flash) misses intermittently, hard-
 # failing the whole ~50s generation. Override with RECAP_LLM_PROVIDER=deepseek.
 RECAP_LLM_PROVIDER = os.getenv("RECAP_LLM_PROVIDER", "anthropic").lower()
+# Claude thinking effort for the recap. Sonnet 5's default (adaptive/high) spends
+# ~6k thinking tokens and ~87s per recap — and can eat the output budget and
+# truncate the JSON. "low" measured ~53s (~40% faster) with no quality loss.
+# One of: low | medium | high | off (off = thinking disabled).
+RECAP_LLM_EFFORT = os.getenv("RECAP_LLM_EFFORT", "low").lower()
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 DEEPSEEK_BASE_URL = os.getenv(

@@ -159,84 +159,41 @@ def test_awards_use_deterministic_matchup_and_standing_facts():
     assert by_id["biggest-upset"]["facts"]["rank_gap"] == 1
 
 
-def test_structured_generation_rejects_unknown_evidence(monkeypatch):
-    snapshot = _snapshot()
-    snapshot.award_candidates = select_awards(snapshot)
-    payload = {
-        "headline": "Alpha owns the week",
-        "dek": "A grounded recap.",
-        "lead_story": ["Alpha won 6-3."],
-        "matchup_takeaways": [
-            {
-                "matchup_id": "week-1:alpha-vs-beta",
-                "text": "Alpha took six categories.",
-                "evidence_ids": ["made-up:evidence"],
-            }
-        ],
-        "ranking_explanations": [],
-        "award_explanations": [
-            {
-                "award_id": award["award_id"],
-                "text": f"{award['winner']} earned it.",
-                "evidence_ids": award["evidence_ids"],
-            }
-            for award in snapshot.award_candidates
-        ],
-        "whatsapp_summary": "Summary",
-        "whatsapp_full": "Full recap",
-    }
-    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
-    monkeypatch.setattr(
-        generate,
-        "_complete_structured",
-        lambda *args, **kwargs: json.dumps(payload),
-    )
-
-    with pytest.raises(ValueError, match="unknown evidence"):
-        generate.generate_structured_recap(snapshot)
-
-
 def _valid_structured_payload(snapshot):
     return {
-        "headline": "Alpha owns the week",
-        "dek": "A grounded recap.",
-        "lead_story": ["Alpha won six categories against Beta."],
+        "headline": "Alpha Owns the Week.",
+        "intro": "Alpha handled Beta and the standings shifted.",
         "matchup_takeaways": [
             {
                 "matchup_id": "week-1:alpha-vs-beta",
-                "text": "Alpha took six categories.",
-                "evidence_ids": ["week-1:alpha-vs-beta"],
+                "woj": "Alpha controlled the matchup start to finish.",
+                "barkley": "Beta got run off the floor.",
+                "stephen_a": "Alpha is for REAL!",
+                "insight": "Alpha won six categories to three on volume scoring.",
             }
         ],
-        "ranking_explanations": [],
         "award_explanations": [
-            {
-                "award_id": award["award_id"],
-                "text": f"{award['winner']} earned it.",
-                "evidence_ids": award["evidence_ids"],
-            }
+            {"award_id": award["award_id"], "text": f"{award['winner']} earned it."}
             for award in snapshot.award_candidates
         ],
-        "whatsapp_summary": "Alpha ran through Beta this week, and Alpha takes home the hardware too.",
-        "whatsapp_full": "Alpha ran through Beta this week, in full detail. Alpha also takes home the hardware.",
     }
 
 
-def test_generate_rejects_whatsapp_missing_a_team_mention(monkeypatch):
+def test_generate_rejects_missing_matchup_coverage(monkeypatch):
     snapshot = _snapshot()
     snapshot.award_candidates = select_awards(snapshot)
     payload = _valid_structured_payload(snapshot)
-    payload["whatsapp_summary"] = "Alpha had a huge week."  # Beta never named
+    payload["matchup_takeaways"] = []  # coverage miss
     monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
     monkeypatch.setattr(
         generate, "_complete_structured", lambda *args, **kwargs: json.dumps(payload)
     )
 
-    with pytest.raises(ValueError, match="whatsapp_summary"):
+    with pytest.raises(ValueError, match="one takeaway per matchup"):
         generate.generate_structured_recap(snapshot)
 
 
-def test_generate_accepts_whatsapp_mentioning_every_team_and_award_winner(monkeypatch):
+def test_generate_accepts_valid_three_voice_payload(monkeypatch):
     snapshot = _snapshot()
     snapshot.award_candidates = select_awards(snapshot)
     payload = _valid_structured_payload(snapshot)
@@ -247,8 +204,9 @@ def test_generate_accepts_whatsapp_mentioning_every_team_and_award_winner(monkey
 
     result = generate.generate_structured_recap(snapshot)
 
-    assert "Alpha" in result.whatsapp_summary
-    assert "Beta" in result.whatsapp_summary
+    assert result.headline == "Alpha Owns the Week."
+    takeaway = result.matchup_takeaways[0]
+    assert takeaway.woj and takeaway.barkley and takeaway.stephen_a and takeaway.insight
 
 
 def test_incomplete_data_requires_generate_anyway(monkeypatch):
@@ -310,40 +268,37 @@ def test_generate_endpoint_rejects_anonymous_before_store_or_anthropic():
     assert response.status_code == 401
 
 
-def test_share_text_appends_public_link_without_altering_model_narrative(monkeypatch):
+def test_share_text_assembles_facts_voices_and_link(monkeypatch):
     snapshot = _snapshot()
     content = RecapGeneratedContent(
-        headline="Alpha owns the week",
-        dek="A grounded recap.",
-        lead_story=["Alpha won six categories."],
+        headline="Alpha Owns the Week.",
+        intro="Alpha survived Beta in a week nobody saw coming.",
         matchup_takeaways=[
             {
                 "matchup_id": "week-1:alpha-vs-beta",
-                "text": "Alpha controlled the matchup.",
-                "evidence_ids": ["week-1:alpha-vs-beta"],
+                "woj": "Alpha controlled the matchup.",
+                "barkley": "Beta got bullied.",
+                "stephen_a": "Alpha is UNSTOPPABLE!",
+                "insight": "Alpha won six categories to three.",
             }
         ],
-        ranking_explanations=[],
         award_explanations=[],
-        whatsapp_summary="Alpha survived Beta in a week nobody saw coming.",
-        whatsapp_full="Alpha survived Beta in a week nobody saw coming, in full.",
     )
     monkeypatch.setattr(
         "backend.recaps.sharing.config.PUBLIC_APP_URL", "https://example.com"
     )
 
     result = format_share_text(snapshot, content)
+    text = result.share_text
 
-    # The model's own narrative passes through untouched -- format_share_text
-    # only appends the link it's the only thing the model can't know.
-    assert result.whatsapp_summary.startswith(
-        "Alpha survived Beta in a week nobody saw coming."
-    )
-    assert result.whatsapp_full.startswith(
-        "Alpha survived Beta in a week nobody saw coming, in full."
-    )
-    assert "https://example.com/recap?season=2026&week=1" in result.whatsapp_summary
-    assert "https://example.com/recap?season=2026&week=1" in result.whatsapp_full
+    # Deterministic header (both teams named by construction) + the voices +link.
+    assert text.startswith("Alpha Owns the Week.")
+    assert "Alpha def. Beta, 6-3" in text
+    assert "Woj: Alpha controlled the matchup." in text
+    assert "Barkley: Beta got bullied." in text
+    assert "Stephen A: Alpha is UNSTOPPABLE!" in text
+    assert "Insight: Alpha won six categories to three." in text
+    assert "https://example.com/recap?season=2026&week=1" in text
 
 
 def test_deepseek_structured_completion_uses_json_mode(monkeypatch):

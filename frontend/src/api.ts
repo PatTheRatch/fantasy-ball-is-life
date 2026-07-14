@@ -674,45 +674,24 @@ export interface RecapDataQuality {
   transaction_quality: string
 }
 
+export interface MatchupTakeaway {
+  matchup_id: string
+  woj: string
+  barkley: string
+  stephen_a: string
+  insight: string
+}
+
 export interface RecapGeneratedContent {
   headline: string
-  dek: string
-  lead_story: string[]
-  matchup_takeaways: Array<{
-    matchup_id: string
-    text: string
-    evidence_ids: string[]
-  }>
-  ranking_explanations: Array<{
-    team_id: string
-    text: string
-    evidence_ids: string[]
-  }>
+  intro: string
+  matchup_takeaways: MatchupTakeaway[]
   award_explanations: Array<{
     award_id: string
     text: string
-    evidence_ids: string[]
   }>
-  whatsapp_summary: string
-  whatsapp_full: string
-  // Playoff weeks only -- empty for a regular-season week.
-  playoff_matchup_recaps: Array<{
-    matchup_id: string
-    result_summary: string
-    text: string
-    evidence_ids: string[]
-  }>
-  playoff_outlook: Array<{
-    team: string
-    text: string
-    evidence_ids: string[]
-  }>
-  playoff_storylines: Array<{
-    title: string
-    text: string
-    evidence_ids: string[]
-  }>
-  playoff_final_line: string | null
+  // Full group-chat-ready recap, assembled server-side (facts + voice).
+  share_text: string
 }
 
 export interface RecapPlayoffContext {

@@ -9,9 +9,6 @@ from backend.commentary import generate
 from backend.commentary.schemas import (
     DataQualityReport,
     PlayoffContext,
-    PlayoffMatchupRecap,
-    PlayoffOutlook,
-    PlayoffStoryline,
     RecapGeneratedContent,
     WeeklyFactSnapshot,
 )
@@ -240,7 +237,8 @@ def test_assemble_playoff_context_none_and_warns_when_settings_fail(monkeypatch)
     assert any("League settings unavailable" in w for w in warnings)
 
 
-# --- generate_structured_recap: playoff field validation --------------------
+
+# --- generate_structured_recap + share text: new voice-first schema ----------
 
 def _playoff_snapshot() -> WeeklyFactSnapshot:
     matchup_id = "week-21:alpha-vs-beta"
@@ -275,241 +273,54 @@ def _playoff_snapshot() -> WeeklyFactSnapshot:
             is_championship=False,
             advancing_teams=["Alpha"],
             eliminated_teams=["Beta"],
-            next_round_matchups=[],
         ),
     )
 
 
-def _base_content_kwargs(matchup_id: str) -> dict:
-    return dict(
-        headline="Alpha survives",
-        dek="A grounded recap.",
-        lead_story=["Alpha won six categories."],
-        matchup_takeaways=[
-            {"matchup_id": matchup_id, "text": "Alpha controlled it.", "evidence_ids": [matchup_id]}
-        ],
-        ranking_explanations=[],
-        award_explanations=[],
-        # Free prose, but the completeness backstop requires every matchup
-        # team to be named in both fields.
-        whatsapp_summary="Alpha survived Beta in the semifinals.",
-        whatsapp_full="Alpha survived Beta in the semifinals, in full detail.",
-    )
-
-
-def test_generate_requires_playoff_matchup_recap_for_every_matchup(monkeypatch):
-    snapshot = _playoff_snapshot()
-    matchup_id = snapshot.matchups[0]["matchup_id"]
-    payload = _base_content_kwargs(matchup_id)
-    payload.update(
-        playoff_matchup_recaps=[],  # missing -- should fail
-        playoff_outlook=[{"team": "Alpha", "text": "Peaking.", "evidence_ids": [matchup_id]}],
-        playoff_storylines=[{"title": "Survival", "text": "Barely.", "evidence_ids": [matchup_id]}],
-        playoff_final_line="Onward.",
-    )
-    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
-    monkeypatch.setattr(
-        generate, "_complete_structured", lambda *a, **k: RecapGeneratedContent(**payload).model_dump_json()
-    )
-
-    with pytest.raises(ValueError, match="playoff_matchup_recap"):
-        generate.generate_structured_recap(snapshot)
-
-
-def test_generate_requires_playoff_outlook_for_every_advancing_team(monkeypatch):
-    snapshot = _playoff_snapshot()
-    matchup_id = snapshot.matchups[0]["matchup_id"]
-    payload = _base_content_kwargs(matchup_id)
-    payload.update(
-        playoff_matchup_recaps=[
+def _new_payload(matchup_id: str) -> dict:
+    return {
+        "headline": "Separation Week.",
+        "intro": "The bracket tightened.",
+        "matchup_takeaways": [
             {
                 "matchup_id": matchup_id,
-                "result_summary": "Alpha def. Beta 6-3",
-                "text": "Alpha controlled it from the start.",
-                "evidence_ids": [matchup_id],
+                "woj": "Alpha controlled the matchup.",
+                "barkley": "Beta never had a chance.",
+                "stephen_a": "Alpha is BUILT for this!",
+                "insight": "Alpha took the volume categories and never let it flip.",
             }
         ],
-        playoff_outlook=[],  # missing Alpha -- should fail
-        playoff_storylines=[{"title": "Survival", "text": "Barely.", "evidence_ids": [matchup_id]}],
-        playoff_final_line="Onward.",
-    )
-    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
-    monkeypatch.setattr(
-        generate, "_complete_structured", lambda *a, **k: RecapGeneratedContent(**payload).model_dump_json()
-    )
-
-    with pytest.raises(ValueError, match="playoff_outlook"):
-        generate.generate_structured_recap(snapshot)
+        "award_explanations": [],
+    }
 
 
-def test_generate_requires_at_least_one_storyline(monkeypatch):
+def test_generate_playoff_week_needs_no_special_fields(monkeypatch):
+    """Playoff weeks now weave stakes into the prose -- the new schema has no
+    playoff-specific fields, so a plain valid payload generates fine."""
     snapshot = _playoff_snapshot()
     matchup_id = snapshot.matchups[0]["matchup_id"]
-    payload = _base_content_kwargs(matchup_id)
-    payload.update(
-        playoff_matchup_recaps=[
-            {
-                "matchup_id": matchup_id,
-                "result_summary": "Alpha def. Beta 6-3",
-                "text": "Alpha controlled it from the start.",
-                "evidence_ids": [matchup_id],
-            }
-        ],
-        playoff_outlook=[{"team": "Alpha", "text": "Peaking.", "evidence_ids": [matchup_id]}],
-        playoff_storylines=[],
-        playoff_final_line="Onward.",
-    )
     monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
     monkeypatch.setattr(
-        generate, "_complete_structured", lambda *a, **k: RecapGeneratedContent(**payload).model_dump_json()
-    )
-
-    with pytest.raises(ValueError, match="playoff_storyline"):
-        generate.generate_structured_recap(snapshot)
-
-
-def test_generate_accepts_a_complete_playoff_payload(monkeypatch):
-    snapshot = _playoff_snapshot()
-    matchup_id = snapshot.matchups[0]["matchup_id"]
-    payload = _base_content_kwargs(matchup_id)
-    payload.update(
-        playoff_matchup_recaps=[
-            {
-                "matchup_id": matchup_id,
-                "result_summary": "Alpha def. Beta 6-3",
-                "text": "Alpha controlled it from the start.",
-                "evidence_ids": [matchup_id],
-            }
-        ],
-        playoff_outlook=[{"team": "Alpha", "text": "Peaking.", "evidence_ids": [matchup_id]}],
-        playoff_storylines=[{"title": "Survival", "text": "Barely.", "evidence_ids": [matchup_id]}],
-        playoff_final_line="Onward.",
-    )
-    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
-    monkeypatch.setattr(
-        generate, "_complete_structured", lambda *a, **k: RecapGeneratedContent(**payload).model_dump_json()
+        generate,
+        "_complete_structured",
+        lambda *a, **k: RecapGeneratedContent(**_new_payload(matchup_id)).model_dump_json(),
     )
 
     result = generate.generate_structured_recap(snapshot)
-
-    assert result.playoff_final_line == "Onward."
-    assert result.playoff_outlook[0].team == "Alpha"
-
-
-def test_generate_regular_season_week_ignores_playoff_fields(monkeypatch):
-    matchup_id = "week-1:alpha-vs-beta"
-    snapshot = WeeklyFactSnapshot(
-        league={"id": "league-1", "slug": "test", "name": "Test"},
-        season=2026,
-        week=1,
-        week_dates={"start": "2025-10-20", "end": "2025-10-26"},
-        matchups=[
-            {
-                "matchup_id": matchup_id,
-                "evidence_id": matchup_id,
-                "home_team": "Alpha",
-                "away_team": "Beta",
-                "home_category_wins": 6,
-                "away_category_wins": 3,
-                "ties": 0,
-                "winner": "Alpha",
-                "categories": [],
-            }
-        ],
-        standings=[],
-        power_rankings=[],
-        transactions=[],
-        season_stats=[],
-        award_candidates=[],
-        data_quality=DataQualityReport(ready=True, checks={}),
-    )
-    payload = _base_content_kwargs(matchup_id)
-    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
-    monkeypatch.setattr(
-        generate, "_complete_structured", lambda *a, **k: RecapGeneratedContent(**payload).model_dump_json()
-    )
-
-    result = generate.generate_structured_recap(snapshot)
-
-    assert result.playoff_matchup_recaps == []
-    assert result.playoff_final_line is None
+    assert result.headline == "Separation Week."
+    assert result.matchup_takeaways[0].stephen_a == "Alpha is BUILT for this!"
 
 
-# --- sharing.format_share_text: playoff weeks -------------------------------
-# The playoff framing (round label, who advanced, storylines, final line) is
-# the model's job now, written directly into the WhatsApp prose per the
-# prompt; format_share_text no longer rebuilds labeled bullet sections.
-
-def test_share_text_passes_playoff_prose_through_untouched():
+def test_share_text_assembles_header_voices_and_link():
     snapshot = _playoff_snapshot()
     matchup_id = snapshot.matchups[0]["matchup_id"]
-    prose = (
-        "Semifinals are done: Alpha adapted and survived Beta 6-3. "
-        "The best two teams remain."
-    )
-    content = RecapGeneratedContent(
-        headline="Alpha survives",
-        dek="A grounded recap.",
-        lead_story=["Alpha won."],
-        matchup_takeaways=[
-            {"matchup_id": matchup_id, "text": "Alpha controlled it.", "evidence_ids": [matchup_id]}
-        ],
-        ranking_explanations=[],
-        award_explanations=[],
-        whatsapp_summary=prose,
-        whatsapp_full=prose + " In full.",
-        playoff_matchup_recaps=[
-            PlayoffMatchupRecap(
-                matchup_id=matchup_id,
-                result_summary="Alpha def. Beta 6-3",
-                text="Alpha adapted and survived.",
-                evidence_ids=[matchup_id],
-            )
-        ],
-        playoff_outlook=[
-            PlayoffOutlook(team="Alpha", text="Battle-tested.", evidence_ids=[matchup_id])
-        ],
-        playoff_storylines=[
-            PlayoffStoryline(title="Survival", text="Barely made it.", evidence_ids=[matchup_id])
-        ],
-        playoff_final_line="The best two teams remain.",
-    )
+    content = RecapGeneratedContent(**_new_payload(matchup_id))
 
-    result = format_share_text(snapshot, content)
+    format_share_text(snapshot, content)
 
-    assert result.whatsapp_summary.startswith(prose)
-    assert result.whatsapp_full.startswith(prose + " In full.")
-    # Only the public link is appended; no rebuilt bullet sections.
-    assert "Read the published recap:" in result.whatsapp_summary
-    assert "🏀 *" not in result.whatsapp_summary
-    assert "What This Sets Up" not in result.whatsapp_summary
-
-
-def test_generate_playoff_week_still_enforces_whatsapp_completeness(monkeypatch):
-    import json as _json
-
-    snapshot = _playoff_snapshot()
-    matchup_id = snapshot.matchups[0]["matchup_id"]
-    payload = _base_content_kwargs(matchup_id)
-    payload.update(
-        playoff_matchup_recaps=[
-            {
-                "matchup_id": matchup_id,
-                "result_summary": "Alpha def. Beta 6-3",
-                "text": "Alpha adapted and survived.",
-                "evidence_ids": [matchup_id],
-            }
-        ],
-        playoff_outlook=[{"team": "Alpha", "text": "Peaking.", "evidence_ids": [matchup_id]}],
-        playoff_storylines=[{"title": "Survival", "text": "Barely.", "evidence_ids": [matchup_id]}],
-        playoff_final_line="Onward.",
-        whatsapp_summary="Alpha had a huge week.",  # Beta never named
-        whatsapp_full="Alpha survived Beta, in full.",
-    )
-    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
-    monkeypatch.setattr(
-        generate, "_complete_structured", lambda *a, **k: _json.dumps(payload)
-    )
-
-    with pytest.raises(ValueError, match="whatsapp_summary"):
-        generate.generate_structured_recap(snapshot)
+    text = content.share_text
+    # Deterministic header (facts) -- both teams named by construction.
+    assert "Alpha def. Beta, 6-3" in text
+    assert "Woj: Alpha controlled the matchup." in text
+    assert "Stephen A: Alpha is BUILT for this!" in text
+    assert "Read the published recap:" in text

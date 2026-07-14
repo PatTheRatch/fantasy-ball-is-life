@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getSnapshot, getPublishedRecap, type RecapGeneratedContent } from '../api'
 import { formatStatValue, STAT_ORDER } from '../lib/inSeasonUtils'
 import { AiTakeBadge } from './AiTakeBadge'
+import { MatchupVoices } from './MatchupVoices'
 
 function winnerLabel(row: Record<string, unknown>): string {
   const home = String(row.home_team ?? '')
@@ -165,15 +166,6 @@ function MatchupCard({
     (item) => item.matchup_id === row.matchup_id,
   )
 
-  const playoffItem = ((content?.playoff_matchup_recaps) || []).find(
-    (item) => item.matchup_id === row.matchup_id,
-  )
-
-  const rawTakeaway = playoffItem
-    ? `${playoffItem.result_summary ?? ''} ${playoffItem.text ?? ''}`.trim()
-    : (takeawayItem?.text ?? '')
-  const takeawayText = rawTakeaway || null
-
   const tiebreakResolved = row.tiebreak_resolved === true
 
   return (
@@ -190,11 +182,11 @@ function MatchupCard({
               Tie resolved by ESPN tiebreaker
             </p>
           )}
-          {takeawayText && (
-            <p className="mt-1 text-sm leading-relaxed text-slate-300">
-              {takeawayText}
+          {takeawayItem && (
+            <div>
+              <MatchupVoices takeaway={takeawayItem} />
               <AiTakeBadge />
-            </p>
+            </div>
           )}
         </div>
         {open ? (

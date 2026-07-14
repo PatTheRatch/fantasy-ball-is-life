@@ -394,149 +394,98 @@ def build_structured_recap_prompts(
     playoff_context = snapshot.get("playoff_context")
 
     system_prompt = (
-        "You are the league's recap columnist -- not a stats-report generator. "
-        "Write like a commissioner who watches every matchup and knows every "
-        "owner: sports journalism with personality (ESPN recap crossed with a "
-        "feature article and group-chat banter), never an AI summary.\n\n"
-        "NARRATIVE FIRST. Facts create credibility; narrative creates "
-        "entertainment. Statistics support the story, they are not the story -- "
-        "use a number only when it makes a moment more dramatic. Before writing, "
-        "decide what actually mattered this week (an upset, a streak, a "
-        "collapse, standings chaos) and let that story lead; everything else "
-        "supports it. If nothing extraordinary happened, say so plainly instead "
-        "of manufacturing drama.\n\n"
-        "HEADLINE: should read like something ESPN would publish, with real "
-        "tension. Never 'Week N Recap' or 'League Update' -- think 'Kings "
-        "Fall.' or 'Chaos at the Top.'\n\n"
-        "TONE: punch upward at luck, randomness, bad schedules, and cursed "
-        "performances -- never at an owner personally. Roast the fantasy "
-        "outcome, not the person. Humor emerges from the facts (bad luck, "
-        "waiver-wire addiction, a last-second escape), never a joke for its "
-        "own sake.\n\n"
-        "AVOID: cliches like 'statement win', 'must win', 'absolute clinic', "
-        "'masterclass', 'gave 110%', 'at the end of the day', and AI-summary "
-        "tells like 'it's worth noting', 'ultimately', 'overall', "
-        "'in conclusion', 'showcased', 'demonstrated'.\n\n"
-        "The supplied fact snapshot is your only source of truth. Never invent, "
-        "infer, or import a player, team, score, result, ranking, transaction, "
-        "award winner, or trend that is absent from it. Omit claims when evidence "
-        "is unavailable. Return one JSON object only: no Markdown fences and no "
-        "text before or after it. Preserve every referenced matchup_id, team_id, "
-        "award_id, and evidence_id exactly."
+        "You are the league's recap desk. You write the weekly matchup roundup as "
+        "a three-voice sports-debate segment: every matchup gets four short beats "
+        "reacting to the result.\n"
+        "- woj: measured insider gravitas, the calm authoritative read (Adrian "
+        "Wojnarowski). One sentence.\n"
+        "- barkley: blunt, funny, unbothered hot take (Charles Barkley). One "
+        "sentence.\n"
+        "- stephen_a: theatrical, emphatic, dramatic declaration (Stephen A. "
+        "Smith). One sentence.\n"
+        "- insight: one grounded analytical line -- what actually decided this "
+        "matchup at the category level (which categories were won/lost, the "
+        "swing). This is the only beat that leans on specifics.\n\n"
+        "The factual header (who beat whom and the category score) is added "
+        "automatically -- do NOT restate the score or announce the winner in your "
+        "beats. React to it, explain it, give it character.\n\n"
+        "NARRATIVE OVER STATS: the three voices are opinion and personality, not "
+        "a stat recount. Keep each beat tight and quotable -- the way these guys "
+        "actually talk, not a paragraph. Humor punches at luck, randomness, bad "
+        "schedules, and cursed performances -- never at an owner personally.\n\n"
+        "AVOID cliches ('statement win', 'must win', 'masterclass', 'gave 110%') "
+        "and AI-summary tells ('it's worth noting', 'ultimately', 'overall', "
+        "'showcased', 'demonstrated').\n\n"
+        "HEADLINE: a punchy title or theme for the week -- 'Separation Week.' or "
+        "'Chaos at the Top.', never 'Week N Recap'.\n"
+        "INTRO: 1-3 punchy sentences setting the week's stakes.\n\n"
+        "The supplied fact snapshot is your only source of truth. Never invent a "
+        "player, team, score, result, transaction, or award winner absent from "
+        "it. Return one JSON object only: no Markdown fences, no text before or "
+        "after it. Use every matchup_id and award_id exactly as given."
     )
     if playoff_context:
         system_prompt += (
-            " This is a PLAYOFF week (see the snapshot's playoff_context). Lean "
-            "heavily into playoff stakes: survival, elimination, and what each "
-            "matchup sets up next. For every matchup write a playoff_matchup_recap "
-            "with a punchy result_summary (e.g. 'TTW def. Optimize 6-3') and a "
-            "grounded account of what happened, using only facts present in the "
-            "snapshot -- never invent injuries, moves, or events absent from it. "
-            "Write a playoff_outlook entry for every team in "
-            "playoff_context.advancing_teams describing what advancing sets up "
-            "for them. Write 2-4 playoff_storylines contrasting the surviving "
-            "teams using only grounded facts (records, category strengths, how "
-            "they won). Close with one playoff_final_line."
+            "\n\nThis is a PLAYOFF week (see playoff_context). Lean into the "
+            "stakes -- survival, elimination, what each result sets up next -- in "
+            "the intro and in the insight beats. Do not invent bracket outcomes "
+            "beyond what the snapshot states."
         )
     recap_voice = (snapshot.get("league") or {}).get("recap_voice")
     if recap_voice:
         system_prompt += f"\n\nLEAGUE-SPECIFIC VOICE NOTES (apply on top of the above):\n{recap_voice}"
 
     schema = {
-        "headline": "string",
-        "dek": "string",
-        "lead_story": ["paragraph string"],
+        "headline": "punchy title/theme for the week",
+        "intro": "1-3 punchy sentences setting the week's stakes",
         "matchup_takeaways": [
             {
                 "matchup_id": "exact snapshot matchup_id",
-                "text": "1-3 sentences: what made this matchup memorable, one supporting fact, one implication -- not a category-by-category recount",
-                "evidence_ids": ["exact snapshot evidence_id"],
-            }
-        ],
-        "ranking_explanations": [
-            {
-                "team_id": "team evidence_id suffix or exact team/team_id value",
-                "text": "one or two grounded sentences",
-                "evidence_ids": ["exact snapshot evidence_id"],
+                "woj": "one measured insider sentence",
+                "barkley": "one blunt, funny sentence",
+                "stephen_a": "one dramatic, emphatic sentence",
+                "insight": "one grounded line on what decided it at the category level",
             }
         ],
         "award_explanations": [
             {
-                "award_id": "exact deterministic award_id",
-                "text": "one grounded sentence justifying the narrative behind the already-decided winner -- not restating the math",
-                "evidence_ids": ["exact snapshot evidence_id"],
+                "award_id": "exact snapshot award_id",
+                "text": "one grounded sentence on why this already-decided winner earned it -- not restating the math",
             }
         ],
-        "whatsapp_summary": "a 30-second-read narrative in flowing prose, not a bulleted digest -- see WHATSAPP FORMAT below",
-        "whatsapp_full": "the complete narrative in flowing prose without tables -- see WHATSAPP FORMAT below",
     }
-    if playoff_context:
-        schema["playoff_matchup_recaps"] = [
+
+    example = {
+        "headline": "Separation Week.",
+        "intro": "The playoff race just tightened. A few teams pulled away; a few ran out of road.",
+        "matchup_takeaways": [
             {
-                "matchup_id": "exact snapshot matchup_id",
-                "result_summary": "e.g. 'TTW def. Optimize 6-3'",
-                "text": "2-4 grounded sentences on what happened in this matchup",
-                "evidence_ids": ["exact snapshot evidence_id"],
+                "matchup_id": "week-N:example-a-vs-example-b",
+                "woj": "Team A continues to demonstrate championship insulation -- they controlled the matchup and avoided downside risk.",
+                "barkley": "That's what grown teams do. They don't beat you by 20, they beat you by enough.",
+                "stephen_a": "Team A understands SURVIVAL. This wasn't domination -- this was INEVITABILITY.",
+                "insight": "Team A took enough volume categories to neutralize Team B's efficiency edge and never let the matchup flip.",
             }
-        ]
-        schema["playoff_outlook"] = [
-            {
-                "team": "exact team name from playoff_context.advancing_teams",
-                "text": "1-2 sentences: what advancing sets up for this team",
-                "evidence_ids": ["exact snapshot evidence_id"],
-            }
-        ]
-        schema["playoff_storylines"] = [
-            {
-                "title": "short storyline title",
-                "text": "1-2 grounded sentences",
-                "evidence_ids": ["exact snapshot evidence_id"],
-            }
-        ]
-        schema["playoff_final_line"] = "one punchy closing line"
+        ],
+        "award_explanations": [
+            {"award_id": "team-of-week", "text": "Led the league in points and rebounds on the way to the week's most complete win."}
+        ],
+    }
 
     user_prompt = (
-        "OUTPUT SCHEMA:\n"
+        "OUTPUT SCHEMA (shape only):\n"
         f"{json.dumps(schema, separators=(',', ':'))}\n\n"
+        "EXAMPLE (format + voice to imitate -- do not reuse its content):\n"
+        f"{json.dumps(example, separators=(',', ':'), ensure_ascii=False)}\n\n"
         "FACT SNAPSHOT:\n"
         f"{json.dumps(snapshot, separators=(',', ':'), ensure_ascii=False)}\n\n"
-        "WHATSAPP FORMAT: whatsapp_summary and whatsapp_full are free narrative "
-        "prose, not itemized bullet lists -- write them the way you'd text a "
-        "group chat, not the way you'd write a report. A good shape for "
-        "whatsapp_summary: one headline-style opener, one paragraph naming the "
-        "week's storylines, a line on notable awards, a line on standings "
-        "movement, and a closing line that invites trash talk. whatsapp_full "
-        "can run longer but stays prose, no tables. Critically: every "
-        "matchup's two team names and every award's winner name must actually "
-        "appear, spelled exactly as in the fact snapshot, somewhere in BOTH "
-        "fields -- weave them into sentences rather than listing them "
-        "mechanically. Do not include a URL or link; one is appended "
-        "automatically after generation.\n\n"
-        "Write the edition. Include a matchup_takeaway for every matchup and an "
-        "award_explanation for every supplied award. If data_quality.ready is "
-        "false, disclose the warnings and do not fill the gaps. lead_story "
-        "should read as one throughline (the week's biggest story, evidence "
-        "for it, why it matters going forward) rather than a paragraph per "
-        "matchup -- three "
-        "paragraphs is a good default when there's a clear headline story.\n\n"
-        "Before returning, check your own draft: does the headline create "
-        "curiosity instead of describing the document? Is there one clear "
-        "throughline the rest of the piece supports? Would a league member "
-        "quote a line of this in the group chat, or does it read like an "
-        "auto-generated summary?"
+        "COVERAGE IS MANDATORY: emit exactly one matchup_takeaways entry for "
+        "every matchup_id in the snapshot, and exactly one award_explanations "
+        "entry for every award_id -- none missing, extra, or duplicated. Do not "
+        "write a ranking_explanations or any per-team ranking blurb; the "
+        "standings and power-ranking tabs are rendered from data. Do not restate "
+        "the score in your beats; the header is added automatically. If "
+        "data_quality.ready is false, keep the takes honest about the gaps rather "
+        "than inventing drama."
     )
-    if playoff_context:
-        user_prompt += (
-            "\n\nThis is a PLAYOFF week: "
-            f"{playoff_context.get('round_label')} "
-            f"(round {playoff_context.get('round_index')} of "
-            f"{playoff_context.get('total_rounds')}). Include a "
-            "playoff_matchup_recap for every matchup, a playoff_outlook entry for "
-            "every team in playoff_context.advancing_teams, 2-4 "
-            "playoff_storylines, and one playoff_final_line. The WhatsApp fields "
-            "must carry the playoff framing too: name the round, say who "
-            "advanced and who went home, and end whatsapp_summary with the "
-            "playoff_final_line -- woven into the prose, not appended as "
-            "labeled sections."
-        )
     return system_prompt, user_prompt

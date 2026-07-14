@@ -1,9 +1,8 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getSnapshot, getPublishedRecap, type RecapGeneratedContent } from '../api'
+import { getSnapshot } from '../api'
 import { rankPillClass, rankPillEntries } from '../lib/inSeasonUtils'
-import { AiTakeBadge } from './AiTakeBadge'
 
 export function PowerRankingsTab({
   slug,
@@ -20,12 +19,6 @@ export function PowerRankingsTab({
     retry: false,
   })
 
-  const recapQuery = useQuery({
-    queryKey: ['recap', 'published', slug, season, week],
-    queryFn: () => getPublishedRecap(slug, season, week),
-    retry: false,
-  })
-
   if (snapshotQuery.isLoading) return <p className="text-slate-400">Loading power rankings…</p>
 
   if (snapshotQuery.error) {
@@ -37,7 +30,6 @@ export function PowerRankingsTab({
   }
 
   const snapshot = snapshotQuery.data?.snapshot as Record<string, unknown> | undefined
-  const content = recapQuery.data?.edition?.structured_content_json
 
   if (!snapshot) {
     return <p className="text-slate-500">No rankings data for this week.</p>
@@ -63,7 +55,6 @@ export function PowerRankingsTab({
     <div className="space-y-4 pb-8">
       <p className="text-xs text-slate-600">
         Rankings are algorithmic (all-play win rate, category dominance, recent form).
-        AI explanations may reflect model opinion.
       </p>
       <div className="space-y-3">
         {rankings.map((row) => (
@@ -71,7 +62,6 @@ export function PowerRankingsTab({
             key={String(row.team_id ?? '')}
             row={row as Record<string, unknown>}
             standing={standingMap[String(row.team)] ?? null}
-            content={content ?? null}
           />
         ))}
       </div>
@@ -104,18 +94,12 @@ function RankBadge({ rank }: { rank: unknown }) {
 function RankingCard({
   row,
   standing,
-  content,
 }: {
   row: Record<string, unknown>
   standing: { wins: number; losses: number; ties: number } | null
-  content: RecapGeneratedContent | null
 }) {
   const [open, setOpen] = useState(false)
   const pills = rankPillEntries(row)
-
-  const explanation = ((content?.ranking_explanations) || []).find(
-    (item) => item.team_id === row.team_id,
-  )
 
   const record = standing
     ? `${standing.wins}–${standing.losses}${standing.ties ? `–${standing.ties}` : ''}`
@@ -139,12 +123,6 @@ function RankingCard({
               ? ` (recent ${Number(row.recent_allplay_win_pct).toFixed(0)}%)`
               : ''}
           </p>
-          {explanation?.text && (
-            <p className="mt-1 text-sm leading-relaxed text-slate-300">
-              {explanation.text}
-              <AiTakeBadge />
-            </p>
-          )}
         </div>
         <div className="flex flex-col items-end gap-1">
           <span className={`text-sm font-semibold ${movementColor(row.rank_change)}`}>

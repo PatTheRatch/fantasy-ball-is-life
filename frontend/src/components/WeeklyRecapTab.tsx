@@ -17,6 +17,7 @@ import {
 } from '../api'
 import { MATCHUP_WEEKS_2025_26 } from '../lib/matchupWeeks'
 import { supabase } from '../lib/supabase'
+import { MatchupVoices } from './MatchupVoices'
 
 function CopyButton({
   label,
@@ -54,13 +55,8 @@ function Narrative({ content }: { content: RecapGeneratedContent }) {
           {content.headline}
         </h2>
         <p className="mt-4 max-w-3xl text-base leading-7 text-slate-300">
-          {content.dek}
+          {content.intro}
         </p>
-      </div>
-      <div className="space-y-5 px-5 py-6 text-[15px] leading-7 text-slate-200 md:px-8">
-        {content.lead_story.map((paragraph, index) => (
-          <p key={`${index}-${paragraph.slice(0, 20)}`}>{paragraph}</p>
-        ))}
       </div>
     </article>
   )
@@ -416,65 +412,21 @@ export function WeeklyRecapTab({
             </h2>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               {snapshot.matchups.map((row) => {
-                const playoffRecap = (content.playoff_matchup_recaps || []).find(
-                  (item) => item.matchup_id === row.matchup_id,
-                )
                 const takeaway = content.matchup_takeaways.find(
                   (item) => item.matchup_id === row.matchup_id,
                 )
                 return (
                   <div key={(row as JsonRecord).matchup_id as string} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                    <p className="font-bold text-white">
-                      {playoffRecap?.result_summary ?? matchupLabel(row)}
-                    </p>
-                    {playoffRecap ? (
-                      <p className="mt-1 text-sm leading-relaxed text-slate-300">{playoffRecap.text}</p>
-                    ) : takeaway ? (
-                      <p className="mt-1 text-sm leading-relaxed text-slate-300">{takeaway.text}</p>
-                    ) : null}
+                    <p className="font-bold text-white">{matchupLabel(row)}</p>
+                    {takeaway ? <MatchupVoices takeaway={takeaway} /> : null}
                   </div>
                 )
               })}
             </div>
           </section>
 
-          {snapshot?.playoff_context && (
-            <section className="space-y-4 rounded-2xl border border-amber-800/40 bg-amber-950/10 p-5">
-              {(content.playoff_outlook || []).length > 0 && (
-                <div>
-                  <h2 className="text-lg font-bold text-white">What This Sets Up</h2>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {content.playoff_outlook.map((item) => (
-                      <div key={item.team} className="rounded-lg bg-amber-950/30 p-3">
-                        <p className="font-semibold text-amber-200">{item.team}</p>
-                        <p className="mt-1 text-sm text-slate-300">{item.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {(content.playoff_storylines || []).length > 0 && (
-                <div>
-                  <h2 className="text-lg font-bold text-white">Storylines</h2>
-                  <div className="mt-3 space-y-3">
-                    {content.playoff_storylines.map((item) => (
-                      <div key={item.title}>
-                        <p className="font-semibold text-amber-200">{item.title}</p>
-                        <p className="mt-1 text-sm leading-relaxed text-slate-200">{item.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {content.playoff_final_line && (
-                <p className="text-sm italic text-slate-400">{content.playoff_final_line}</p>
-              )}
-            </section>
-          )}
-
           <section className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-5">
-            <CopyButton label="Copy Summary" value={content?.whatsapp_summary ?? ''} />
-            <CopyButton label="Copy Full Recap" value={content?.whatsapp_full ?? ''} />
+            <CopyButton label="Copy Recap" value={content?.share_text ?? ''} />
           </section>
         </>
       )}

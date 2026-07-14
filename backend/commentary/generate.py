@@ -30,17 +30,30 @@ def _require_api_key() -> None:
         )
 
 
-def _complete(system_prompt: str, user_prompt: str, *, max_tokens: int) -> str:
+def _complete(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    max_tokens: int,
+    effort: Optional[str] = None,
+) -> str:
     """Call Claude and return concatenated text blocks (skips thinking blocks).
 
     Anthropics Messages API. claude-sonnet-4-20250514 is deprecated
     (retires 2026-06-15); claude-sonnet-5 is its designated replacement.
-    Sonnet 5 runs adaptive thinking by default and thinking tokens count
-    against max_tokens (and its tokenizer runs ~30% more tokens for the
-    same text), so budgets get headroom vs. the old values -- the
-    text-block parsing below already skips thinking blocks.
+    Sonnet 5 runs adaptive thinking by default; thinking tokens count against
+    max_tokens *and* dominate latency (measured ~6k thinking tokens / ~87s for a
+    full recap, which can also truncate the output). ``effort`` bounds that:
+    ``low``/``medium``/``high`` set ``output_config.effort``, and ``off``
+    disables thinking outright. ``None`` leaves the model default.
     """
     from anthropic import Anthropic
+
+    extra: dict[str, Any] = {}
+    if effort == "off":
+        extra["thinking"] = {"type": "disabled"}
+    elif effort:
+        extra["output_config"] = {"effort": effort}
 
     # Let the anthropic client read ANTHROPIC_API_KEY from the environment.
     client = Anthropic()
@@ -49,7 +62,17 @@ def _complete(system_prompt: str, user_prompt: str, *, max_tokens: int) -> str:
         max_tokens=max_tokens,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
+        **extra,
     )
+    usage = getattr(resp, "content", None) and getattr(resp, "usage", None)
+    if usage is not None:
+        thinking = getattr(
+            getattr(usage, "output_tokens_details", None), "thinking_tokens", 0
+        ) or 0
+        logging.info(
+            "recap LLM (effort=%s): output=%s thinking=%s input=%s",
+            effort, usage.output_tokens, thinking, usage.input_tokens,
+        )
     text = ""
     if getattr(resp, "content", None):
         for block in resp.content:
@@ -80,7 +103,10 @@ def _complete_structured(
     system_prompt: str, user_prompt: str, *, max_tokens: int
 ) -> str:
     if config.RECAP_LLM_PROVIDER == "anthropic":
-        return _complete(system_prompt, user_prompt, max_tokens=max_tokens)
+        return _complete(
+            system_prompt, user_prompt, max_tokens=max_tokens,
+            effort=config.RECAP_LLM_EFFORT,
+        )
 
     try:
         response = requests.post(
@@ -96,7 +122,9 @@ def _complete_structured(
                     {"role": "user", "content": user_prompt},
                 ],
                 "response_format": {"type": "json_object"},
-                "max_tokens": max_tokens,
+                # DeepSeek caps output tokens well below Claude's; clamp so the
+                # 16k Claude budget doesn't 400 the DeepSeek fallback.
+                "max_tokens": min(max_tokens, 8192),
                 "temperature": 0.7,
                 "stream": False,
             },
@@ -277,21 +305,6 @@ def generate_season_commentary(body: Any) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-def _evidence_ids(value: Any) -> set[str]:
-    found: set[str] = set()
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key == "evidence_id" and isinstance(item, str):
-                found.add(item)
-            elif key == "evidence_ids" and isinstance(item, list):
-                found.update(str(part) for part in item)
-            found.update(_evidence_ids(item))
-    elif isinstance(value, list):
-        for item in value:
-            found.update(_evidence_ids(item))
-    return found
-
-
 def _parse_json_object(text: str) -> dict[str, Any]:
     candidate = text.strip()
     if candidate.startswith("```") and candidate.endswith("```"):
@@ -317,11 +330,9 @@ def _parse_json_object(text: str) -> dict[str, Any]:
 def _structured_corrective(snapshot: WeeklyFactSnapshot, error_msg: str) -> str:
     """A user-prompt suffix that tells the model exactly what to fix on retry.
 
-    The most common rejection is a cardinality miss (a dropped/duplicated
-    ranking explanation or matchup takeaway), so we spell out the exact id sets
-    it must cover one-for-one — far more actionable than the bare error."""
+    The only hard constraint now is coverage, so we spell out the exact id sets
+    it must cover one-for-one -- far more actionable than the bare error."""
     matchup_ids = [item["matchup_id"] for item in snapshot.matchups]
-    team_ids = [item["team_id"] for item in snapshot.power_rankings]
     award_ids = [item["award_id"] for item in snapshot.award_candidates]
     return "\n".join(
         [
@@ -330,10 +341,9 @@ def _structured_corrective(snapshot: WeeklyFactSnapshot, error_msg: str) -> str:
             "IMPORTANT — your previous response was REJECTED:",
             f"  {error_msg}",
             "Return the COMPLETE corrected JSON object (not a diff, not prose).",
-            "Include exactly one entry per id below — none missing, none extra, "
-            "none duplicated:",
+            "Include exactly one entry per id below — none missing, extra, or "
+            "duplicated:",
             f"  matchup_takeaways -> one per matchup_id: {matchup_ids}",
-            f"  ranking_explanations -> one per team_id: {team_ids}",
             f"  award_explanations -> one per award_id: {award_ids}",
         ]
     )
@@ -344,13 +354,13 @@ def generate_structured_recap(
     *,
     max_attempts: int = 3,
 ) -> RecapGeneratedContent:
-    """Generate and validate evidence-bound narrative for a persisted fact snapshot.
+    """Generate the voice-driven weekly recap for a persisted fact snapshot.
 
-    The output must satisfy several exact constraints (one explanation per
-    ranked team, one takeaway per matchup, valid evidence ids, ...). LLMs
-    intermittently miss one, so on a validation failure we re-prompt with a
-    corrective message naming exactly what was wrong and retry, rather than
-    throwing away the whole ~50s generation on the first miss."""
+    The model writes one three-voice-plus-insight takeaway per matchup and one
+    line per award; the factual headers (who beat whom, the score) come from the
+    deterministic snapshot, not the model. Coverage is the only hard constraint,
+    so on a miss we re-prompt with the exact ids and retry rather than discarding
+    the generation."""
     _require_recap_api_key()
     snapshot_payload = dump_model(snapshot)
     system_prompt, base_user_prompt = prompts.build_structured_recap_prompts(
@@ -359,11 +369,12 @@ def generate_structured_recap(
     last_error: Exception | None = None
     corrective = ""
     for attempt in range(1, max_attempts + 1):
+        # 16k so thinking tokens can't crowd out the JSON output and truncate it.
         raw = _complete_structured(
-            system_prompt, base_user_prompt + corrective, max_tokens=8000
+            system_prompt, base_user_prompt + corrective, max_tokens=16000
         )
         try:
-            return _parse_and_validate_recap(raw, snapshot, snapshot_payload)
+            return _parse_and_validate_recap(raw, snapshot)
         except ValueError as exc:
             last_error = exc
             logging.warning(
@@ -380,25 +391,16 @@ def generate_structured_recap(
 def _parse_and_validate_recap(
     raw: str,
     snapshot: WeeklyFactSnapshot,
-    snapshot_payload: dict[str, Any],
 ) -> RecapGeneratedContent:
-    """Parse one raw LLM response and enforce every recap constraint.
+    """Parse one raw LLM response and enforce matchup/award coverage.
 
-    Raises ``ValueError`` on any problem (bad JSON, schema, unknown evidence,
-    cardinality) so the caller can retry with corrective feedback."""
+    Raises ``ValueError`` on any problem (bad JSON, schema, coverage) so the
+    caller can retry with corrective feedback. Everything factual is supplied by
+    the deterministic snapshot, so there is no evidence-id binding to enforce."""
     try:
         content = validate_generated_content(_parse_json_object(raw))
     except Exception as exc:
         raise ValueError(f"LLM returned an invalid structured recap: {exc}") from exc
-
-    valid_evidence = _evidence_ids(snapshot_payload)
-    used_evidence = _evidence_ids(dump_model(content))
-    unknown_evidence = sorted(used_evidence - valid_evidence)
-    if unknown_evidence:
-        raise ValueError(
-            "Structured recap referenced unknown evidence IDs: "
-            + ", ".join(unknown_evidence)
-        )
 
     matchup_ids = {item["matchup_id"] for item in snapshot.matchups}
     returned_matchups = {item.matchup_id for item in content.matchup_takeaways}
@@ -407,16 +409,6 @@ def _parse_and_validate_recap(
         or len(content.matchup_takeaways) != len(matchup_ids)
     ):
         raise ValueError("Structured recap must contain exactly one takeaway per matchup.")
-
-    ranking_ids = {item["team_id"] for item in snapshot.power_rankings}
-    returned_rankings = {item.team_id for item in content.ranking_explanations}
-    if (
-        returned_rankings != ranking_ids
-        or len(content.ranking_explanations) != len(ranking_ids)
-    ):
-        raise ValueError(
-            "Structured recap must contain exactly one explanation per ranked team."
-        )
 
     award_ids = {item["award_id"] for item in snapshot.award_candidates}
     returned_awards = {item.award_id for item in content.award_explanations}
@@ -427,71 +419,4 @@ def _parse_and_validate_recap(
             "Structured recap must contain exactly one explanation per award."
         )
 
-    if snapshot.playoff_context is not None:
-        returned_playoff_matchups = {
-            item.matchup_id for item in content.playoff_matchup_recaps
-        }
-        if (
-            returned_playoff_matchups != matchup_ids
-            or len(content.playoff_matchup_recaps) != len(matchup_ids)
-        ):
-            raise ValueError(
-                "Structured recap must contain exactly one playoff_matchup_recap "
-                "per matchup for a playoff week."
-            )
-
-        advancing_teams = set(snapshot.playoff_context.advancing_teams)
-        returned_outlook_teams = {item.team for item in content.playoff_outlook}
-        if (
-            returned_outlook_teams != advancing_teams
-            or len(content.playoff_outlook) != len(advancing_teams)
-        ):
-            raise ValueError(
-                "Structured recap must contain exactly one playoff_outlook entry "
-                "per advancing team."
-            )
-
-        if not content.playoff_storylines:
-            raise ValueError(
-                "Structured recap must include at least one playoff_storyline "
-                "for a playoff week."
-            )
-        if not content.playoff_final_line:
-            raise ValueError(
-                "Structured recap must include a playoff_final_line for a "
-                "playoff week."
-            )
-
-    _validate_whatsapp_completeness(snapshot, content)
     return content
-
-
-def _required_whatsapp_mentions(snapshot: WeeklyFactSnapshot) -> set[str]:
-    mentions: set[str] = set()
-    for matchup in snapshot.matchups:
-        mentions.add(str(matchup.get("home_team") or ""))
-        mentions.add(str(matchup.get("away_team") or ""))
-    for award in snapshot.award_candidates:
-        mentions.add(str(award.get("winner") or ""))
-    mentions.discard("")
-    return mentions
-
-
-def _validate_whatsapp_completeness(
-    snapshot: WeeklyFactSnapshot, content: RecapGeneratedContent
-) -> None:
-    """The WhatsApp fields are free narrative, not evidence-ID bound like the
-    rest of the edition -- this is the deterministic backstop that keeps the
-    completeness guarantee the old itemized format used to provide for free:
-    every matchup team and award winner must actually be named."""
-    required = _required_whatsapp_mentions(snapshot)
-    for field_name, text in (
-        ("whatsapp_summary", content.whatsapp_summary),
-        ("whatsapp_full", content.whatsapp_full),
-    ):
-        missing = sorted(name for name in required if name not in text)
-        if missing:
-            raise ValueError(
-                f"Structured recap {field_name} does not mention: "
-                + ", ".join(missing)
-            )

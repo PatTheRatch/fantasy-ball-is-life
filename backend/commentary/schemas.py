@@ -6,51 +6,32 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
-class EvidenceNarrative(BaseModel):
-    text: str = Field(min_length=1)
-    evidence_ids: list[str] = Field(min_length=1)
+class MatchupTakeaway(BaseModel):
+    """One matchup's writeup in the newsroom's three-voice + insight format.
 
+    The factual header (who beat whom, the category score) comes from the
+    deterministic snapshot, not here -- these are the opinionated takes."""
 
-class MatchupTakeaway(EvidenceNarrative):
     matchup_id: str
+    woj: str = Field(min_length=1)        # insider / measured
+    barkley: str = Field(min_length=1)    # blunt / funny
+    stephen_a: str = Field(min_length=1)  # dramatic / hot take
+    insight: str = Field(min_length=1)    # grounded analytical line
 
 
-class RankingExplanation(EvidenceNarrative):
-    team_id: str
-
-
-class AwardExplanation(EvidenceNarrative):
+class AwardExplanation(BaseModel):
     award_id: str
-
-
-class PlayoffMatchupRecap(EvidenceNarrative):
-    matchup_id: str
-    result_summary: str = Field(min_length=1)
-
-
-class PlayoffOutlook(EvidenceNarrative):
-    team: str
-
-
-class PlayoffStoryline(EvidenceNarrative):
-    title: str = Field(min_length=1)
+    text: str = Field(min_length=1)
 
 
 class RecapGeneratedContent(BaseModel):
-    headline: str = Field(min_length=1)
-    dek: str = Field(min_length=1)
-    lead_story: list[str] = Field(min_length=1)
+    headline: str = Field(min_length=1)   # title / theme line
+    intro: str = Field(min_length=1)      # 1-3 punchy sentences
     matchup_takeaways: list[MatchupTakeaway] = Field(default_factory=list)
-    ranking_explanations: list[RankingExplanation] = Field(default_factory=list)
     award_explanations: list[AwardExplanation] = Field(default_factory=list)
-    whatsapp_summary: str = Field(min_length=1)
-    whatsapp_full: str = Field(min_length=1)
-    # Playoff weeks only (see WeeklyFactSnapshot.playoff_context) -- empty/omitted
-    # for a regular-season week.
-    playoff_matchup_recaps: list[PlayoffMatchupRecap] = Field(default_factory=list)
-    playoff_outlook: list[PlayoffOutlook] = Field(default_factory=list)
-    playoff_storylines: list[PlayoffStoryline] = Field(default_factory=list)
-    playoff_final_line: Optional[str] = None
+    # Assembled server-side by sharing.format_share_text (not produced by the
+    # LLM): the full group-chat-ready recap text for the Copy button.
+    share_text: str = ""
 
 
 class DataQualityReport(BaseModel):
