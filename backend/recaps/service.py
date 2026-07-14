@@ -153,6 +153,11 @@ def generate_draft(
         generated = generate_structured_recap(snapshot)
         generated = format_share_text(snapshot, generated)
     except Exception as exc:
+        # Surface the real cause in the server logs — the detail below only
+        # reaches the HTTP response body, so without this the Render logs show
+        # a bare 502 with no reason (e.g. DeepSeek token-limit / API errors).
+        logging.exception("recap generation failed after %.2fs: %s",
+                          time.perf_counter() - llm_started, exc)
         raise HTTPException(
             status_code=502,
             detail=f"Structured recap generation failed: {exc}",
@@ -201,13 +206,13 @@ def get_public_snapshot(
     """
     league = _league_or_404(store, slug)
     if league.get("visibility", "public") != "public":
-        raise _not_found()
+        raise HTTPException(status_code=404, detail="League not found.")
 
     edition = store.get_edition(
         league_id=league["id"], season=season, week=week, status=None
     )
     if edition is None:
-        raise _not_found()
+        raise HTTPException(status_code=404, detail="Snapshot not found for this week.")
 
     return {"league": league, "snapshot": edition["league_week_snapshots"]}
 

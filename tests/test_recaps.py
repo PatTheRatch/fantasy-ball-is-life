@@ -654,6 +654,46 @@ def test_invalid_structured_recap_uses_provider_neutral_error(monkeypatch):
         generate.generate_structured_recap(_snapshot())
 
 
+# --- get_public_snapshot: the deterministic /snapshot read path ---------------
+# Regression for a NameError (`_not_found` was called but never defined), which
+# turned every /snapshot request into a 500 in production.
+
+def test_get_public_snapshot_returns_snapshot():
+    store = Mock()
+    store.get_league_by_slug.return_value = {
+        "id": "league-1", "slug": "test", "visibility": "public"
+    }
+    store.get_edition.return_value = {"league_week_snapshots": {"matchups_json": []}}
+
+    result = service.get_public_snapshot(store=store, slug="test", season=2026, week=10)
+
+    assert result["league"]["id"] == "league-1"
+    assert result["snapshot"] == {"matchups_json": []}
+
+
+def test_get_public_snapshot_404s_when_no_edition():
+    store = Mock()
+    store.get_league_by_slug.return_value = {
+        "id": "league-1", "slug": "test", "visibility": "public"
+    }
+    store.get_edition.return_value = None
+
+    with pytest.raises(HTTPException) as raised:
+        service.get_public_snapshot(store=store, slug="test", season=2026, week=10)
+    assert raised.value.status_code == 404
+
+
+def test_get_public_snapshot_404s_when_league_not_public():
+    store = Mock()
+    store.get_league_by_slug.return_value = {
+        "id": "league-1", "slug": "test", "visibility": "private"
+    }
+
+    with pytest.raises(HTTPException) as raised:
+        service.get_public_snapshot(store=store, slug="test", season=2026, week=10)
+    assert raised.value.status_code == 404
+
+
 # ── F2-1 archive endpoint ──────────────────────────────────────────
 
 def test_store_list_published_returns_weeks_ordered(monkeypatch):
