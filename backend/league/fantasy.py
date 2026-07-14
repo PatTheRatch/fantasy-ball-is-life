@@ -16,7 +16,6 @@ class MyLeague(League):
         espn_s2 = ESPN_S2 if espn_s2 is None else espn_s2
         swid = SWID if swid is None else swid
         super().__init__(league_id, year, espn_s2=espn_s2, swid=swid)
-        self.team_names = [team.team_name for team in self.teams]
         # Schedules can differ in length depending on playoffs/bye; use max.
         self.length_of_schedule = max((len(team.schedule) for team in self.teams), default=0)
         self.league_matchups = self.get_all_matchups()
@@ -31,6 +30,14 @@ class MyLeague(League):
         self.effective_current_week = max(1, min(int(self.currentMatchupPeriod), int(max_available_week)))
         self.current_scoreboard = self.league_matchups.get(self.effective_current_week, [])
         self.stat_categories = ['PTS', 'REB', 'AST', 'STL', 'BLK', '3PM', 'FG%', 'FT%', 'TO']
+
+    def _get_all_pro_schedule(self):
+        """Skip the NBA pro-schedule fetch (~420 KB, one of espn-api's 4 calls
+        during construction) — no attribute here or in any consumer (draft
+        optimizer, schedule/current-week-matchups endpoints) reads
+        ``self.pro_schedule`` or per-player game-day data; verified live that
+        team/roster/draft construction is unaffected without it."""
+        return {}
 
     def get_all_matchups(self):
         return league_matchups_of(self)
@@ -50,63 +57,6 @@ class MyLeague(League):
         return WeeklyScoreboard(
             data, self.schedule, self.stat_categories, LOWER_IS_BETTER_STATS
         )
-
-    def get_power_rankings(self,
-                           week=None,
-                           lookback=3,
-                           metric='Matchup Win %',
-                           comparison_week=None,
-                           ascending=False,
-                           additional_team_stats=None):
-
-        power_rankings = []
-        week = self.currentMatchupPeriod if week is None else int(week)
-        week = max(1, min(int(week), int(self.length_of_schedule)))
-
-        comparison_week = week - 1 if comparison_week is None else int(comparison_week)
-        comparison_week = max(1, min(int(comparison_week), int(self.length_of_schedule)))
-
-        # Ensure we never ask for weeks <= 0 (range() would include 0/-1/etc.).
-        lookback = int(lookback)
-        lookback = max(0, min(lookback, week - 1))
-
-        comparison_lookback = max(0, min(lookback, comparison_week - 1))
-
-        rankings_data = self.get_universe_wins(weeks=range(max(1, week - lookback), week + 1), order_by=[metric, 'Win % Ratio'],
-                                               ascending=ascending, additional_team_stats=additional_team_stats)
-        comparison_rankings_data = self.get_universe_wins(weeks=range(max(1, comparison_week - comparison_lookback), week),
-                                                          order_by=[metric, 'Win % Ratio'], ascending=ascending,
-                                                          additional_team_stats=additional_team_stats)
-        current_week_performance = self.get_universe_wins(weeks=[week], order_by=[metric, 'Win % Ratio'],
-                                                          ascending=ascending, additional_team_stats=additional_team_stats)
-
-        for team in self.team_names:
-            team_data = rankings_data.loc[rankings_data['Team'] == team]
-            comparison_team_data = comparison_rankings_data.loc[comparison_rankings_data['Team'] == team]
-            change = (comparison_team_data.index[0] + 1) - (team_data.index[0] + 1)
-
-            if change > 0:
-                change_value = f'+{change}'
-            elif change < 0:
-                change_value = f'{change}'
-            else:
-                change_value = '-'
-            power_rankings.append(
-                {
-                    'Team': [team],
-                    'Current Rank': [team_data.index[0] + 1],
-                    'Previous Rank': [comparison_team_data.index[0] + 1],
-                    'Change': [change_value],
-                    'Current Win %': [team_data[metric].values[0]],
-                    'Previous Win %': [comparison_team_data[metric].values[0]],
-                    'Change in Win %': [round(team_data[metric].values[0] - comparison_team_data[metric].values[0], 2)],
-                    f'Week {week} Performance Rank': [
-                        current_week_performance[current_week_performance['Team'] == team].index[0] + 1
-                    ]
-                }
-            )
-
-        return pd.concat([pd.DataFrame(data) for data in power_rankings]).sort_values(by='Current Rank').set_index('Team')
 
     def get_schedule(self):
         return schedule_df(self)

@@ -18,8 +18,10 @@ STAT_CATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
 
 
 def _league(team_names):
+    # `team_names` isn't stored on the instance (MyLeague no longer has that
+    # attribute) -- kept as a parameter purely so each call site documents
+    # which teams the scenario involves.
     lg = MyLeague.__new__(MyLeague)  # skip ESPN __init__
-    lg.team_names = list(team_names)
     lg.stat_categories = list(STAT_CATS)
     lg.currentMatchupPeriod = 1
     lg.schedule = pd.DataFrame({"Week": [], "Team": [], "Opponent": []})
