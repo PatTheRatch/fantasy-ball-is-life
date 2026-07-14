@@ -7,8 +7,22 @@ handlers are split into ``backend.api.routers.*`` (BACKEND_RESTRUCTURE §4 PR 2)
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Nothing configures the root logger by default -- plain `logging.info(...)`
+# calls elsewhere in the app (e.g. recap assembly phase timing) were silently
+# dropped since the root logger's default level is WARNING. uvicorn only
+# configures its own "uvicorn"/"uvicorn.access"/"uvicorn.error" loggers, not
+# root, so this doesn't touch the request-access-log format. `force=True`
+# so this wins even if something else set up the root logger first.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    force=True,
+)
 
 # Re-export helpers so existing `from backend.api.main import _df_records`
 # call sites (tests, etc.) keep working.
