@@ -18,10 +18,14 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
-        // Default proxy timeouts are short; slow ESPN calls otherwise surface as 502 Bad Gateway
-        timeout: 300_000,
-        proxyTimeout: 300_000,
         rewrite: (path) => path.replace(/^\/api/, '') || '/',
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            req.socket?.setTimeout(0)   // incoming browser→Vite: disable idle timeout during long waits
+            proxyReq.setTimeout(0)      // outgoing Vite→FastAPI
+          })
+          proxy.on('error', (err) => console.error('[vite proxy]', err.message))
+        },
       },
     },
   },

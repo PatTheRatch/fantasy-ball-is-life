@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getPublishedRecap, type RecapGeneratedContent } from '../api'
+import { getSnapshot, getPublishedRecap, type RecapGeneratedContent } from '../api'
 import { formatStatValue, STAT_ORDER } from '../lib/inSeasonUtils'
 import { AiTakeBadge } from './AiTakeBadge'
 
@@ -95,43 +95,47 @@ export function MatchupsTab({
   season: number
   week: number
 }) {
-  const { data, isLoading, error } = useQuery({
+  const snapshotQuery = useQuery({
+    queryKey: ['recap', 'snapshot', slug, season, week],
+    queryFn: () => getSnapshot(slug, season, week),
+    retry: false,
+  })
+
+  const recapQuery = useQuery({
     queryKey: ['recap', 'published', slug, season, week],
     queryFn: () => getPublishedRecap(slug, season, week),
     retry: false,
   })
 
-  if (isLoading) return <p className="text-slate-400">Loading matchups…</p>
+  if (snapshotQuery.isLoading) return <p className="text-slate-400">Loading matchups…</p>
 
-  // A 404 is expected for unpublished weeks — treat as neutral, not error.
-  if (error) {
-    const status = (error as { response?: { status: number } })?.response?.status
+  if (snapshotQuery.error) {
+    const status = (snapshotQuery.error as { response?: { status: number } })?.response?.status
     if (status === 404) {
-      return <p className="text-slate-500">No matchup data published for this week.</p>
+      return <p className="text-slate-500">No matchup data for this week.</p>
     }
     return <p className="text-red-400">Could not load matchups.</p>
   }
 
-  const edition = data?.edition ?? null
-  const snapshot = edition?.snapshot
-  const content = edition?.structured_content_json
+  const snapshot = snapshotQuery.data?.snapshot as Record<string, unknown> | undefined
+  const content = recapQuery.data?.edition?.structured_content_json
 
-  if (!edition || !snapshot) {
-    return <p className="text-slate-500">No matchup data published for this week.</p>
+  if (!snapshot) {
+    return <p className="text-slate-500">No matchup data for this week.</p>
   }
 
   const { matchups } = snapshot
-  if (!matchups || matchups.length === 0) {
+  if (!Array.isArray(matchups) || matchups.length === 0) {
     return <p className="text-slate-500">No matchups recorded for this week.</p>
   }
 
   return (
     <div className="space-y-4 pb-8">
-      {snapshot.playoff_context?.round_label && (
+      {(snapshot.playoff_context as Record<string, unknown> | undefined)?.round_label ? (
         <p className="text-sm font-semibold text-amber-400">
-          {snapshot.playoff_context.round_label}
+          {String((snapshot.playoff_context as Record<string, unknown>).round_label)}
         </p>
-      )}
+      ) : null}
       <p className="text-xs text-slate-600">
         ESPN resolves category ties. AI takeaways may reflect model opinion.
       </p>

@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getPublishedRecap, type RecapGeneratedContent } from '../api'
+import { getSnapshot, getPublishedRecap, type RecapGeneratedContent } from '../api'
 import { rankPillClass, rankPillEntries } from '../lib/inSeasonUtils'
 import { AiTakeBadge } from './AiTakeBadge'
 
@@ -14,32 +14,37 @@ export function PowerRankingsTab({
   season: number
   week: number
 }) {
-  const { data, isLoading, error } = useQuery({
+  const snapshotQuery = useQuery({
+    queryKey: ['recap', 'snapshot', slug, season, week],
+    queryFn: () => getSnapshot(slug, season, week),
+    retry: false,
+  })
+
+  const recapQuery = useQuery({
     queryKey: ['recap', 'published', slug, season, week],
     queryFn: () => getPublishedRecap(slug, season, week),
     retry: false,
   })
 
-  if (isLoading) return <p className="text-slate-400">Loading power rankings…</p>
+  if (snapshotQuery.isLoading) return <p className="text-slate-400">Loading power rankings…</p>
 
-  if (error) {
-    const status = (error as { response?: { status: number } })?.response?.status
+  if (snapshotQuery.error) {
+    const status = (snapshotQuery.error as { response?: { status: number } })?.response?.status
     if (status === 404) {
-      return <p className="text-slate-500">No rankings published for this week.</p>
+      return <p className="text-slate-500">No rankings data for this week.</p>
     }
     return <p className="text-red-400">Could not load power rankings.</p>
   }
 
-  const edition = data?.edition ?? null
-  const snapshot = edition?.snapshot
-  const content = edition?.structured_content_json
+  const snapshot = snapshotQuery.data?.snapshot as Record<string, unknown> | undefined
+  const content = recapQuery.data?.edition?.structured_content_json
 
-  if (!edition || !snapshot) {
-    return <p className="text-slate-500">No rankings published for this week.</p>
+  if (!snapshot) {
+    return <p className="text-slate-500">No rankings data for this week.</p>
   }
 
-  const rankings = snapshot.power_rankings || []
-  const standings = snapshot.standings || []
+  const rankings = (snapshot.power_rankings as Record<string, unknown>[]) || []
+  const standings = (snapshot.standings as Record<string, unknown>[]) || []
 
   if (rankings.length === 0) {
     return <p className="text-slate-500">No ranking data for this week.</p>

@@ -893,4 +893,13 @@ export async function getPublishedArchive(
   return data
 }
 
+export async function getSnapshot(
+  slug: string,
+  season: number,
+  week: number,
+): Promise<{ league: JsonRecord; snapshot: JsonRecord }> {
+  const { data } = await directClient.get(`/leagues/${slug}/recaps/${season}/${week}/snapshot`)
+  return data
+}
+
 export { client as apiClient }

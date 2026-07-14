@@ -60,6 +60,26 @@ def published_archive(
     )
 
 
+@router.get("/{season}/{week}/snapshot")
+def public_snapshot(
+    slug: str,
+    season: int,
+    week: int,
+    store: RecapStore = Depends(get_recap_store),
+) -> dict[str, Any]:
+    """Return the snapshot for a league/week (public, no auth).
+
+    Differs from the published recap: no publication status check.
+    Matchups, power rankings, and other deterministic tabs read this
+    so they render before an admin publishes the LLM-generated recap.
+    """
+    return _run(
+        lambda: service.get_public_snapshot(
+            store=store, slug=slug, season=season, week=week
+        )
+    )
+
+
 @router.get("/{season}/{week}")
 def published_recap(
     slug: str,

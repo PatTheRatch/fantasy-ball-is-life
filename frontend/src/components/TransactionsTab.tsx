@@ -5,7 +5,7 @@ import {
   DollarSign,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { getPublishedRecap } from '../api'
+import { getSnapshot } from '../api'
 
 /** Parse ESPN transaction id from activity_id: "txn-{week}-{txnId}-{action}-{playerId}" */
 function parseTxnId(activityId: unknown): string {
@@ -23,8 +23,8 @@ export function TransactionsTab({
   week: number
 }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['recap', 'published', slug, season, week],
-    queryFn: () => getPublishedRecap(slug, season, week),
+    queryKey: ['recap', 'snapshot', slug, season, week],
+    queryFn: () => getSnapshot(slug, season, week),
     retry: false,
   })
 
@@ -33,19 +33,18 @@ export function TransactionsTab({
   if (error) {
     const status = (error as { response?: { status: number } })?.response?.status
     if (status === 404) {
-      return <p className="text-slate-500">No transactions published for this week.</p>
+      return <p className="text-slate-500">No transactions data for this week.</p>
     }
     return <p className="text-red-400">Could not load transactions.</p>
   }
 
-  const edition = data?.edition ?? null
-  const snapshot = edition?.snapshot
-  if (!edition || !snapshot) {
-    return <p className="text-slate-500">No transactions published for this week.</p>
+  const snapshot = data?.snapshot as Record<string, unknown> | undefined
+  if (!snapshot) {
+    return <p className="text-slate-500">No transactions data for this week.</p>
   }
 
-  const transactions: Record<string, unknown>[] = snapshot.transactions || []
-  const standings: Record<string, unknown>[] = snapshot.standings || []
+  const transactions: Record<string, unknown>[] = (snapshot.transactions as Record<string, unknown>[]) || []
+  const standings: Record<string, unknown>[] = (snapshot.standings as Record<string, unknown>[]) || []
 
   // ── Season leaderboard ──────────────────────────────────────────
   const leaderboard = standings
