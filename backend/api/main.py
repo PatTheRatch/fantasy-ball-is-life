@@ -36,6 +36,7 @@ except Exception:
     # If `python-dotenv` isn't installed or .env doesn't exist, we'll just rely on real env vars.
     pass
 
+from backend import config
 from backend.league.cache import ESPNRequestCacheMiddleware
 
 app = FastAPI(title="PatriotGames Fantasy API", version="0.1.0")
@@ -47,14 +48,20 @@ app = FastAPI(title="PatriotGames Fantasy API", version="0.1.0")
 app.add_middleware(ESPNRequestCacheMiddleware)
 
 # Browser dev: any localhost / 127.0.0.1 port (Vite may use 5174+, etc.) + common LAN preview IPs.
+# Deployed frontend: PUBLIC_APP_URL (e.g. the Render static site) is added explicitly
+# since it won't match the localhost/LAN regex below.
+_cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+if config.PUBLIC_APP_URL not in _cors_origins:
+    _cors_origins.append(config.PUBLIC_APP_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-    ],
+    allow_origins=_cors_origins,
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
