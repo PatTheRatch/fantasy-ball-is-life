@@ -28,6 +28,9 @@ streamlit>=1.28.0
 # Anthropic Claude (matchup commentary)
 anthropic>=0.0.0
 
+# Repair almost-valid JSON from the LLM structured-recap call (unescaped quotes etc.)
+json_repair>=0.30.0
+
 # FastAPI multipart/form-data support (File/Form)
 python-multipart>=0.0.9
 

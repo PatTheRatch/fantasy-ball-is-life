@@ -745,3 +745,40 @@ def test_service_get_published_archive_returns_list_on_public(monkeypatch):
     result = service.get_published_archive(store=store, slug='test', season=2026)
     assert result == [{'week': 1, 'headline': 'Week One'}]
     store.list_published.assert_called_once_with('league-1', 2026)
+
+
+# --- malformed-JSON recovery (json_repair) ------------------------------------
+# Regression for a prod 502: the LLM emitted almost-valid JSON with an unescaped
+# double-quote inside a narrative string ("Expecting ',' delimiter"), and a bare
+# json.loads threw away the whole ~60s generation.
+
+def test_parse_json_object_passes_through_valid():
+    assert generate._parse_json_object('{"a": 1, "b": [1, 2]}') == {"a": 1, "b": [1, 2]}
+
+
+def test_parse_json_object_repairs_unescaped_quote():
+    bad = '{"headline": "The "Dream Team" rolls", "n": 3}'
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(bad)  # confirms this is the real prod failure shape
+    out = generate._parse_json_object(bad)
+    assert out["n"] == 3
+    assert "Dream Team" in out["headline"]
+
+
+def test_generate_recovers_from_malformed_llm_json(monkeypatch):
+    snapshot = _snapshot()
+    snapshot.award_candidates = select_awards(snapshot)
+    payload = _valid_structured_payload(snapshot)
+    payload["headline"] = "Alpha owns the week"
+    # Corrupt exactly like prod: unescaped quotes inside a string value.
+    malformed = json.dumps(payload).replace(
+        "Alpha owns the week", 'Alpha owns the "big" week'
+    )
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(malformed)  # strict parse must fail, else the test is moot
+
+    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
+    monkeypatch.setattr(generate, "_complete_structured", lambda *a, **k: malformed)
+
+    result = generate.generate_structured_recap(snapshot)
+    assert "big" in result.headline

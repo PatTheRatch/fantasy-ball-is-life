@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import requests
 from fastapi import HTTPException
+from json_repair import repair_json
 
 from backend import config
 from backend.api.deps import _strip_numpy
@@ -294,7 +296,19 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     candidate = text.strip()
     if candidate.startswith("```") and candidate.endswith("```"):
         candidate = candidate.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    value = json.loads(candidate)
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError as strict_exc:
+        # LLMs intermittently emit almost-valid JSON — most commonly an
+        # unescaped double-quote inside a narrative string, which terminates the
+        # string early and yields "Expecting ',' delimiter". Repair and continue
+        # rather than throwing away a full ~60s generation; the downstream schema
+        # + evidence-id validation still guards correctness if the repair guesses
+        # wrong.
+        logging.warning(
+            "structured recap JSON invalid (%s); attempting repair", strict_exc
+        )
+        value = repair_json(candidate, return_objects=True)
     if not isinstance(value, dict):
         raise ValueError("Structured recap response must be a JSON object.")
     return value
