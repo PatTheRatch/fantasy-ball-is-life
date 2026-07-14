@@ -175,3 +175,47 @@ Accessor: get_active_projections(horizon) -> DataFrame[PlayerProjection]
    optimizer) and weekly-horizon uploads. `ProjectionSet.horizon` is therefore
    load-bearing from day one, and the accessor takes `horizon` as a required
    argument.
+
+---
+
+## Addendum: Implementation sequencing + ESPN adapter moved into v1 (2026-07-14)
+
+Prompted by Patrick scoping the app's intra-week features (a live per-matchup
+scoreboard + projections). The live scoreboard already exists end-to-end
+(`/scoreboard/current` → `get_current_scoreboard()` → `InSeason.tsx`) and
+needed no new work. Projections is this framework — but Patrick's stated
+priority reorders v1: **default to ESPN's own rolling stats first** (no manual
+download required every week), with BBM/upload as the alternative, not the
+other way around. §"v1 scope" above (2026-07-08) sequenced `BbmAdapter` and
+`HashtagAdapter` first and called an ESPN adapter a follow-up; this addendum
+supersedes that ordering only — the acceptance criteria and data model are
+unchanged.
+
+**Why this is cheap to move up:** the underlying logic already exists.
+`get_current_rosters()` (`backend/league/data_feed.py:1391-1502`) already reads
+each roster player's ESPN `Last 15`/`Last 30` day averages
+(`player.stats["{year}_last_{15,30}"]`) and projects rest-of-week production
+by multiplying by games remaining — this is not new code, it's an existing
+function that needs porting into the `ProjectionAdapter` shape.
+
+**Hard constraint this framework must respect:** ESPN's rolling Last-15/30
+splits only exist mid-season (no games played yet at draft time), so
+`EspnAdapter` can only ever serve `horizon = 'week'`. The draft optimizer's
+`horizon = 'season'` need is unaffected by this reordering and still requires
+BBM (or an equivalent season-long source) — `EspnAdapter` does not replace
+`BbmAdapter`, it just ships first for the horizon it *can* serve.
+
+### PR sequence
+
+| PR | Scope | Notes |
+|---|---|---|
+| **P-1** | `EspnAdapter` (`horizon='week'` only) + a minimal `get_active_projections('week')` accessor defaulting to it; wire the in-season projected-scoreboard view to use it with zero setup (no upload required) | Port of the existing Last-15/Last-30 logic in `get_current_rosters()` — no store/manifest needed for this adapter specifically (ESPN is always live, nothing to persist). Smallest, safest PR; delivers Patrick's "don't depend on downloading BBM every week" want immediately. `detect()` trivially returns high confidence always (not file-based). |
+| **P-2** | Store + manifest (`data/projections/`, parquet + `manifest.json`) + `BbmAdapter` (both horizons — season horizon is required for the draft optimizer, which `EspnAdapter` cannot serve) + the four endpoints (`POST/GET /projections`, `GET /projections/sets`, `PUT /projections/active`) | Port of existing `read_projections_xls`/`add_bbm_projections`. Existing callers keep working via the `source=bbm` default (spec §4). |
+| **P-3** | Swap consumers — draft optimizer (season horizon), projected scoreboard + matchup confidence (week horizon) — off raw BBM/ESPN columns onto `PlayerProjection` / `get_active_projections()` | Contract test required by spec §5: identical optimizer output before/after the refactor on the same BBM fixture file. |
+| **P-4** | Upload UI: source dropdown (default auto-detect), post-upload match report, "Projections: {source} · {date}" badge on Draft / In-Season / projected-scoreboard views | Acceptance criterion 5. |
+| **P-5** | `HashtagAdapter` (file + paste-input modes) | Last, per the spec's own caveat: paid source, export availability unconfirmed. Open action item carried over from 2026-07-08: verify with a real Hashtag account before building the fixture. |
+
+P-1 through P-3 are the load-bearing pieces (a real source-agnostic accessor
+existing consumers actually read through). P-4 is UI polish on top of a
+working P-2/P-3. P-5 is intentionally last — it's the one adapter with
+unresolved real-world access questions, and nothing else in v1 depends on it.
