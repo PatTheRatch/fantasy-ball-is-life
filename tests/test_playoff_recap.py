@@ -172,6 +172,12 @@ def test_next_round_matchups_empty_without_advancing_teams():
 # --- assemble._build_playoff_context ----------------------------------------
 
 def test_assemble_builds_playoff_context_for_a_playoff_week(monkeypatch):
+    """Regression for the real reported bug: a team that already LOST a
+    bracket game (Foxes, Masters -- both fell in round 1) must NOT be tagged
+    "championship" just because it's seeded into the real playoffs. Their
+    round-2 matchup against each other is a placement game, not the title
+    race -- distinct from TTW/Optimize and Fantastic5/Brighton, who are both
+    still unbeaten in the bracket and genuinely playing for the championship."""
     monkeypatch.setattr(
         assemble.league_api,
         "league_settings",
@@ -189,6 +195,21 @@ def test_assemble_builds_playoff_context_for_a_playoff_week(monkeypatch):
             {"Week": 22, "Team": "TTW", "Opponent": "Fantastic5"},
         ],
     )
+    # Week 20 (round 1) is already decided: Foxes and Masters both lost --
+    # they've fallen out of the title race entering week 21.
+    monkeypatch.setattr(assemble.league_api, "scoreboard_current", lambda scoring_period: scoring_period)
+    monkeypatch.setattr(
+        assemble,
+        "canonical_matchups",
+        lambda scoreboard, wk: (
+            [
+                {"home_team": "TTW", "away_team": "Foxes", "winner": "TTW"},
+                {"home_team": "Fantastic5", "away_team": "Masters", "winner": "Fantastic5"},
+            ]
+            if wk == 20
+            else []
+        ),
+    )
     matchups = [
         {
             "matchup_id": "week-21:ttw-vs-optimize",
@@ -201,6 +222,15 @@ def test_assemble_builds_playoff_context_for_a_playoff_week(monkeypatch):
             "home_team": "Fantastic5",
             "away_team": "Brighton",
             "winner": "Fantastic5",
+        },
+        {
+            # Both already lost their round-1 (week 20) bracket game -- a
+            # placement game now, NOT the championship, despite both being
+            # seeded into the real playoffs.
+            "matchup_id": "week-21:foxes-vs-masters",
+            "home_team": "Foxes",
+            "away_team": "Masters",
+            "winner": "Foxes",
         },
         {
             # both teams missed the 6-team playoffs (seeds 7 & 8) -> consolation
@@ -216,6 +246,8 @@ def test_assemble_builds_playoff_context_for_a_playoff_week(monkeypatch):
         {"team_name": "Fantastic5", "standing": 2},
         {"team_name": "Optimize", "standing": 3},
         {"team_name": "Brighton", "standing": 4},
+        {"team_name": "Masters", "standing": 5},
+        {"team_name": "Foxes", "standing": 6},
         {"team_name": "Cellar", "standing": 7},
         {"team_name": "Basement", "standing": 8},
     ]
@@ -225,11 +257,18 @@ def test_assemble_builds_playoff_context_for_a_playoff_week(monkeypatch):
     assert context is not None
     assert context.round_label == "Semifinals"
     # Seeds 1-6 made the real playoffs; 7-8 are consolation.
-    assert context.championship_teams == ["TTW", "Fantastic5", "Optimize", "Brighton"]
+    assert context.championship_teams == [
+        "TTW", "Fantastic5", "Optimize", "Brighton", "Masters", "Foxes",
+    ]
     assert context.consolation_teams == ["Cellar", "Basement"]
-    # Each matchup is tagged with its bracket.
+    # Dynamic: only the round-1 winners are still alive for the title.
+    assert context.still_alive_for_title == ["TTW", "Fantastic5", "Optimize", "Brighton"]
+    assert context.eliminated_from_title == ["Masters", "Foxes"]
+    # Each matchup is tagged with its bracket -- the core regression check.
     by_id = {m["matchup_id"]: m["bracket"] for m in matchups}
     assert by_id["week-21:ttw-vs-optimize"] == "championship"
+    assert by_id["week-21:fantastic5-vs-brighton"] == "championship"
+    assert by_id["week-21:foxes-vs-masters"] == "placement"  # the reported bug
     assert by_id["week-21:cellar-vs-basement"] == "consolation"
 
 

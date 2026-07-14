@@ -63,6 +63,59 @@ def playoff_round(
     }
 
 
+def replay_championship_bracket(
+    *,
+    current_week: int,
+    playoff_start_week: int,
+    period_length: int,
+    championship_teams: list[str],
+    matchups_loader: Callable[[int], list[dict[str, Any]]],
+) -> tuple[list[str], list[str]]:
+    """Replay the championship bracket from its first round up to (but not
+    including) ``current_week``, tracking who has lost a bracket game.
+
+    A team's playoff *seed* only tells you who started in the real bracket --
+    once the bracket is underway, half the field loses every round and drops
+    to playing for final positioning (not the title), even though they're
+    still playing an "in the playoffs" matchup. This replays each completed
+    round's results (a team absent from a round's matchups had a bye and stays
+    in place) to answer "who is still actually alive for the championship
+    *right now*."
+
+    Returns ``(still_alive, fell_out)``, both ordered as in
+    ``championship_teams``:
+    - ``still_alive``: unbeaten in the bracket so far -- eligible for this
+      week's title-track game.
+    - ``fell_out``: lost a bracket game already -- playing a placement game
+      now, not the championship.
+
+    Best-effort and additive, matching ``next_round_matchups``'s policy: a
+    per-round fetch failure just stops the replay at that round (keeps
+    whatever was determined so far) rather than raising or guessing.
+    """
+    alive = set(championship_teams)
+    week = playoff_start_week
+    step = max(1, int(period_length or 1))
+    while week < current_week:
+        try:
+            week_matchups = matchups_loader(week)
+        except Exception:
+            break
+        for m in week_matchups:
+            home, away = m.get("home_team"), m.get("away_team")
+            winner = m.get("winner")
+            if home not in alive or away not in alive:
+                continue  # not a championship-bracket game this round
+            if not winner or winner == "Tie":
+                continue  # unresolved -- leave both in place rather than guess
+            loser = away if winner == home else home
+            alive.discard(loser)
+        week += step
+    still_alive = [t for t in championship_teams if t in alive]
+    fell_out = [t for t in championship_teams if t not in alive]
+    return still_alive, fell_out
+
+
 def playoff_advancement(
     matchups: list[dict[str, Any]],
 ) -> tuple[list[str], list[str]]:

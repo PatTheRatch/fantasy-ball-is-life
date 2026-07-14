@@ -370,16 +370,38 @@ def _build_playoff_context(
     championship_teams, consolation_teams = _championship_split(
         standings, settings.get("playoff_team_count")
     )
-    # Tag each playoff matchup as championship (both teams made the real
-    # playoffs) or consolation, so the recap can frame title games apart from
-    # placement/toilet-bowl games.
+
+    # A playoff seed only says who STARTED in the real bracket -- half the
+    # field loses every round after that and drops to playing for final
+    # positioning, not the title, even though it's still an "in the playoffs"
+    # matchup. Replay the bracket's completed rounds to find who's actually
+    # still alive for the championship this week.
+    reg_season_count = settings.get("reg_season_count")
+    still_alive, eliminated_from_title = playoffs.replay_championship_bracket(
+        current_week=week,
+        playoff_start_week=(int(reg_season_count) + 1) if reg_season_count else week,
+        period_length=settings.get("playoff_matchup_period_length") or 1,
+        championship_teams=championship_teams,
+        matchups_loader=lambda w: canonical_matchups(
+            league_api.scoreboard_current(scoring_period=w), w
+        ),
+    )
+
+    # Tag each playoff matchup: championship (both teams still alive for the
+    # title), placement (both made the real playoffs but at least one already
+    # lost a bracket game -- playing for final positioning now), or
+    # consolation (either team never made the real playoffs at all).
+    alive_set = set(still_alive)
     champ_set = set(championship_teams)
     for matchup in matchups:
         home = matchup.get("home_team")
         away = matchup.get("away_team")
-        matchup["bracket"] = (
-            "championship" if home in champ_set and away in champ_set else "consolation"
-        )
+        if home in alive_set and away in alive_set:
+            matchup["bracket"] = "championship"
+        elif home in champ_set and away in champ_set:
+            matchup["bracket"] = "placement"
+        else:
+            matchup["bracket"] = "consolation"
 
     advancing, eliminated = playoffs.playoff_advancement(matchups)
     next_matchups: list[dict[str, Any]] = []
@@ -400,5 +422,7 @@ def _build_playoff_context(
         eliminated_teams=eliminated,
         championship_teams=championship_teams,
         consolation_teams=consolation_teams,
+        still_alive_for_title=still_alive,
+        eliminated_from_title=eliminated_from_title,
         next_round_matchups=next_matchups,
     )

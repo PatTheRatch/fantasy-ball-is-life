@@ -58,7 +58,10 @@ def build_share_text(
         if takeaway is None:
             continue
         header = _matchup_header(matchup)
-        if matchup.get("bracket") == "consolation":
+        bracket = matchup.get("bracket")
+        if bracket == "placement":
+            header += "  (placement game)"
+        elif bracket == "consolation":
             header += "  (consolation bracket)"
         lines += [
             _DIVIDER,

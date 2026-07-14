@@ -425,22 +425,32 @@ def build_structured_recap_prompts(
         "after it. Use every matchup_id and award_id exactly as given."
     )
     if playoff_context:
-        champs = playoff_context.get("championship_teams") or []
+        alive = playoff_context.get("still_alive_for_title") or []
+        fell_out = playoff_context.get("eliminated_from_title") or []
         conso = playoff_context.get("consolation_teams") or []
         system_prompt += (
             "\n\nThis is a PLAYOFF week (see playoff_context). CRUCIAL: not every "
-            "matchup matters equally. Each matchup carries a `bracket` field:\n"
-            "- bracket=championship -> these teams actually made the playoffs and "
-            "are playing for the title. This is where the real stakes are; give "
-            "these matchups the weight.\n"
-            "- bracket=consolation -> a placement / toilet-bowl game between teams "
-            "that missed the real playoffs. Cover it, but frame it honestly as "
-            "playing for pride/seeding, not the championship -- a little "
-            "self-aware humor about the consolation bracket lands well.\n"
-            f"Championship bracket (real playoffs): {champs}. "
-            f"Consolation bracket: {conso}.\n"
-            "Center the intro and synopsis on the championship race. Do not invent "
-            "bracket outcomes beyond what the snapshot states."
+            "matchup matters equally, and a team being 'in the playoffs' does NOT "
+            "mean it's still playing for the title -- half the bracket loses every "
+            "round. Each matchup carries a `bracket` field:\n"
+            "- bracket=championship -> both teams have won every bracket game so "
+            "far and are still alive for the actual title. This is where the real "
+            "stakes are; give these matchups the weight.\n"
+            "- bracket=placement -> both teams made the real playoffs originally, "
+            "but at least one has already lost a bracket game. They are NOT playing "
+            "for the championship anymore -- they're settling final positioning. "
+            "Frame it honestly as that, not as title stakes.\n"
+            "- bracket=consolation -> at least one team never made the real "
+            "playoffs at all (the toilet bowl). Cover it, but frame it as playing "
+            "for pride/seeding -- a little self-aware humor lands well here.\n"
+            f"Still alive for the title: {alive}. "
+            f"Made the playoffs but already eliminated from the title (now in "
+            f"placement games): {fell_out}. "
+            f"Never made the real playoffs (consolation bracket): {conso}.\n"
+            "Center the intro and synopsis on the championship race -- who's still "
+            "alive, not just who's 'in the playoffs'. Do not invent bracket "
+            "outcomes, seeds, or placement numbers (3rd/5th/etc) beyond what the "
+            "snapshot states."
         )
     recap_voice = (snapshot.get("league") or {}).get("recap_voice")
     if recap_voice:
