@@ -1,6 +1,8 @@
 """Weekly recap generation and publication orchestration."""
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 from fastapi import HTTPException
@@ -146,6 +148,7 @@ def generate_draft(
         }
     )
 
+    llm_started = time.perf_counter()
     try:
         generated = generate_structured_recap(snapshot)
         generated = format_share_text(snapshot, generated)
@@ -154,6 +157,11 @@ def generate_draft(
             status_code=502,
             detail=f"Structured recap generation failed: {exc}",
         ) from exc
+    finally:
+        logging.info(
+            "recap assembly: LLM generate_structured_recap took %.2fs",
+            time.perf_counter() - llm_started,
+        )
 
     edition_version = store.next_version(
         "recap_editions",

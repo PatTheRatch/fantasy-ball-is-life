@@ -8,6 +8,7 @@ seconds of each other.
 """
 from __future__ import annotations
 
+import logging
 import math
 import re
 import time
@@ -177,11 +178,16 @@ def _capture(
     loader: Callable[[], list[dict[str, Any]]],
     warnings: list[str],
 ) -> tuple[list[dict[str, Any]], bool]:
+    started = time.perf_counter()
     try:
         return loader(), True
     except Exception as exc:
         warnings.append(f"{name} unavailable: {exc}")
         return [], False
+    finally:
+        logging.info(
+            "recap assembly: %s took %.2fs", name, time.perf_counter() - started
+        )
 
 
 def assemble_weekly_snapshot(
@@ -198,10 +204,13 @@ def assemble_weekly_snapshot(
     the readiness and generation endpoints arrive seconds apart.
     """
     # --- E3 snapshot cache check ---
+    assembly_started = time.perf_counter()
     ck = _cache_key(league, season, week)
     cached = _cache_get(ck)
     if cached is not None:
+        logging.info("recap assembly: cache hit for %s, skipping ESPN fetch", ck)
         return cached
+    logging.info("recap assembly: cache miss for %s, assembling from ESPN", ck)
 
     warnings: list[str] = []
     weeks_csv = ",".join(str(value) for value in range(1, week + 1))
@@ -270,7 +279,11 @@ def assemble_weekly_snapshot(
     for row in ranking_facts:
         row["team_id"] = _slug(row.get("team") or row.get("Team"))
 
+    playoff_started = time.perf_counter()
     playoff_context = _build_playoff_context(week, matchups, warnings)
+    logging.info(
+        "recap assembly: playoff_context took %.2fs", time.perf_counter() - playoff_started
+    )
 
     snapshot = WeeklyFactSnapshot(
         league={
@@ -302,6 +315,9 @@ def assemble_weekly_snapshot(
     # transient ESPN blip should not block recovery for the full TTL.
     if snapshot.data_quality.ready:
         _cache_put(ck, snapshot)
+    logging.info(
+        "recap assembly: total %.2fs for %s", time.perf_counter() - assembly_started, ck
+    )
     return snapshot
 
 
