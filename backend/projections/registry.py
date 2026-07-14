@@ -1,12 +1,11 @@
-"""Minimal projection-source registry (P-1).
+"""Projection-source registry (P-2).
 
-P-1 only ships ``EspnAdapter``.  The full multi-source registry
-(``BbmAdapter``, on-disk parquet store, manifest, upload endpoints) is
-P-2.  ``get_active_projections()`` routes to EspnAdapter for
-``horizon='week'`` and returns an empty list for all other horizons
-(no adapter registered yet — P-2 fills this in).  The actual consumer
-swap (projected scoreboard calling this instead of the legacy
-``get_current_rosters`` path) is P-3.
+Precedence for each horizon:
+  ``week``  — uploaded BBM set (store) → live ESPN (EspnAdapter)
+  ``season`` — uploaded BBM set (store) → empty (no live source yet)
+
+The actual consumer swap (projected scoreboard calling this instead of
+the legacy ``get_current_rosters`` path) is P-3.
 """
 
 from __future__ import annotations
@@ -26,14 +25,19 @@ def get_active_projections(
     week_start_date: Optional[str] = None,
     current_matchup_period: Optional[int] = None,
 ) -> "list[PlayerProjection]":
-    """Return the canonical projections for the requested horizon.
+    """Canonical projections for ``horizon``.
 
-    P-1 knowledge: ``horizon='week'`` → ``EspnAdapter(window)``.  Everything
-    else returns an empty list (to be filled in by P-2 / P-3).
-
-    Parameters are forwarded through to the backing adapter — callers
-    provide ESPN handles + window context.
+    Precedence (per horizon):
+      ``week``  — store (uploaded BBM) → ESPN live Last-N
+      ``season`` — store (uploaded BBM) → empty
     """
+    # ---- check the store first (uploaded sets win) ----
+    store = _get_store()  # defaults to data/projections/
+    rows = store.load_active(horizon)
+    if rows is not None:
+        return rows
+
+    # ---- fallback: live sources ----
     if horizon == "week":
         from backend.projections.adapter import EspnAdapter
 
@@ -44,4 +48,11 @@ def get_active_projections(
             week_start_date=week_start_date,
             current_matchup_period=current_matchup_period,
         )
+
     return []
+
+
+def _get_store() -> "ProjectionStore":
+    """Internal: get the singleton ProjectionStore."""
+    from backend.projections.store import ProjectionStore
+    return ProjectionStore()
