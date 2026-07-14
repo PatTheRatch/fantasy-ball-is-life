@@ -19,7 +19,14 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from backend.league.cache import ESPNRequestCache
+from backend.league.cache import ESPNRequestCache, _clear_my_league_ttl_cache
+
+
+@pytest.fixture(autouse=True)
+def _reset_my_league_ttl_cache():
+    _clear_my_league_ttl_cache()
+    yield
+    _clear_my_league_ttl_cache()
 
 
 # --- unit tests: ESPNRequestCache MyLeague store ------------------------------
@@ -118,8 +125,11 @@ def test_my_league_works_without_cache_outside_request(monkeypatch):
     assert ml is mock_ml
 
 
-def test_my_league_isolation_between_requests(monkeypatch):
-    """Request A's cached MyLeague must not leak into Request B."""
+def test_my_league_ttl_cache_reused_across_requests(monkeypatch):
+    """Perf fix: readiness and generate are separate HTTP requests that both
+    build the same (league_id, season) MyLeague. Within the 90s TTL window,
+    request B must reuse request A's construction instead of paying the ESPN
+    fetch cost again."""
     from fastapi.testclient import TestClient
 
     from backend.api.main import app
@@ -154,4 +164,45 @@ def test_my_league_isolation_between_requests(monkeypatch):
 
     client.get("/__test_ml_req_a__")
     client.get("/__test_ml_req_b__")
-    assert call_count == 2  # One construction per request
+    assert call_count == 1  # TTL cache reused across requests
+
+
+def test_my_league_ttl_cache_isolated_by_key(monkeypatch):
+    """Different (league_id, season) keys must not share a TTL-cache entry."""
+    from backend.league import cache
+
+    call_count = 0
+
+    def _counting_ml(league_id, year, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return Mock()
+
+    monkeypatch.setattr(cache, "MyLeague", _counting_ml)
+
+    cache.get_cached_my_league(1, 2026)
+    cache.get_cached_my_league(2, 2026)
+    cache.get_cached_my_league(1, 2025)
+    assert call_count == 3
+
+
+def test_my_league_ttl_cache_expires(monkeypatch):
+    """After the TTL window elapses, the next call constructs fresh."""
+    from backend.league import cache
+
+    call_count = 0
+
+    def _counting_ml(league_id, year, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return Mock()
+
+    monkeypatch.setattr(cache, "MyLeague", _counting_ml)
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(cache.time, "monotonic", lambda: fake_now[0])
+
+    cache.get_cached_my_league(1, 2026)
+    fake_now[0] += cache._MY_LEAGUE_TTL_SECONDS + 1
+    cache.get_cached_my_league(1, 2026)
+    assert call_count == 2

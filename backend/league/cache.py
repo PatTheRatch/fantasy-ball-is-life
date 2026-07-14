@@ -1,4 +1,4 @@
-"""Request-scoped ESPN league cache (PR E2).
+"""Request-scoped ESPN league cache (PR E2), plus a cross-request MyLeague TTL cache.
 
 Every FastAPI request that touches ESPN constructs a fresh ``League`` object
 via ``connect()``, which makes 4 HTTP calls (~2.5 MB) regardless of the view
@@ -15,12 +15,28 @@ singleton that outlives the ESPN cookie validity window.
 
 Consumers (``connect()``, ``_handles()``) become cache-aware transparently:
 no caller needs to pass a cache handle or change its signature.
+
+MyLeague TTL cache (perf follow-up): the per-request cache above only
+dedupes constructions *within* a single HTTP request. In production,
+``MyLeague()`` construction has been observed taking 140-171s (vs. ~1-2.5s
+locally against the same live league) — almost certainly a Render-specific
+network/throttling issue, not a code-level cost. Recap readiness and
+generate are separate HTTP requests that both build the same
+``(league_id, season)`` MyLeague, and clicking between weeks in the admin UI
+does the same — each paying that cost from scratch. ``_MY_LEAGUE_TTL_CACHE``
+below adds a short-lived (90s) process-global cache, keyed by
+``(league_id, season)``, mirroring the snapshot cache pattern in
+``backend/recaps/assemble.py`` (E3). A per-key lock also collapses concurrent
+callers (e.g. two overlapping requests for the same league/season, which is
+exactly what production logs showed) into a single ESPN fetch instead of
+racing two independent slow fetches.
 """
 
 from __future__ import annotations
 
 import contextvars
 import logging
+import threading
 import time
 from typing import Optional
 
@@ -30,6 +46,44 @@ from backend.league.fantasy import MyLeague  # exported so tests can patch it
 _CACHE_VAR: contextvars.ContextVar[Optional["ESPNRequestCache"]] = (
     contextvars.ContextVar("espn_request_cache", default=None)
 )
+
+# --- cross-request MyLeague TTL cache -----------------------------------------
+
+_MY_LEAGUE_TTL_SECONDS = 90
+_MY_LEAGUE_TTL_CACHE: dict[tuple[int, int], tuple[float, Any]] = {}
+"""key = (league_id, season), value = (monotonic timestamp, MyLeague instance)."""
+
+_MY_LEAGUE_LOCKS: dict[tuple[int, int], threading.Lock] = {}
+_MY_LEAGUE_LOCKS_GUARD = threading.Lock()
+
+
+def _get_my_league_lock(key: tuple[int, int]) -> threading.Lock:
+    with _MY_LEAGUE_LOCKS_GUARD:
+        lock = _MY_LEAGUE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _MY_LEAGUE_LOCKS[key] = lock
+        return lock
+
+
+def _my_league_ttl_get(key: tuple[int, int]):
+    entry = _MY_LEAGUE_TTL_CACHE.get(key)
+    if entry is None:
+        return None
+    ts, ml = entry
+    if time.monotonic() - ts > _MY_LEAGUE_TTL_SECONDS:
+        _MY_LEAGUE_TTL_CACHE.pop(key, None)
+        return None
+    return ml
+
+
+def _my_league_ttl_put(key: tuple[int, int], ml) -> None:
+    _MY_LEAGUE_TTL_CACHE[key] = (time.monotonic(), ml)
+
+
+def _clear_my_league_ttl_cache() -> None:
+    """Test hook: reset the cross-request MyLeague TTL cache."""
+    _MY_LEAGUE_TTL_CACHE.clear()
 
 
 class ESPNRequestCache:
@@ -88,9 +142,11 @@ def set_request_cache(cache: Optional[ESPNRequestCache]) -> None:
 def get_cached_my_league(league_id: int, year: int) -> Any:
     """Return a (possibly cached) ``MyLeague`` for the given league and season.
 
-    Checks the per-request cache first; constructs a new ``MyLeague`` (4 ESPN
-    requests) on a miss, then stores it. Returns the uncached result when no
-    request cache is active (CLI / Streamlit).
+    Checks the per-request cache first, then the cross-request 90s TTL cache,
+    before constructing a new ``MyLeague`` (4 ESPN requests). A per-key lock
+    collapses concurrent misses (e.g. readiness and generate arriving close
+    together) into a single ESPN fetch. Returns the uncached result when no
+    request cache is active (CLI / Streamlit) — the TTL cache still applies.
 
     Lives in the league layer (not ``api.deps``) so the Draft optimizer can
     import it without an upward dependency.
@@ -104,12 +160,33 @@ def get_cached_my_league(league_id: int, year: int) -> Any:
             )
             return existing
 
-    started = time.perf_counter()
-    ml = MyLeague(league_id, year)
-    logging.info(
-        "get_cached_my_league: MyLeague(%s, %s) construction took %.2fs",
-        league_id, year, time.perf_counter() - started,
-    )
+    key = (league_id, year)
+    ml = _my_league_ttl_get(key)
+    if ml is not None:
+        logging.info("get_cached_my_league: TTL-cache hit for (%s, %s)", league_id, year)
+        if cache is not None:
+            cache.put_my_league(league_id, year, ml)
+        return ml
+
+    lock = _get_my_league_lock(key)
+    with lock:
+        # Re-check: another thread may have populated the TTL cache while we
+        # were waiting on the lock (the "overlapping concurrent requests"
+        # case observed in production).
+        ml = _my_league_ttl_get(key)
+        if ml is not None:
+            logging.info(
+                "get_cached_my_league: TTL-cache hit for (%s, %s) after lock wait",
+                league_id, year,
+            )
+        else:
+            started = time.perf_counter()
+            ml = MyLeague(league_id, year)
+            logging.info(
+                "get_cached_my_league: MyLeague(%s, %s) construction took %.2fs",
+                league_id, year, time.perf_counter() - started,
+            )
+            _my_league_ttl_put(key, ml)
 
     if cache is not None:
         cache.put_my_league(league_id, year, ml)
