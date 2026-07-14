@@ -685,7 +685,12 @@ export interface MatchupTakeaway {
 export interface RecapGeneratedContent {
   headline: string
   intro: string
+  synopsis: string[]
   matchup_takeaways: MatchupTakeaway[]
+  ranking_explanations: Array<{
+    team: string
+    text: string
+  }>
   award_explanations: Array<{
     award_id: string
     text: string

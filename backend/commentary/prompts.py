@@ -435,9 +435,16 @@ def build_structured_recap_prompts(
     if recap_voice:
         system_prompt += f"\n\nLEAGUE-SPECIFIC VOICE NOTES (apply on top of the above):\n{recap_voice}"
 
+    ranked_teams = [
+        str(row.get("team") or row.get("Team") or "")
+        for row in (snapshot.get("power_rankings") or [])
+    ]
+    ranked_teams = [name for name in ranked_teams if name]
+
     schema = {
         "headline": "punchy title/theme for the week",
         "intro": "1-3 punchy sentences setting the week's stakes",
+        "synopsis": ["2-4 paragraphs: the data-grounded story of the week"],
         "matchup_takeaways": [
             {
                 "matchup_id": "exact snapshot matchup_id",
@@ -445,6 +452,12 @@ def build_structured_recap_prompts(
                 "barkley": "one blunt, funny sentence",
                 "stephen_a": "one dramatic, emphatic sentence",
                 "insight": "one grounded line on what decided it at the category level",
+            }
+        ],
+        "ranking_explanations": [
+            {
+                "team": "exact team name from power_rankings",
+                "text": "1-2 grounded sentences on why this team sits where it does",
             }
         ],
         "award_explanations": [
@@ -458,6 +471,10 @@ def build_structured_recap_prompts(
     example = {
         "headline": "Separation Week.",
         "intro": "The playoff race just tightened. A few teams pulled away; a few ran out of road.",
+        "synopsis": [
+            "The top of the standings finally cracked open this week, and it wasn't the contenders who blinked -- it was the team everyone assumed was safe.",
+            "Down in the muck, two clubs that spent the month treading water finally separated, one riding a waiver-wire binge into relevance and the other quietly assembling the league's most balanced category profile.",
+        ],
         "matchup_takeaways": [
             {
                 "matchup_id": "week-N:example-a-vs-example-b",
@@ -466,6 +483,9 @@ def build_structured_recap_prompts(
                 "stephen_a": "Team A understands SURVIVAL. This wasn't domination -- this was INEVITABILITY.",
                 "insight": "Team A took enough volume categories to neutralize Team B's efficiency edge and never let the matchup flip.",
             }
+        ],
+        "ranking_explanations": [
+            {"team": "Team A", "text": "Still the class of the league -- best all-play win rate and no obvious category hole."}
         ],
         "award_explanations": [
             {"award_id": "team-of-week", "text": "Led the league in points and rebounds on the way to the week's most complete win."}
@@ -479,13 +499,19 @@ def build_structured_recap_prompts(
         f"{json.dumps(example, separators=(',', ':'), ensure_ascii=False)}\n\n"
         "FACT SNAPSHOT:\n"
         f"{json.dumps(snapshot, separators=(',', ':'), ensure_ascii=False)}\n\n"
-        "COVERAGE IS MANDATORY: emit exactly one matchup_takeaways entry for "
-        "every matchup_id in the snapshot, and exactly one award_explanations "
-        "entry for every award_id -- none missing, extra, or duplicated. Do not "
-        "write a ranking_explanations or any per-team ranking blurb; the "
-        "standings and power-ranking tabs are rendered from data. Do not restate "
-        "the score in your beats; the header is added automatically. If "
-        "data_quality.ready is false, keep the takes honest about the gaps rather "
-        "than inventing drama."
+        "SYNOPSIS: write 2-4 short paragraphs that read the WHOLE snapshot -- "
+        "standings, power_rankings, season_stats, transactions -- and tell the "
+        "story of the week the way NBA.com frames its power-rankings column: "
+        "who's separating, who's collapsing, what the numbers reveal that the "
+        "box scores don't. Narrative, grounded in the data, not a stat dump.\n\n"
+        "RANKING EXPLANATIONS: write one for EVERY team in power_rankings, using "
+        "the exact team name. Ground each in that team's ranking, all-play rate, "
+        "recent form, or category profile. These are the team-by-team blurbs the "
+        f"power-rankings tab shows. The teams to cover: {ranked_teams}.\n\n"
+        "COVERAGE: emit exactly one matchup_takeaways entry per matchup_id and "
+        "one award_explanations entry per award_id -- none missing, extra, or "
+        "duplicated. Do not restate the score in your matchup beats; the header "
+        "is added automatically. If data_quality.ready is false, keep everything "
+        "honest about the gaps rather than inventing drama."
     )
     return system_prompt, user_prompt

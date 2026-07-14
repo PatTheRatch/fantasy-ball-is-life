@@ -50,6 +50,9 @@ def build_share_text(
 
     lines: list[str] = [content.headline, "", content.intro, ""]
 
+    for paragraph in content.synopsis:
+        lines += [paragraph, ""]
+
     for matchup in snapshot.matchups:  # snapshot order = stable read order
         takeaway = takeaway_by_id.get(matchup["matchup_id"])
         if takeaway is None:

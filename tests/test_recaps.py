@@ -163,6 +163,10 @@ def _valid_structured_payload(snapshot):
     return {
         "headline": "Alpha Owns the Week.",
         "intro": "Alpha handled Beta and the standings shifted.",
+        "synopsis": [
+            "Alpha keeps separating from the field.",
+            "Beta is running out of runway.",
+        ],
         "matchup_takeaways": [
             {
                 "matchup_id": "week-1:alpha-vs-beta",
@@ -171,6 +175,10 @@ def _valid_structured_payload(snapshot):
                 "stephen_a": "Alpha is for REAL!",
                 "insight": "Alpha won six categories to three on volume scoring.",
             }
+        ],
+        "ranking_explanations": [
+            {"team": "Alpha", "text": "Still the class of the league."},
+            {"team": "Beta", "text": "Slipping fast without a clear category edge."},
         ],
         "award_explanations": [
             {"award_id": award["award_id"], "text": f"{award['winner']} earned it."}
@@ -288,11 +296,13 @@ def test_share_text_assembles_facts_voices_and_link(monkeypatch):
         "backend.recaps.sharing.config.PUBLIC_APP_URL", "https://example.com"
     )
 
+    content.synopsis = ["The field is separating.", "The bottom is falling out."]
     result = format_share_text(snapshot, content)
     text = result.share_text
 
     # Deterministic header (both teams named by construction) + the voices +link.
     assert text.startswith("Alpha Owns the Week.")
+    assert "The field is separating." in text  # synopsis paragraphs included
     assert "Alpha def. Beta, 6-3" in text
     assert "Woj: Alpha controlled the matchup." in text
     assert "Barkley: Beta got bullied." in text
@@ -613,29 +623,42 @@ def test_invalid_structured_recap_uses_provider_neutral_error(monkeypatch):
 # Regression for a NameError (`_not_found` was called but never defined), which
 # turned every /snapshot request into a 500 in production.
 
-def test_get_public_snapshot_returns_snapshot():
+def test_get_public_snapshot_normalizes_stored_edition():
     store = Mock()
     store.get_league_by_slug.return_value = {
         "id": "league-1", "slug": "test", "visibility": "public"
     }
-    store.get_edition.return_value = {"league_week_snapshots": {"matchups_json": []}}
+    store.get_edition.return_value = {
+        "season": 2026,
+        "week": 10,
+        "league_week_snapshots": {
+            "matchups_json": [{"matchup_id": "week-10:a-vs-b"}],
+            "power_rankings_json": [{"team": "Alpha"}],
+        },
+    }
 
     result = service.get_public_snapshot(store=store, slug="test", season=2026, week=10)
 
-    assert result["league"]["id"] == "league-1"
-    assert result["snapshot"] == {"matchups_json": []}
+    # Normalized to the tabs' shape (matchups/power_rankings, not *_json).
+    assert result["snapshot"]["matchups"] == [{"matchup_id": "week-10:a-vs-b"}]
+    assert result["snapshot"]["power_rankings"] == [{"team": "Alpha"}]
 
 
-def test_get_public_snapshot_404s_when_no_edition():
+def test_get_public_snapshot_assembles_when_no_edition(monkeypatch):
+    # No stored recap -> the deterministic tabs must still get data (assembled
+    # from ESPN), never a 404.
     store = Mock()
     store.get_league_by_slug.return_value = {
         "id": "league-1", "slug": "test", "visibility": "public"
     }
     store.get_edition.return_value = None
 
-    with pytest.raises(HTTPException) as raised:
-        service.get_public_snapshot(store=store, slug="test", season=2026, week=10)
-    assert raised.value.status_code == 404
+    fake = _snapshot()
+    monkeypatch.setattr(service, "assemble_weekly_snapshot", lambda **_kwargs: fake)
+
+    result = service.get_public_snapshot(store=store, slug="test", season=2026, week=10)
+
+    assert result["snapshot"]["matchups"][0]["matchup_id"] == "week-1:alpha-vs-beta"
 
 
 def test_get_public_snapshot_404s_when_league_not_public():

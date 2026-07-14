@@ -24,10 +24,20 @@ class AwardExplanation(BaseModel):
     text: str = Field(min_length=1)
 
 
+class RankingExplanation(BaseModel):
+    team: str = Field(min_length=1)  # exact team name from power_rankings
+    text: str = Field(min_length=1)  # one-two grounded sentences
+
+
 class RecapGeneratedContent(BaseModel):
     headline: str = Field(min_length=1)   # title / theme line
     intro: str = Field(min_length=1)      # 1-3 punchy sentences
+    # Data-grounded "story of the week" (2-4 paragraphs) reading the whole
+    # snapshot -- the NBA.com-style writeup that precedes the power rankings.
+    synopsis: list[str] = Field(default_factory=list)
     matchup_takeaways: list[MatchupTakeaway] = Field(default_factory=list)
+    # One blurb per ranked team (best-effort -- not a hard coverage constraint).
+    ranking_explanations: list[RankingExplanation] = Field(default_factory=list)
     award_explanations: list[AwardExplanation] = Field(default_factory=list)
     # Assembled server-side by sharing.format_share_text (not produced by the
     # LLM): the full group-chat-ready recap text for the Copy button.

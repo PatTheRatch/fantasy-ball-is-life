@@ -58,6 +58,13 @@ function Narrative({ content }: { content: RecapGeneratedContent }) {
           {content.intro}
         </p>
       </div>
+      {(content.synopsis ?? []).length > 0 && (
+        <div className="space-y-4 px-5 py-6 text-[15px] leading-7 text-slate-200 md:px-8">
+          {(content.synopsis ?? []).map((paragraph, index) => (
+            <p key={`${index}-${paragraph.slice(0, 20)}`}>{paragraph}</p>
+          ))}
+        </div>
+      )}
     </article>
   )
 }
