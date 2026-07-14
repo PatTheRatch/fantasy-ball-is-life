@@ -509,3 +509,95 @@ only appends the public URL. This updates acceptance criteria 21-22's
 rather than by assembly. On playoff weeks the prompt requires the round,
 advancement, and final line to be woven into the same prose — no labeled
 bullet sections.
+
+---
+
+## Addendum: Phase 2 execution plan (2026-07-13)
+
+Phase 1 (admin generate → preview → publish) shipped, and the ESPN hardening
+detour (E1–E3, F, G) that made generation reliable is complete. Phase 2 — the
+public newsroom — was spec'd in §8 but never sequenced. This is the plan.
+
+**Key framing:** every Phase 2 tab renders data the snapshot *already*
+persists (`standings`, `power_rankings`, `transactions`, `season_stats`,
+`award_candidates`) plus AI text the generator *already* produces but nothing
+currently displays (`ranking_explanations`, `award_explanations`). So Phase 2
+is overwhelmingly a frontend rendering effort, not new data plumbing — lower
+risk than the hardening work that preceded it.
+
+| PR | Scope | Notes |
+|---|---|---|
+| **F2-1** | Tab scaffold + league-scoped route (`/leagues/:slug/recaps/:season/:week`) + archive/week navigation; move the current single-page recap into the **Weekly Recap** tab; redirect the legacy `/recap` route | Foundation every other tab sits in |
+| **F2-2** | **Matchups** tab — compact result cards, expandable to the deterministic 9-category breakdown | data in `snapshot.matchups` |
+| **F2-3** | **Power Rankings** tab — frozen weekly rank, prior-published-week movement, record, all-play strength, category strengths, grounded explanation | `ranking_explanations` already generated, currently unused |
+| **F2-4** | **Transactions** tab — weekly chronological feed + season activity leaderboard | data in `snapshot.transactions` |
+| **F2-5** | **Awards & Stats** tab — render `award_candidates` + `award_explanations` | count-based awards live immediately; Move of the Week / Waiver Wire Wizard render only when the Transaction Intelligence track (below) is enabled |
+| **F2-6** | **Standings & Season Stats** tab — its own PR (Patrick, 2026-07-13). NBA.com-style column groups (Overview / Category Stats with season-totals + per-week-avg + category-rank views / Advanced / Activity), pinned team column, sortable | the heaviest single tab; data in `snapshot.standings` + `season_stats` |
+| **F2-7** | **OG social previews** — **last** (Patrick, 2026-07-13) | Prerequisite: the app is a SPA, so OG meta tags need SSR or a prerender/edge-render step. That infra decision is made when F2-7 starts, not before |
+
+F2-1 through F2-5 are each small and low-risk (render existing data). F2-6 is
+the biggest build. F2-7 has a real infra prerequisite and is deliberately last.
+
+**AI-verdict labeling (cross-cutting, Patrick 2026-07-13):** anywhere a tab
+shows an AI-authored verdict next to a hard number — award explanations,
+ranking takes, and especially the move-grading below — the AI portion must be
+visually marked as an AI take (a badge/label distinct from the deterministic
+facts beside it), with a short disclaimer. Deterministic facts and AI opinion
+never render as the same kind of thing.
+
+---
+
+## Addendum: Transaction Intelligence track (2026-07-13)
+
+A separate track from the Phase 2 render tabs. Where Phase 2 displays data we
+already have, this *produces new* analysis: grading whether a roster move
+actually helped, and (later) inferring its motive. Kept out of F2-5 so the
+Awards tab ships on time with count-based awards while this develops on its
+own schedule, data-source decision, and quality gate.
+
+### Motivation
+
+The current transaction feed (PR #19 `mTransactions2` adapter) gives us
+executed adds/drops/trades with `player_id`, `date`, `bid_amount`, and team
+attribution — enough for *counts*, not enough to judge a move. Judging a move
+needs player performance: the added player's baseline (season/recent average)
+vs. their production since the pickup, and — the fun one — the *dropped*
+player's production after the drop ("dropped X, then X went off — bad move").
+
+### Data source decision — prefer an external daily-stats source over ESPN
+
+ESPN *can* provide daily player production (NBA fantasy scoring periods are
+daily; `Player.stats` carries per-scoring-period splits with dates, and
+`get_player_card` fetches them). **But** daily, per-player pulls are exactly
+the request fan-out the E-series just eliminated — routing this through ESPN
+would re-introduce it. **Decision (Patrick, 2026-07-13): source daily player
+stats from an external NBA stats API** (e.g. a stats.nba.com wrapper or
+similar) so move-grading costs zero ESPN calls.
+
+- **The real work is the player-ID join**, not finding the source: an external
+  source won't share ESPN's `player_id`, so we match on name — and we already
+  have that machinery (`normalize_name` / `fuzzy_map_names` in `data_feed.py`,
+  the same fuzzy matcher that maps BBM projection names to ESPN players).
+- A source scan (licensing, cost, rate limits, ID-mapping quality) is the
+  first concrete task before any build.
+
+### Deterministic facts vs. AI verdict
+
+Same boundary as the rest of the newsroom. Code computes and surfaces the
+*facts* as evidence — added player's since-pickup production vs. season
+average, dropped player's post-drop production, category deltas. The LLM
+writes the "great pickup / bad drop" *verdict*, grounded in those numbers.
+Deterministic code never hard-declares "bad move." Per the labeling decision
+above, the verdict renders with a visible AI-take badge + disclaimer.
+
+### Parked future item — inferred transaction motive
+
+A richer, subjective layer: infer *why* a move was made by intersecting the
+added player's category profile with the team's category deficits at
+transaction time (e.g. "dead-last in blocks that week, picked up a
+shot-blocker → motive: chasing blocks"). Feasible — the all-play / per-category
+machinery already tracks weekly category standing, and we know the
+transaction's week — but a large build layered on top of the move-grading
+engine, and inherently speculative (doubly bound by the AI-take labeling).
+**Captured, not scoped into Phase 2.** Candidate for a "subjective motive"
+surface in the Transactions tab once the grading engine exists.
