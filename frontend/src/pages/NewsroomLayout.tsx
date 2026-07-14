@@ -5,6 +5,7 @@ import { ShieldCheck } from 'lucide-react'
 import { getPublishedArchive, getPublishedRecap } from '../api'
 import { recapLeagueSlug } from '../lib/supabase'
 import { WeeklyRecapTab } from '../components/WeeklyRecapTab'
+import { MatchupsTab } from '../components/MatchupsTab'
 
 const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 
@@ -17,7 +18,7 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: 'weekly-recap', label: 'Weekly Recap', Icon: Newspaper, enabled: true },
-  { id: 'matchups', label: 'Matchups', Icon: Swords, enabled: false },
+  { id: 'matchups', label: 'Matchups', Icon: Swords, enabled: true },
   { id: 'power-rankings', label: 'Power Rankings', Icon: TrendingUp, enabled: false },
   { id: 'transactions', label: 'Transactions', Icon: ArrowRightLeft, enabled: false },
   { id: 'awards', label: 'Awards & Stats', Icon: Trophy, enabled: false },
@@ -177,7 +178,10 @@ export function NewsroomLayout() {
       {activeTab === 'weekly-recap' && (
         <WeeklyRecapTab slug={effectiveSlug} season={season} week={week} adminMode={adminMode} />
       )}
-      {activeTab !== 'weekly-recap' && (
+      {activeTab === 'matchups' && (
+        <MatchupsTab slug={effectiveSlug} season={season} week={week} />
+      )}
+      {activeTab !== 'weekly-recap' && activeTab !== 'matchups' && (
         <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-900/40 p-8">
           <p className="text-center text-slate-500">
             <span className="block text-lg font-semibold">Coming soon</span>
