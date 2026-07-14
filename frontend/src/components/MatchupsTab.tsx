@@ -10,8 +10,7 @@ function winnerLabel(row: Record<string, unknown>): string {
   const away = String(row.away_team ?? '')
   const homeWins = Number(row.home_category_wins ?? 0)
   const awayWins = Number(row.away_category_wins ?? 0)
-  const result = String(row.winner ?? '')
-  return `${home} ${homeWins}–${awayWins} ${away}${result && result !== 'Tie' && result !== 'UNDECIDED' ? ` (${result})` : ''}`
+  return `${home} ${homeWins}–${awayWins} ${away}`
 }
 
 function CategoryBreakdown({ categories }: { categories: Record<string, unknown>[] }) {
@@ -103,7 +102,16 @@ export function MatchupsTab({
   })
 
   if (isLoading) return <p className="text-slate-400">Loading matchups…</p>
-  if (error) return <p className="text-red-400">Could not load matchups.</p>
+
+  // A 404 is expected for unpublished weeks — treat as neutral, not error.
+  if (error) {
+    const status = (error as { response?: { status: number } })?.response?.status
+    if (status === 404) {
+      return <p className="text-slate-500">No matchup data published for this week.</p>
+    }
+    return <p className="text-red-400">Could not load matchups.</p>
+  }
+
   const edition = data?.edition ?? null
   const snapshot = edition?.snapshot
   const content = edition?.structured_content_json
@@ -124,6 +132,10 @@ export function MatchupsTab({
           {snapshot.playoff_context.round_label}
         </p>
       )}
+      <p className="text-xs text-slate-600">
+        Matchup results are deterministic (9 categories, no ESPN tiebreaker).
+        AI takeaways may reflect model opinion.
+      </p>
       <div className="grid gap-4 md:grid-cols-2">
         {matchups.map((row) => (
           <MatchupCard
@@ -154,9 +166,10 @@ function MatchupCard({
     (item) => item.matchup_id === row.matchup_id,
   )
 
-  const takeawayText = playoffItem
-    ? `${playoffItem.result_summary ?? ''} ${playoffItem.text ?? ''}`
-    : takeawayItem?.text ?? null
+  const rawTakeaway = playoffItem
+    ? `${playoffItem.result_summary ?? ''} ${playoffItem.text ?? ''}`.trim()
+    : (takeawayItem?.text ?? '')
+  const takeawayText = rawTakeaway || null
 
   const tiebreakResolved = row.tiebreak_resolved === true
 

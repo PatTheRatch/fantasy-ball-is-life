@@ -3,12 +3,17 @@
  *
  * Marks a line as model-written so readers distinguish data vs. opinion.
  * Used by MatchupsTab (F2-2), Power Rankings (F2-3), Awards (F2-5).
+ *
+ * The visible badge is compact; each tab should also include a one-line
+ * disclaimer (e.g. "AI takeaways may reflect model opinion") for
+ * accessibility on touch/mobile where the title tooltip is invisible.
  */
 export function AiTakeBadge() {
   return (
     <span
       className="ml-1 inline-flex h-4 items-center rounded border border-amber-700/50 bg-amber-950/30 px-1 text-[10px] font-bold uppercase leading-none text-amber-400"
-      title="AI-generated takeaway — may reflect model opinion, not fact"
+      title="AI-generated — may reflect model opinion, not fact"
+      aria-label="AI-generated content"
     >
       AI
     </span>
