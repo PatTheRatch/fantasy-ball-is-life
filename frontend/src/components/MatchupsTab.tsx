@@ -133,8 +133,7 @@ export function MatchupsTab({
         </p>
       )}
       <p className="text-xs text-slate-600">
-        Matchup results are deterministic (9 categories, no ESPN tiebreaker).
-        AI takeaways may reflect model opinion.
+        ESPN resolves category ties. AI takeaways may reflect model opinion.
       </p>
       <div className="grid gap-4 md:grid-cols-2">
         {matchups.map((row) => (
