@@ -280,7 +280,7 @@ def assemble_weekly_snapshot(
         row["team_id"] = _slug(row.get("team") or row.get("Team"))
 
     playoff_started = time.perf_counter()
-    playoff_context = _build_playoff_context(week, matchups, warnings)
+    playoff_context = _build_playoff_context(week, matchups, standings, warnings)
     logging.info(
         "recap assembly: playoff_context took %.2fs", time.perf_counter() - playoff_started
     )
@@ -321,8 +321,34 @@ def assemble_weekly_snapshot(
     return snapshot
 
 
+def _championship_split(
+    standings: list[dict[str, Any]], playoff_team_count: Optional[int]
+) -> tuple[list[str], list[str]]:
+    """(championship_teams, consolation_teams) by ESPN playoff seed.
+
+    ``standing`` in the snapshot is ESPN's ``playoffSeed``: seeds
+    ``1..playoff_team_count`` made the real playoffs; the rest are the
+    consolation bracket. Both lists are ordered by seed."""
+    if not playoff_team_count:
+        return [], []
+    seeded = []
+    for row in standings:
+        seed = row.get("standing")
+        name = row.get("team_name") or row.get("Team")
+        if seed is None or not name:
+            continue
+        seeded.append((int(seed), str(name)))
+    seeded.sort()
+    championship = [name for seed, name in seeded if seed <= playoff_team_count]
+    consolation = [name for seed, name in seeded if seed > playoff_team_count]
+    return championship, consolation
+
+
 def _build_playoff_context(
-    week: int, matchups: list[dict[str, Any]], warnings: list[str]
+    week: int,
+    matchups: list[dict[str, Any]],
+    standings: list[dict[str, Any]],
+    warnings: list[str],
 ) -> Optional[PlayoffContext]:
     """None for a regular-season week or when settings/round derivation fail --
     playoff context is additive and must never block generation."""
@@ -341,6 +367,20 @@ def _build_playoff_context(
     if round_info is None:
         return None
 
+    championship_teams, consolation_teams = _championship_split(
+        standings, settings.get("playoff_team_count")
+    )
+    # Tag each playoff matchup as championship (both teams made the real
+    # playoffs) or consolation, so the recap can frame title games apart from
+    # placement/toilet-bowl games.
+    champ_set = set(championship_teams)
+    for matchup in matchups:
+        home = matchup.get("home_team")
+        away = matchup.get("away_team")
+        matchup["bracket"] = (
+            "championship" if home in champ_set and away in champ_set else "consolation"
+        )
+
     advancing, eliminated = playoffs.playoff_advancement(matchups)
     next_matchups: list[dict[str, Any]] = []
     if not round_info["is_championship"]:
@@ -358,5 +398,7 @@ def _build_playoff_context(
         is_championship=round_info["is_championship"],
         advancing_teams=advancing,
         eliminated_teams=eliminated,
+        championship_teams=championship_teams,
+        consolation_teams=consolation_teams,
         next_round_matchups=next_matchups,
     )

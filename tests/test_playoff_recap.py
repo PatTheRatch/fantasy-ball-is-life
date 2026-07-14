@@ -202,15 +202,35 @@ def test_assemble_builds_playoff_context_for_a_playoff_week(monkeypatch):
             "away_team": "Brighton",
             "winner": "Fantastic5",
         },
+        {
+            # both teams missed the 6-team playoffs (seeds 7 & 8) -> consolation
+            "matchup_id": "week-21:cellar-vs-basement",
+            "home_team": "Cellar",
+            "away_team": "Basement",
+            "winner": "Cellar",
+        },
+    ]
+    # ESPN playoffSeed lives in the standings `standing` field.
+    standings = [
+        {"team_name": "TTW", "standing": 1},
+        {"team_name": "Fantastic5", "standing": 2},
+        {"team_name": "Optimize", "standing": 3},
+        {"team_name": "Brighton", "standing": 4},
+        {"team_name": "Cellar", "standing": 7},
+        {"team_name": "Basement", "standing": 8},
     ]
 
-    context = assemble._build_playoff_context(21, matchups, [])
+    context = assemble._build_playoff_context(21, matchups, standings, [])
 
     assert context is not None
     assert context.round_label == "Semifinals"
-    assert set(context.advancing_teams) == {"TTW", "Fantastic5"}
-    assert set(context.eliminated_teams) == {"Optimize", "Brighton"}
-    assert len(context.next_round_matchups) == 1
+    # Seeds 1-6 made the real playoffs; 7-8 are consolation.
+    assert context.championship_teams == ["TTW", "Fantastic5", "Optimize", "Brighton"]
+    assert context.consolation_teams == ["Cellar", "Basement"]
+    # Each matchup is tagged with its bracket.
+    by_id = {m["matchup_id"]: m["bracket"] for m in matchups}
+    assert by_id["week-21:ttw-vs-optimize"] == "championship"
+    assert by_id["week-21:cellar-vs-basement"] == "consolation"
 
 
 def test_assemble_playoff_context_none_for_regular_season_week(monkeypatch):
@@ -223,7 +243,7 @@ def test_assemble_playoff_context_none_for_regular_season_week(monkeypatch):
             "playoff_matchup_period_length": 1,
         },
     )
-    assert assemble._build_playoff_context(5, [], []) is None
+    assert assemble._build_playoff_context(5, [], [], []) is None
 
 
 def test_assemble_playoff_context_none_and_warns_when_settings_fail(monkeypatch):
@@ -233,7 +253,7 @@ def test_assemble_playoff_context_none_and_warns_when_settings_fail(monkeypatch)
     monkeypatch.setattr(assemble.league_api, "league_settings", _raise)
     warnings: list[str] = []
 
-    assert assemble._build_playoff_context(21, [], warnings) is None
+    assert assemble._build_playoff_context(21, [], [], warnings) is None
     assert any("League settings unavailable" in w for w in warnings)
 
 

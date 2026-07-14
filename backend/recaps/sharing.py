@@ -57,10 +57,13 @@ def build_share_text(
         takeaway = takeaway_by_id.get(matchup["matchup_id"])
         if takeaway is None:
             continue
+        header = _matchup_header(matchup)
+        if matchup.get("bracket") == "consolation":
+            header += "  (consolation bracket)"
         lines += [
             _DIVIDER,
             "",
-            _matchup_header(matchup),
+            header,
             f"Woj: {takeaway.woj}",
             f"Barkley: {takeaway.barkley}",
             f"Stephen A: {takeaway.stephen_a}",

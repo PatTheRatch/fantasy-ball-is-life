@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getSnapshot, getPublishedRecap, type RecapGeneratedContent } from '../api'
 import { formatStatValue, STAT_ORDER } from '../lib/inSeasonUtils'
 import { AiTakeBadge } from './AiTakeBadge'
+import { BracketBadge } from './BracketBadge'
 import { MatchupVoices } from './MatchupVoices'
 
 function winnerLabel(row: Record<string, unknown>): string {
@@ -176,7 +177,10 @@ function MatchupCard({
         className="flex w-full items-start justify-between gap-3 p-4 text-left"
       >
         <div className="min-w-0 flex-1">
-          <p className="font-bold text-white">{winnerLabel(row)}</p>
+          <p className="font-bold text-white">
+            {winnerLabel(row)}
+            <BracketBadge bracket={row.bracket} />
+          </p>
           {tiebreakResolved && (
             <p className="mt-0.5 text-xs text-amber-400">
               Tie resolved by ESPN tiebreaker

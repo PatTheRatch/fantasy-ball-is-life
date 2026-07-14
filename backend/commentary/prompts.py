@@ -425,11 +425,22 @@ def build_structured_recap_prompts(
         "after it. Use every matchup_id and award_id exactly as given."
     )
     if playoff_context:
+        champs = playoff_context.get("championship_teams") or []
+        conso = playoff_context.get("consolation_teams") or []
         system_prompt += (
-            "\n\nThis is a PLAYOFF week (see playoff_context). Lean into the "
-            "stakes -- survival, elimination, what each result sets up next -- in "
-            "the intro and in the insight beats. Do not invent bracket outcomes "
-            "beyond what the snapshot states."
+            "\n\nThis is a PLAYOFF week (see playoff_context). CRUCIAL: not every "
+            "matchup matters equally. Each matchup carries a `bracket` field:\n"
+            "- bracket=championship -> these teams actually made the playoffs and "
+            "are playing for the title. This is where the real stakes are; give "
+            "these matchups the weight.\n"
+            "- bracket=consolation -> a placement / toilet-bowl game between teams "
+            "that missed the real playoffs. Cover it, but frame it honestly as "
+            "playing for pride/seeding, not the championship -- a little "
+            "self-aware humor about the consolation bracket lands well.\n"
+            f"Championship bracket (real playoffs): {champs}. "
+            f"Consolation bracket: {conso}.\n"
+            "Center the intro and synopsis on the championship race. Do not invent "
+            "bracket outcomes beyond what the snapshot states."
         )
     recap_voice = (snapshot.get("league") or {}).get("recap_voice")
     if recap_voice:

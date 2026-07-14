@@ -61,6 +61,10 @@ class PlayoffContext(BaseModel):
     is_championship: bool
     advancing_teams: list[str] = Field(default_factory=list)
     eliminated_teams: list[str] = Field(default_factory=list)
+    # Who is actually playing for the title (playoff seed <= playoff_team_count)
+    # vs. the consolation/placement bracket. Ordered by seed.
+    championship_teams: list[str] = Field(default_factory=list)
+    consolation_teams: list[str] = Field(default_factory=list)
     # Only populated once every advancing team appears in ESPN's own schedule
     # for the next round -- never guessed from seeding rules.
     next_round_matchups: list[dict[str, Any]] = Field(default_factory=list)

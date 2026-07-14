@@ -17,6 +17,7 @@ import {
 } from '../api'
 import { MATCHUP_WEEKS_2025_26 } from '../lib/matchupWeeks'
 import { supabase } from '../lib/supabase'
+import { BracketBadge } from './BracketBadge'
 import { MatchupVoices } from './MatchupVoices'
 
 function CopyButton({
@@ -424,7 +425,10 @@ export function WeeklyRecapTab({
                 )
                 return (
                   <div key={(row as JsonRecord).matchup_id as string} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                    <p className="font-bold text-white">{matchupLabel(row)}</p>
+                    <p className="font-bold text-white">
+                      {matchupLabel(row)}
+                      <BracketBadge bracket={(row as JsonRecord).bracket} />
+                    </p>
                     {takeaway ? <MatchupVoices takeaway={takeaway} /> : null}
                   </div>
                 )
