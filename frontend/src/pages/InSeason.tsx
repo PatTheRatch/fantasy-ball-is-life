@@ -404,7 +404,7 @@ export function InSeason() {
 
   const [week, setWeek] = useState(1)
   const [projectionSource, setProjectionSource] =
-    useState<ProjectionSource>('bbm')
+    useState<ProjectionSource>('15')
   const [bbmFile, setBbmFile] = useState<File | null>(null)
 
   const [loadedWeeks, setLoadedWeeks] = useState<

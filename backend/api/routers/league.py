@@ -310,7 +310,7 @@ def confidence(
 @router.get("/matchup-confidence")
 def matchup_confidence(
     current_matchup_period: int = Query(..., description="ESPN current matchup period"),
-    projections: str = Query("BBM", description="Projection source (default: BBM)"),
+    projections: str = Query("15", description="Projection source (default: ESPN Last 15)"),
     games_played: int = Query(0, description="How many matchup games have been played so far"),
     total_games: int = Query(1, description="Total expected matchup games"),
 ) -> List[dict[str, Any]]:
@@ -613,7 +613,7 @@ def rosters_current(
     """Load weekly BBM file from disk via ``bbm_path`` (or config default). For uploads use ``POST /rosters/current``."""
     _validate_week_range(week_start_date, week_end_date)
     h = _handles()
-    effective_projections = projections or "BBM"
+    effective_projections = projections or "15"
     return _df_records(
         feed.get_current_rosters(
             h,
@@ -687,7 +687,7 @@ async def rosters_current_upload(
 def projected_scoreboard(
     week_end_date: Optional[str] = None,
     current_matchup_period: Optional[int] = None,
-    projections: str = "BBM",
+    projections: str = "15",
 ) -> List[dict[str, Any]]:
     h = _handles()
     return _df_records(
@@ -723,7 +723,7 @@ async def projected_scoreboard_upload(request: Request) -> List[dict[str, Any]]:
     payload = _json.loads(str(data_raw))
     week_end_date = payload.get("week_end_date")
     current_matchup_period = payload.get("current_matchup_period")
-    projections = payload.get("projections", "BBM")
+    projections = payload.get("projections", "15")
 
     bbm_df = None
     up = form.get("bbm_file")
