@@ -11,14 +11,11 @@ import {
   getRecapReadiness,
   publishRecapEdition,
   rollbackRecapEdition,
-  type JsonRecord,
   type RecapEdition,
   type RecapGeneratedContent,
 } from '../api'
 import { MATCHUP_WEEKS_2025_26 } from '../lib/matchupWeeks'
 import { supabase } from '../lib/supabase'
-import { BracketBadge } from './BracketBadge'
-import { MatchupVoices } from './MatchupVoices'
 
 function CopyButton({
   label,
@@ -129,14 +126,6 @@ function AdminSignIn({
       {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
     </div>
   )
-}
-
-function matchupLabel(row: JsonRecord): string {
-  const home = String(row.home_team ?? '')
-  const away = String(row.away_team ?? '')
-  const homeWins = Number(row.home_category_wins ?? 0)
-  const awayWins = Number(row.away_category_wins ?? 0)
-  return `${home} ${homeWins}–${awayWins} ${away}`
 }
 
 export function WeeklyRecapTab({
@@ -412,30 +401,8 @@ export function WeeklyRecapTab({
       {preview && content && snapshot && (
         <>
           <Narrative content={content} />
-          <section>
-            <h2 className="text-xl font-bold text-white">
-              {snapshot.playoff_context
-                ? `${snapshot.playoff_context.round_label} results`
-                : 'Matchup results'}
-            </h2>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {(snapshot.matchups ?? []).map((row) => {
-                const takeaway = (content.matchup_takeaways ?? []).find(
-                  (item) => item.matchup_id === row.matchup_id,
-                )
-                return (
-                  <div key={(row as JsonRecord).matchup_id as string} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                    <p className="font-bold text-white">
-                      {matchupLabel(row)}
-                      <BracketBadge bracket={(row as JsonRecord).bracket} />
-                    </p>
-                    {takeaway ? <MatchupVoices takeaway={takeaway} /> : null}
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-
+          {/* Matchup-by-matchup takes live on the Matchups tab -- no need to
+              duplicate them here. */}
           <section className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-5">
             <CopyButton label="Copy Recap" value={content?.share_text ?? ''} />
           </section>
