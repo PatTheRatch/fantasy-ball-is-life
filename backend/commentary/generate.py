@@ -314,16 +314,78 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     return value
 
 
+def _structured_corrective(snapshot: WeeklyFactSnapshot, error_msg: str) -> str:
+    """A user-prompt suffix that tells the model exactly what to fix on retry.
+
+    The most common rejection is a cardinality miss (a dropped/duplicated
+    ranking explanation or matchup takeaway), so we spell out the exact id sets
+    it must cover one-for-one — far more actionable than the bare error."""
+    matchup_ids = [item["matchup_id"] for item in snapshot.matchups]
+    team_ids = [item["team_id"] for item in snapshot.power_rankings]
+    award_ids = [item["award_id"] for item in snapshot.award_candidates]
+    return "\n".join(
+        [
+            "",
+            "",
+            "IMPORTANT — your previous response was REJECTED:",
+            f"  {error_msg}",
+            "Return the COMPLETE corrected JSON object (not a diff, not prose).",
+            "Include exactly one entry per id below — none missing, none extra, "
+            "none duplicated:",
+            f"  matchup_takeaways -> one per matchup_id: {matchup_ids}",
+            f"  ranking_explanations -> one per team_id: {team_ids}",
+            f"  award_explanations -> one per award_id: {award_ids}",
+        ]
+    )
+
+
 def generate_structured_recap(
     snapshot: WeeklyFactSnapshot,
+    *,
+    max_attempts: int = 3,
 ) -> RecapGeneratedContent:
-    """Generate and validate evidence-bound narrative for a persisted fact snapshot."""
+    """Generate and validate evidence-bound narrative for a persisted fact snapshot.
+
+    The output must satisfy several exact constraints (one explanation per
+    ranked team, one takeaway per matchup, valid evidence ids, ...). LLMs
+    intermittently miss one, so on a validation failure we re-prompt with a
+    corrective message naming exactly what was wrong and retry, rather than
+    throwing away the whole ~50s generation on the first miss."""
     _require_recap_api_key()
     snapshot_payload = dump_model(snapshot)
-    system_prompt, user_prompt = prompts.build_structured_recap_prompts(
+    system_prompt, base_user_prompt = prompts.build_structured_recap_prompts(
         snapshot_payload
     )
-    raw = _complete_structured(system_prompt, user_prompt, max_tokens=8000)
+    last_error: Exception | None = None
+    corrective = ""
+    for attempt in range(1, max_attempts + 1):
+        raw = _complete_structured(
+            system_prompt, base_user_prompt + corrective, max_tokens=8000
+        )
+        try:
+            return _parse_and_validate_recap(raw, snapshot, snapshot_payload)
+        except ValueError as exc:
+            last_error = exc
+            logging.warning(
+                "structured recap attempt %d/%d rejected: %s",
+                attempt, max_attempts, exc,
+            )
+            corrective = _structured_corrective(snapshot, str(exc))
+    raise ValueError(
+        f"LLM returned an invalid structured recap after {max_attempts} attempts: "
+        f"{last_error}"
+    )
+
+
+def _parse_and_validate_recap(
+    raw: str,
+    snapshot: WeeklyFactSnapshot,
+    snapshot_payload: dict[str, Any],
+) -> RecapGeneratedContent:
+    """Parse one raw LLM response and enforce every recap constraint.
+
+    Raises ``ValueError`` on any problem (bad JSON, schema, unknown evidence,
+    cardinality) so the caller can retry with corrective feedback."""
     try:
         content = validate_generated_content(_parse_json_object(raw))
     except Exception as exc:

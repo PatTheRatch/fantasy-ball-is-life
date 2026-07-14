@@ -35,7 +35,11 @@ RECAP_LEAGUE_SLUG = os.getenv("RECAP_LEAGUE_SLUG", "patriot-games")
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/")
 
 # --- Structured recap generation ---
-RECAP_LLM_PROVIDER = os.getenv("RECAP_LLM_PROVIDER", "deepseek").lower()
+# Default to Anthropic/Claude: the structured recap has exact-cardinality
+# constraints (one explanation per ranked team, one takeaway per matchup, etc.)
+# that a lightweight model (deepseek-v4-flash) misses intermittently, hard-
+# failing the whole ~50s generation. Override with RECAP_LLM_PROVIDER=deepseek.
+RECAP_LLM_PROVIDER = os.getenv("RECAP_LLM_PROVIDER", "anthropic").lower()
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 DEEPSEEK_BASE_URL = os.getenv(

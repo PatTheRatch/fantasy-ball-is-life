@@ -765,6 +765,51 @@ def test_parse_json_object_repairs_unescaped_quote():
     assert "Dream Team" in out["headline"]
 
 
+def test_generate_retries_with_feedback_then_succeeds(monkeypatch):
+    # First LLM response misses the matchup cardinality; after the corrective
+    # re-prompt the second response is valid — the recap should succeed on
+    # attempt 2 instead of hard-failing (502) on attempt 1.
+    snapshot = _snapshot()
+    snapshot.award_candidates = select_awards(snapshot)
+    good = _valid_structured_payload(snapshot)
+    bad = {**good, "matchup_takeaways": []}  # 0 takeaways != the snapshot's matchups
+
+    calls = {"n": 0}
+
+    def fake(system_prompt, user_prompt, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return json.dumps(bad)
+        # The retry must carry the corrective feedback naming the required ids.
+        assert "REJECTED" in user_prompt
+        return json.dumps(good)
+
+    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
+    monkeypatch.setattr(generate, "_complete_structured", fake)
+
+    result = generate.generate_structured_recap(snapshot)
+    assert calls["n"] == 2
+    assert result.matchup_takeaways
+
+
+def test_generate_raises_after_exhausting_retries(monkeypatch):
+    snapshot = _snapshot()
+    snapshot.award_candidates = select_awards(snapshot)
+    bad = {**_valid_structured_payload(snapshot), "matchup_takeaways": []}
+    calls = {"n": 0}
+
+    def fake(*a, **k):
+        calls["n"] += 1
+        return json.dumps(bad)
+
+    monkeypatch.setattr(generate, "_require_recap_api_key", lambda: None)
+    monkeypatch.setattr(generate, "_complete_structured", fake)
+
+    with pytest.raises(ValueError, match="after 3 attempts"):
+        generate.generate_structured_recap(snapshot)
+    assert calls["n"] == 3
+
+
 def test_generate_recovers_from_malformed_llm_json(monkeypatch):
     snapshot = _snapshot()
     snapshot.award_candidates = select_awards(snapshot)
