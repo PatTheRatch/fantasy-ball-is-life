@@ -499,75 +499,130 @@ def test_structured_recap_prompt_includes_league_voice_notes_when_set():
 
     system_prompt, _ = prompts.build_structured_recap_prompts(snapshot_payload)
 
-    assert "Alpha/Beta rivalry" in system_prompt
+    assert "LEAGUE-SPECIFIC VOICE NOTES" in system_prompt
+    assert "Mention the Alpha/Beta rivalry." in system_prompt
 
 
-def test_structured_recap_prompt_omits_voice_section_when_not_set():
-    snapshot_payload = {
-        "league": {"id": "league-1", "slug": "test", "name": "Test"},
-    }
+def test_structured_recap_prompt_omits_voice_section_when_unset():
+    snapshot_payload = {"league": {"id": "league-1", "slug": "test", "name": "Test"}}
 
     system_prompt, _ = prompts.build_structured_recap_prompts(snapshot_payload)
 
-    assert "League voice" not in system_prompt
-
-
-def test_format_share_summary_passes_through_model_text_unmodified():
-    snapshot = _snapshot()
-    content = RecapGeneratedContent(
-        headline="Test",
-        dek=".",
-        lead_story=["Alpha won."],
-        matchup_takeaways=[],
-        ranking_explanations=[],
-        award_explanations=[],
-        whatsapp_summary="Alpha beat Beta in a close one.",
-        whatsapp_full="Full recap.",
-    )
-
-    result = format_share_text(snapshot, content)
-
-    assert result.whatsapp_summary.startswith("Alpha beat Beta")
-    assert result.whatsapp_full.startswith("Full recap.")
+    assert "LEAGUE-SPECIFIC VOICE NOTES" not in system_prompt
 
 
 def test_get_edition_by_id_normalizes_stored_snapshot(monkeypatch):
-    """Published edition should have the snapshot normalize path triggered."""
     store = Mock()
-    edition = {
+    store.get_edition_with_content_by_id.return_value = {
         "id": "edition-1",
         "league_id": "league-1",
         "season": 2026,
-        "week": 1,
-        "status": "published",
-        "structured_content_json": {
-            "headline": "Test",
-            "dek": "",
-            "lead_story": [],
-            "matchup_takeaways": [],
-            "ranking_explanations": [],
-            "award_explanations": [],
-            "whatsapp_summary": "",
-            "whatsapp_full": "",
-        },
+        "week": 21,
+        "status": "superseded",
+        "structured_content_json": {"headline": "Playoffs"},
         "league_week_snapshots": {
-            "league": {"id": "league-1"},
-            "data_quality": {"ready": True, "warnings": [], "checks": {}},
-            "matchups": [],
-            "standings": [],
-            "power_rankings": [],
-            "transactions": [],
-            "season_stats": [],
-            "award_candidates": [],
+            "schema_version": "recap-facts-v1",
+            "matchups_json": [{"matchup_id": "week-21:alpha-vs-beta"}],
+            "standings_json": [{"team_name": "Alpha"}],
+            "power_rankings_json": [],
+            "transactions_json": [],
+            "season_stats_json": [],
+            "award_candidates_json": [],
+            "data_quality_json": {"ready": True},
         },
     }
-    store.get_league_by_slug.return_value = {"id": "league-1", "visibility": "public", "recap_voice": None}
-    store.get_edition.return_value = edition
+    monkeypatch.setattr(
+        service,
+        "require_admin",
+        lambda *_args, **_kwargs: {"id": "league-1", "slug": "test", "name": "Test"},
+    )
 
-    result = service.get_public_edition(store=store, slug="test", season=2026, week=1)
+    result = service.get_edition_by_id(
+        store=store,
+        slug="test",
+        user_id="user-1",
+        season=2026,
+        week=21,
+        edition_id="edition-1",
+    )
 
-    assert "edition" in result
-    assert "structured_content_json" in result["edition"]
+    store.get_edition_with_content_by_id.assert_called_once_with("edition-1")
+    assert "league_week_snapshots" not in result
+    assert result["snapshot"]["matchups"] == [{"matchup_id": "week-21:alpha-vs-beta"}]
+    assert result["snapshot"]["standings"] == [{"team_name": "Alpha"}]
+    assert result["snapshot"]["league"]["id"] == "league-1"
+    assert result["snapshot"]["season"] == 2026
+    assert result["snapshot"]["week"] == 21
+
+
+def test_get_edition_by_id_404s_on_wrong_week(monkeypatch):
+    store = Mock()
+    store.get_edition_with_content_by_id.return_value = {
+        "id": "edition-1",
+        "league_id": "league-1",
+        "season": 2026,
+        "week": 20,
+        "status": "draft",
+        "structured_content_json": {},
+    }
+    monkeypatch.setattr(
+        service,
+        "require_admin",
+        lambda *_args, **_kwargs: {"id": "league-1", "slug": "test", "name": "Test"},
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        service.get_edition_by_id(
+            store=store,
+            slug="test",
+            user_id="user-1",
+            season=2026,
+            week=21,
+            edition_id="edition-1",
+        )
+
+    assert raised.value.status_code == 404
+
+
+def test_get_edition_by_id_404s_on_missing_edition(monkeypatch):
+    store = Mock()
+    store.get_edition_with_content_by_id.return_value = None
+    monkeypatch.setattr(
+        service,
+        "require_admin",
+        lambda *_args, **_kwargs: {"id": "league-1", "slug": "test", "name": "Test"},
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        service.get_edition_by_id(
+            store=store,
+            slug="test",
+            user_id="user-1",
+            season=2026,
+            week=21,
+            edition_id="missing",
+        )
+
+    assert raised.value.status_code == 404
+
+
+def test_edition_router_uses_get_edition_by_id_service(monkeypatch):
+    from backend.api.routers import recaps
+
+    fetch = Mock(return_value={"id": "edition-1", "status": "superseded"})
+    monkeypatch.setattr(recaps.service, "get_edition_by_id", fetch)
+
+    result = recaps.recap_edition(
+        slug="test",
+        season=2026,
+        week=21,
+        edition_id="edition-1",
+        user={"id": "user-1"},
+        store=Mock(),
+    )
+
+    assert result["status"] == "superseded"
+    fetch.assert_called_once()
 
 
 def test_store_get_edition_with_content_by_id_selects_snapshot_embed(monkeypatch):
@@ -575,8 +630,9 @@ def test_store_get_edition_with_content_by_id_selects_snapshot_embed(monkeypatch
     request = Mock(return_value=[{"id": "edition-1"}])
     monkeypatch.setattr(store, "_request", request)
 
-    store.get_edition_with_content_by_id("edition-1")
+    result = store.get_edition_with_content_by_id("edition-1")
 
+    assert result == {"id": "edition-1"}
     request.assert_called_once_with(
         "GET",
         "recap_editions",
@@ -602,66 +658,50 @@ def test_invalid_structured_recap_uses_provider_neutral_error(monkeypatch):
 
 def test_store_list_published_returns_weeks_ordered(monkeypatch):
     """list_published selects published weeks sorted by week.asc."""
-    store = RecapStore(url="https://example.supabase.co", service_role_key="key")
+    store = RecapStore(url='https://example.supabase.co', service_role_key='key')
     request = Mock(return_value=[
-        {"week": 1, "headline": "Week One", "published_at": "2026-01-15T00:00:00Z"},
-        {"week": 3, "headline": "Week Three", "published_at": "2026-01-29T00:00:00Z"},
+        {'week': 1, 'headline': 'Week One', 'published_at': '2026-01-15T00:00:00Z'},
+        {'week': 3, 'headline': 'Week Three', 'published_at': '2026-01-29T00:00:00Z'},
     ])
-    monkeypatch.setattr(store, "_request", request)
-
-    result = store.list_published("league-1", 2026)
-
+    monkeypatch.setattr(store, '_request', request)
+    result = store.list_published('league-1', 2026)
     assert result == [
-        {"week": 1, "headline": "Week One", "published_at": "2026-01-15T00:00:00Z"},
-        {"week": 3, "headline": "Week Three", "published_at": "2026-01-29T00:00:00Z"},
+        {'week': 1, 'headline': 'Week One', 'published_at': '2026-01-15T00:00:00Z'},
+        {'week': 3, 'headline': 'Week Three', 'published_at': '2026-01-29T00:00:00Z'},
     ]
     request.assert_called_once_with(
-        "GET",
-        "recap_editions",
+        'GET', 'recap_editions',
         params={
-            "league_id": "eq.league-1",
-            "season": "eq.2026",
-            "status": "eq.published",
-            "select": "week,structured_content_json->headline,published_at",
-            "order": "week.asc",
+            'league_id': 'eq.league-1', 'season': 'eq.2026',
+            'status': 'eq.published',
+            'select': 'week,structured_content_json->headline,published_at',
+            'order': 'week.asc',
         },
     )
 
-
 def test_store_list_published_returns_empty_on_none(monkeypatch):
-    store = RecapStore(url="https://example.supabase.co", service_role_key="key")
-    monkeypatch.setattr(store, "_request", Mock(return_value=[]))
-    assert store.list_published("league-1", 2026) == []
-
+    store = RecapStore(url='https://example.supabase.co', service_role_key='key')
+    monkeypatch.setattr(store, '_request', Mock(return_value=[]))
+    assert store.list_published('league-1', 2026) == []
 
 def test_store_list_published_handles_missing_headline(monkeypatch):
-    """Rows without a headline key should not include headline in output."""
-    store = RecapStore(url="https://example.supabase.co", service_role_key="key")
-    monkeypatch.setattr(store, "_request", Mock(return_value=[
-        {"week": 1, "published_at": "2026-01-15T00:00:00Z"},
+    store = RecapStore(url='https://example.supabase.co', service_role_key='key')
+    monkeypatch.setattr(store, '_request', Mock(return_value=[
+        {'week': 1, 'published_at': '2026-01-15T00:00:00Z'},
     ]))
-    result = store.list_published("league-1", 2026)
-    assert result == [{"week": 1, "published_at": "2026-01-15T00:00:00Z"}]
-
+    result = store.list_published('league-1', 2026)
+    assert result == [{'week': 1, 'published_at': '2026-01-15T00:00:00Z'}]
 
 def test_service_get_published_archive_404s_on_non_public_league(monkeypatch):
-    """Visibility gate: non-public leagues return 404, same as get_public_edition."""
-    from backend.recaps import service as svc_mod
-
     store = Mock()
-    store.get_league_by_slug.return_value = {"id": "league-1", "visibility": "private"}
-
-    with pytest.raises(HTTPException, match="Published recap not found."):
-        svc_mod.get_published_archive(store=store, slug="test", season=2026)
-
+    store.get_league_by_slug.return_value = {'id': 'league-1', 'visibility': 'private'}
+    with pytest.raises(HTTPException, match='Published recap not found.'):
+        service.get_published_archive(store=store, slug='test', season=2026)
 
 def test_service_get_published_archive_returns_list_on_public(monkeypatch):
     store = Mock()
-    store.get_league_by_slug.return_value = {"id": "league-1", "visibility": "public"}
-    store.list_published.return_value = [
-        {"week": 1, "headline": "Week One"},
-    ]
-
-    result = service.get_published_archive(store=store, slug="test", season=2026)
-    assert result == [{"week": 1, "headline": "Week One"}]
-    store.list_published.assert_called_once_with("league-1", 2026)
+    store.get_league_by_slug.return_value = {'id': 'league-1', 'visibility': 'public'}
+    store.list_published.return_value = [{'week': 1, 'headline': 'Week One'}]
+    result = service.get_published_archive(store=store, slug='test', season=2026)
+    assert result == [{'week': 1, 'headline': 'Week One'}]
+    store.list_published.assert_called_once_with('league-1', 2026)

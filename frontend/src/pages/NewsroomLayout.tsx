@@ -127,7 +127,6 @@ export function NewsroomLayout() {
               {Array.from({ length: 22 }, (_, i) => i + 1).map((w) => (
                 <option key={w} value={w}>
                   Week {w}
-                  {!adminMode && archive.some((e) => e.week === w) ? '' : ''}
                 </option>
               ))}
             </select>
