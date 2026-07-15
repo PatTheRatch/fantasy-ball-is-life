@@ -601,3 +601,124 @@ transaction's week — but a large build layered on top of the move-grading
 engine, and inherently speculative (doubly bound by the AI-take labeling).
 **Captured, not scoped into Phase 2.** Candidate for a "subjective motive"
 surface in the Transactions tab once the grading engine exists.
+
+---
+
+## Addendum: F2-5 Awards tab — full scope (2026-07-15)
+
+Expands the one-line F2-5 row into an implementable spec. Grounded in what
+already exists: the F2-1..F2-4 tabs, the deterministic award computation in
+`backend/recaps/awards.py`, and the AI-verdict-labeling decision above.
+
+### 1. User story
+
+> As a league member, I want a tab that shows the week's awards — Team of the
+> Week, Blowout, Photo Finish, biggest upset, luck, risers/fallers, transaction
+> activity — each with the hard fact that earned it and a short AI-written line
+> of flavor, so I get the fun of superlatives without confusing opinion for fact.
+
+### 2. What already exists (do not rebuild)
+
+- `select_awards(snapshot)` (`backend/recaps/awards.py`) deterministically
+  produces award candidates, each: `{award_id, title, winner, evidence_ids,
+  facts{}}`. Currently 9 awards: Team of the Week (`facts.category_wins`),
+  Blowout of the Week (`margin`, `opponent`), Photo Finish (`margin`,
+  `opponent`), Biggest Upset (`rank_gap`), Luckiest / Unluckiest Team
+  (`luck_ratio`), Stock Rising / Falling Fast (`places`), Transaction Addict
+  (`transaction_count`). The `facts{}` dict is the deterministic supporting
+  line the card renders.
+- The LLM produces `award_explanations: [{award_id, text}]` in the recap
+  edition's `structured_content_json` — the AI flavor line, joined to a card
+  by `award_id`.
+- `AiTakeBadge` (`frontend/src/components/AiTakeBadge.tsx`) is the labeling
+  primitive (its docstring already names F2-5). Reuse it, plus the one-line
+  disclaimer pattern the other tabs use.
+- The tab is scaffolded but disabled: `NewsroomLayout.tsx` TABS has
+  `{ id: 'awards', label: 'Awards & Stats', ..., enabled: false }` and no
+  render branch. No `AwardsTab` component exists yet.
+
+So F2-5, like F2-2..F2-4, is **overwhelmingly a frontend rendering effort** —
+one card grid joining deterministic award facts (snapshot) to AI explanations
+(edition), by `award_id` — *except* for the one backend decision below.
+
+### 3. Data model impact — the one backend change
+
+**Awards are deterministic but currently only computed in the generation
+path.** `assemble_weekly_snapshot()` sets `award_candidates=[]`
+(`assemble.py:303`); only `generate_draft` / `build_readiness` call
+`select_awards`. So a freshly-assembled snapshot for an un-generated week has
+**no awards**, and the Awards tab would be empty until a recap is generated —
+inconsistent with Matchups/Power Rankings, which render deterministic data
+with no LLM gate (the "tabs always load" principle from the 2026-07-14
+transactions/tabs work).
+
+**Decision (recommended, flag if you disagree): compute `select_awards` inside
+the snapshot/assemble path** so `award_candidates` is always populated, and the
+tab renders award winners + facts pre-generation, with only the AI explanation
+line gated on a published recap — exactly the Matchups pattern (deterministic
+result always; AI takeaway when available). `select_awards` is cheap pure
+Python over already-loaded snapshot fields. Implementation options: call it at
+the end of `assemble_weekly_snapshot` (sets `snapshot.award_candidates`), or in
+`get_public_snapshot`'s assemble branch. Prefer the former so every consumer
+benefits; then the explicit `select_awards` calls in `generate_draft` /
+`build_readiness` become redundant (remove or leave idempotent). Degraded weeks
+already produce fewer awards, so no extra gating needed.
+
+### 4. Acceptance criteria
+
+1. The tab is enabled and rendered (`enabled: true` + an `AwardsTab` render
+   branch in `NewsroomLayout`).
+2. It renders **every** `award_candidates` entry for the week as a card:
+   trophy/title, winner (team name; use team logo/accent if the render layer
+   already has them, else name), and a deterministic supporting line built from
+   `facts{}` (e.g. "Won 6 categories", "by a 5-category margin over {opponent}",
+   "climbed 3 spots", "12 moves this week").
+3. If a matching `award_explanations[award_id].text` exists, render it as the
+   AI flavor line **with `AiTakeBadge` + the standard disclaimer** — visually
+   distinct from the deterministic fact (criterion from the AI-verdict-labeling
+   decision: facts and AI opinion never render as the same kind of thing).
+4. An award with no AI explanation still renders (deterministic-only) — no
+   empty card, no gate.
+5. Data source + always-load: `award_candidates` from the snapshot
+   (`getSnapshot`), `award_explanations` from the published edition
+   (`getPublishedRecap`), joined by `award_id` — the exact two-source pattern
+   `MatchupsTab` uses. Per §3, awards render even before a recap is published.
+6. **Extensible by `award_id`, not hardcoded to the current 9.** Render
+   whatever `award_candidates` contains so the Transaction Intelligence awards
+   (Move of the Week, Waiver Wire Wizard) and any rotating awards drop in later
+   with zero tab changes. A small per-`award_id` presentation map (icon +
+   fact-line formatter) is fine; an unknown `award_id` must still render with a
+   sensible default (title + winner + raw fact), never crash or disappear.
+7. Empty state: an all-tie or degraded week can yield few or zero awards — show
+   a graceful "No awards this week" rather than a blank tab.
+8. Mobile-readable (cards stack; no wide table).
+
+### 5. Test plan
+
+- `AwardsTab` renders all award_candidates; a card with an explanation shows the
+  AI badge, one without shows deterministic-only (no badge, no empty slot).
+- Unknown `award_id` renders via the default path (title + winner + raw fact),
+  proving criterion 6 without a code change.
+- Empty award_candidates → "No awards this week" state.
+- Backend (if §3 adopted): `assemble_weekly_snapshot` populates
+  `award_candidates` (assert non-empty for a normal fixture week; unchanged
+  award output vs. the current `generate_draft` path — a small parity check so
+  moving the call doesn't alter results). The 324 existing tests stay green.
+- Frontend `npm run lint` + `npm run build` pass.
+
+### 6. Rollback / failure
+
+- Pure-additive tab; if it misbehaves, flip `enabled: false` — no other surface
+  is affected.
+- The §3 backend change is low-risk (a deterministic call moved earlier); its
+  only regression surface is award output, covered by the parity test.
+
+### Open question for Patrick (do not guess — CONTRIBUTING.md)
+
+**Tab name/scope.** The scaffold labels this tab **"Awards & Stats"**, but F2-6
+is a separate **"Standings & Season Stats"** tab that owns the statistical
+views. Is F2-5 **just Awards** (recommend renaming the tab to "Awards"), or
+should it also carry a light "category leaders" strip (e.g. top scorer /
+rebounder of the week) distinct from F2-6's full standings? This changes F2-5's
+scope; needs a product call before build. Recommended default: **Awards only**,
+rename the tab, leave all stat surfaces to F2-6 — but Patrick decides.
