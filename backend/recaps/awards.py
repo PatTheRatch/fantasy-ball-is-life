@@ -181,17 +181,20 @@ def select_awards(snapshot: WeeklyFactSnapshot) -> list[dict[str, Any]]:
             )
         )
 
+    # Only ADDs count toward a team's weekly transaction total -- that's the
+    # limited resource (waiver/FA adds per week). The paired DROP that frees
+    # the roster spot, and TRADE moves, don't consume that budget.
     transaction_counts = Counter(
         str(row.get("team_name"))
         for row in snapshot.transactions
-        if row.get("team_name")
+        if row.get("team_name") and row.get("action_type") == "ADD"
     )
     if transaction_counts:
         team, count = transaction_counts.most_common(1)[0]
         evidence = [
             row["evidence_id"]
             for row in snapshot.transactions
-            if str(row.get("team_name")) == team
+            if str(row.get("team_name")) == team and row.get("action_type") == "ADD"
         ]
         awards.append(
             _candidate(
