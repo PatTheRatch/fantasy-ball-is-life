@@ -20,6 +20,7 @@ from backend.commentary.schemas import (
     PlayoffContext,
     WeeklyFactSnapshot,
 )
+from backend.league.scoreboard import WeeklyScoreboard
 from backend.recaps import playoffs
 
 STAT_ORDER = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
@@ -215,14 +216,15 @@ def assemble_weekly_snapshot(
     warnings: list[str] = []
     weeks_csv = ",".join(str(value) for value in range(1, week + 1))
 
-    standings, standings_ok = _capture(
-        "Standings", league_api.league_standings, warnings
-    )
+    # FIX-B: compute week-scoped standings from matchup results across
+    # weeks 1..week (not ESPN's live standings).  Win% stored 0–100.
+    standings, standings_ok = _build_scoped_standings(league_api, week, warnings)
     rankings, rankings_ok = _capture(
         "Power rankings",
         lambda: league_api.power_rankings(weeks=weeks_csv, recent_weeks=3),
         warnings,
     )
+    single_week_all_play = _build_single_week_ap(league_api, week)
     scoreboard, scoreboard_ok = _capture(
         "Matchups",
         lambda: league_api.scoreboard_current(scoring_period=week),
@@ -251,9 +253,9 @@ def assemble_weekly_snapshot(
         warnings.append("No completed matchup data was found for this week.")
     elif not complete_categories:
         warnings.append("One or more matchups do not contain all nine categories.")
-    if not standings:
+    if not standings_ok or not standings:
         warnings.append("Standings data is empty.")
-    if not rankings:
+    if not rankings_ok or not rankings:
         warnings.append("Power-ranking data is empty.")
     if not season_stats:
         warnings.append("Season statistics are empty.")
@@ -318,6 +320,10 @@ def assemble_weekly_snapshot(
     # explanation line stays gated on a published recap.
     from backend.recaps.awards import select_awards
 
+    # FIX-A: single-week all-play for Team of the Week.
+    # WeeklyFactSnapshot is a Pydantic model — use object.__setattr__
+    # for fields not declared in the model.
+    object.__setattr__(snapshot, "single_week_all_play", single_week_all_play)
     snapshot.award_candidates = select_awards(snapshot)
 
     # Cache the result so the follow-up generate request reuses this assembly.
@@ -464,3 +470,65 @@ def _build_playoff_context(
         eliminated_from_title=eliminated_from_title,
         next_round_matchups=next_matchups,
     )
+
+
+# ── FIX-B: week-scoped standings from matchups ────────────────────────
+
+
+def _build_scoped_standings(league_api, week, warnings):
+    """Build week-scoped standings: aggregate wins/losses from matchups
+    across weeks 1..week.  win_pct is 0–100 (matches allplay_win_pct)."""
+    from collections import defaultdict
+    records: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "ties": 0})
+
+    for w in range(1, week + 1):
+        try:
+            matchups = canonical_matchups(
+                league_api.scoreboard_current(scoring_period=w), w
+            )
+        except Exception:
+            continue
+        for m in matchups:
+            for side, opp in (("home", "away"), ("away", "home")):
+                team = m.get(f"{side}_team", "")
+                if not team:
+                    continue
+                wlt = m.get("winner", "")
+                if wlt == side:
+                    records[team]["wins"] += 1
+                elif wlt == opp:
+                    records[team]["losses"] += 1
+                else:
+                    records[team]["ties"] += 1
+
+    if not records:
+        return [], False
+
+    rows = []
+    for team, rec in records.items():
+        total = rec["wins"] + rec["losses"] + rec["ties"]
+        wp = (rec["wins"] / total * 100) if total > 0 else 0.0
+        rows.append({"team_name": team, "wins": rec["wins"],
+                      "losses": rec["losses"], "ties": rec["ties"],
+                      "win_pct": round(wp, 1)})
+    rows.sort(key=lambda r: (-r["win_pct"], -r["wins"]))
+    for i, r in enumerate(rows):
+        r["standing"] = i + 1
+    return rows, True
+
+
+def _build_single_week_ap(league_api, week):
+    """FIX-A: single-week all-play for Team of the Week.
+
+    Returns list of {Team, Matchup Wins, Total Wins} — enough for
+    select_awards to pick the field-wide winner."""
+    try:
+        matchups = canonical_matchups(
+            league_api.scoreboard_current(scoring_period=week), week
+        )
+    except Exception:
+        return []
+    if not matchups:
+        return []
+    from backend.league.scoreboard import _single_week_all_play
+    return _single_week_all_play(matchups)

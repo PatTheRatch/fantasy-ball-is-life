@@ -289,3 +289,33 @@ class WeeklyScoreboard:
         if not row:
             return pd.DataFrame()
         return pd.DataFrame([row[0]])
+
+
+def _single_week_all_play(matchups: list[dict]) -> list[dict]:
+    """Best-effort single-week all-play from matchup dicts [FIX-A]."""
+    teams_stats: dict[str, dict] = {}
+    for m in matchups:
+        cats = m.get("categories", [])
+        for side in ("home", "away"):
+            team = m.get(f"{side}_team", "")
+            if not team:
+                continue
+            teams_stats[team] = {c["stat"]: c[f"{side}_value"] for c in cats}
+
+    team_names = list(teams_stats)
+    results = []
+    for team in team_names:
+        my = teams_stats[team]
+        mw = total = 0
+        for other in team_names:
+            if other == team:
+                continue
+            ot = teams_stats[other]
+            wins = sum(1 for s, v in my.items()
+                       if (s == "TO" and v < ot.get(s, 0))
+                       or (s != "TO" and v > ot.get(s, 0)))
+            total += wins
+            if wins > len(my) / 2:
+                mw += 1
+        results.append({"Team": team, "Matchup Wins": mw, "Total Wins": total})
+    return results

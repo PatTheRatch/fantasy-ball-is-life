@@ -103,16 +103,16 @@ def test_second_call_reuses_snapshot_from_cache(monkeypatch):
 
     call_count = 0
 
-    def _counting_standings():
+    def _counting_standings(**kw):
         nonlocal call_count
         call_count += 1
         return []
 
     import backend.api.routers.league as league_api
 
-    monkeypatch.setattr(league_api, "league_standings", _counting_standings)
+    monkeypatch.setattr(league_api, "league_standings", lambda **kw: [])
     monkeypatch.setattr(league_api, "power_rankings", lambda **kw: [])
-    monkeypatch.setattr(league_api, "scoreboard_current", lambda **kw: [])
+    monkeypatch.setattr(league_api, "scoreboard_current", _counting_standings)
     monkeypatch.setattr(league_api, "transactions_week", lambda **kw: [])
     monkeypatch.setattr(league_api, "season_stats", lambda **kw: [])
     monkeypatch.setattr(league_api, "league_settings", lambda: {})
@@ -147,16 +147,16 @@ def test_different_week_is_cache_miss(monkeypatch):
 
     call_count = 0
 
-    def _counting_standings():
+    def _counting_standings(**kw):
         nonlocal call_count
         call_count += 1
         return []
 
     import backend.api.routers.league as league_api
 
-    monkeypatch.setattr(league_api, "league_standings", _counting_standings)
+    monkeypatch.setattr(league_api, "league_standings", lambda **kw: [])
     monkeypatch.setattr(league_api, "power_rankings", lambda **kw: [])
-    monkeypatch.setattr(league_api, "scoreboard_current", lambda **kw: [])
+    monkeypatch.setattr(league_api, "scoreboard_current", _counting_standings)
     monkeypatch.setattr(league_api, "transactions_week", lambda **kw: [])
     monkeypatch.setattr(league_api, "season_stats", lambda **kw: [])
     monkeypatch.setattr(league_api, "league_settings", lambda: {})
@@ -208,7 +208,7 @@ def test_degraded_snapshot_not_cached(monkeypatch):
         league=league, season=2026, week=1,
         week_start="2025-10-01", week_end="2025-10-07",
     )
-    assert call_count == 5  # all 5 lambdas ran
+    assert call_count == 6  # 5 lambdas + per-week standings fetch (wk 1)
     assert s1.data_quality.ready is False
 
     # Second call — cache should NOT have stored it, so lambdas run again.
@@ -216,4 +216,4 @@ def test_degraded_snapshot_not_cached(monkeypatch):
         league=league, season=2026, week=1,
         week_start="2025-10-01", week_end="2025-10-07",
     )
-    assert call_count == 10  # second full assembly
+    assert call_count == 12  # second full assembly

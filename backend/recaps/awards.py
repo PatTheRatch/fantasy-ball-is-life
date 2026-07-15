@@ -26,29 +26,26 @@ def _candidate(
 def select_awards(snapshot: WeeklyFactSnapshot) -> list[dict[str, Any]]:
     awards: list[dict[str, Any]] = []
     matchups = snapshot.matchups
-
     decided = [item for item in matchups if item["winner"] != "Tie"]
-    if decided:
-        team_of_week = max(
-            decided,
-            key=lambda item: max(
-                item["home_category_wins"], item["away_category_wins"]
-            ),
-        )
-        wins = max(
-            team_of_week["home_category_wins"],
-            team_of_week["away_category_wins"],
-        )
+
+    # FIX-A: Team of the Week is now single-week all-play — the team
+    # that would beat the most of the entire field this week.
+    # The old per-matchup category-wins max was monotonic in blowout
+    # margin; the two awards collapsed onto the same matchup.
+    single_week_ap = getattr(snapshot, "single_week_all_play", None) or []
+    if single_week_ap:
+        top = max(single_week_ap, key=lambda r: (r["Matchup Wins"], r["Total Wins"]))
         awards.append(
             _candidate(
                 "team-of-the-week",
                 "Team of the Week",
-                team_of_week["winner"],
-                [team_of_week["evidence_id"]],
-                category_wins=wins,
+                top["Team"],
+                ["single-week-all-play"],
+                matchup_wins=top["Matchup Wins"],
+                total_wins=top["Total Wins"],
             )
         )
-
+    if decided:
         margins = [
             (
                 abs(item["home_category_wins"] - item["away_category_wins"]),

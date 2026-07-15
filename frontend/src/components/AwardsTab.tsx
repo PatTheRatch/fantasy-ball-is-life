@@ -22,7 +22,8 @@ interface AwardPresentation {
 const PRESENTATION: Record<string, AwardPresentation> = {
   'team-of-the-week': {
     icon: Trophy,
-    factLine: (f) => `Won ${f.category_wins ?? '?'} categories`,
+    factLine: (f) =>
+      `beat ${f.matchup_wins ?? '?'} of the field (${f.total_wins ?? '?'} total cat-wins)`,
   },
   'blowout-of-the-week': {
     icon: Zap,
