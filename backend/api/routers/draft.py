@@ -26,7 +26,22 @@ from backend.draft.strategies import (
     custom_config,
     generate_portfolio,
 )
+from backend.draft import auction_sim as auction_mc
 
+
+def _load_season_projections() -> Optional[list]:
+    """Load active season projections from the framework store.
+
+    Returns ``list[PlayerProjection]`` or ``None`` (fall through to
+    the optimizer's legacy on-disk BBM_PROJECTIONS_PATH read).
+    P-8: wires P-3's optimizer consumer swap into production.
+    """
+    try:
+        from backend.projections import get_active_projections
+        rows = get_active_projections("season")
+        return rows if rows else None
+    except Exception:
+        return None
 router = APIRouter(tags=["draft"])
 
 class DraftPickEntry(BaseModel):
@@ -182,6 +197,10 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
     decided_keys = picked_keys | set(rival_keys)
     candidate_targets = [t for t in params.target_players if t.player_key not in decided_keys]
 
+    # P-8: load active season projections from the framework store.
+    # Falls through to legacy BBM_PROJECTIONS_PATH when no upload exists.
+    season_rows = _load_season_projections()
+
     def make_base_optimizer() -> OptimizeLineup:
         """No target_players applied — the pool as constrained by exclude/
         favorite-team/real picks only. Used both to resolve target validity/
@@ -199,6 +218,7 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
             favorite_team_representation=params.favorite_team_representation,
             value_col="Value",
             value_source=params.value_source,
+            projections_rows=season_rows,
         )
         for p in user_picks:
             opt.draft_player(p.player_key, p.price)
@@ -387,6 +407,7 @@ def draft_auction_sim(body: AuctionSimulationBody) -> dict:
                 minimum_value_players=body.minimum_value_players,
                 minimum_game_threshold=body.minimum_game_threshold,
                 value_col="Value",
+                projections_rows=_load_season_projections(),
             )
             pool_df = opt._mc_pool_df()
 

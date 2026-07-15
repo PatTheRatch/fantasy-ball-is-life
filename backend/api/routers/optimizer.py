@@ -12,6 +12,16 @@ from backend.api.deps import _df_records, _read_excel_bytes
 from backend.config import BBM_PROJECTIONS_PATH
 from backend.draft.optimizer import OptimizeLineup, generate_multiple_plans
 
+
+def _load_season_rows() -> Optional[list]:
+    """P-8: shared helper.  Returns ``list[PlayerProjection]`` or ``None``."""
+    try:
+        from backend.projections import get_active_projections
+        rows = get_active_projections("season")
+        return rows if rows else None
+    except Exception:
+        return None
+
 router = APIRouter(tags=["optimizer"])
 
 class DraftPick(BaseModel):
@@ -84,6 +94,7 @@ async def optimizer_optimize(request: Request) -> List[dict[str, Any]]:
         body = OptimizeBody.model_validate(payload)
 
     try:
+        season_rows = _load_season_rows()
         opt = OptimizeLineup(
             exclude_players=body.exclude_players,
             games_per_week=body.games_per_week,
@@ -96,6 +107,7 @@ async def optimizer_optimize(request: Request) -> List[dict[str, Any]]:
             minimum_game_threshold=body.minimum_game_threshold,
             value_col=body.value_col,
             projections_df=bbm_df,
+            projections_rows=season_rows,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
