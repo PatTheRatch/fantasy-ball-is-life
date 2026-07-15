@@ -1668,8 +1668,9 @@ def get_projected_scoreboard(
     # producing all-zero projections.
     now = pd.Timestamp.now()
     resolved_end = pd.to_datetime(week_end_date) if week_end_date else None
-    if resolved_end is not None and now > resolved_end:
+    if resolved_end is not None and now > (resolved_end + pd.Timedelta(days=1)):
         # Offseason / completed week: no future games to project.
+        # Use end-of-day boundary so the final matchup day still projects.
         # Return empty — callers should show the current scoreboard only.
         return pd.DataFrame(columns=[
             "home_team", "away_team", "stat",
