@@ -233,6 +233,56 @@ def projections_sets(
 # PUT /projections/active — activate a set
 # ---------------------------------------------------------------------------
 
+@router.get("/projections/active")
+def projections_active(
+    horizon: str = Query("week", description="Horizon to query ('week' or 'season')"),
+) -> Optional[Dict[str, Any]]:
+    """Return the currently-active projection set for ``horizon``.
+
+    Returns ``null``/``None`` when no set is active (caller falls
+    through to the default source — ESPN live for week, legacy disk
+    read for season).  The virtual ESPN set is represented with
+    ``source='espn'``, ``set_id='espn-live'``, and no upload date.
+    """
+    store = _get_store()
+    # Find the active set ID from the manifest
+    active_id = store._manifest.active.get(horizon)
+    if not active_id:
+        return None
+
+    # Virtual ESPN sentinel
+    if active_id == "espn-live":
+        return {
+            "set_id": "espn-live",
+            "source": "espn",
+            "horizon": "week",
+            "uploaded_at": None,
+            "filename": None,
+            "row_count": 0,
+            "matched_count": 0,
+            "unmatched_players": [],
+            "week": None,
+            "is_virtual": True,
+        }
+
+    # Real uploaded set
+    for s in store.list_sets():
+        if s.set_id == active_id:
+            return {
+                "set_id": s.set_id,
+                "source": s.source,
+                "horizon": s.horizon,
+                "uploaded_at": s.uploaded_at,
+                "filename": s.filename,
+                "row_count": s.row_count,
+                "matched_count": s.matched_count,
+                "unmatched_players": s.unmatched_players,
+                "week": s.week,
+                "is_virtual": False,
+            }
+    return None
+
+
 @router.put("/projections/active")
 def projections_activate(body: ActivateBody) -> Dict[str, Any]:
     """Promote a previously-uploaded set (or the virtual ESPN set via

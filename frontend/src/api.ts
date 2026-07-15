@@ -407,6 +407,36 @@ export async function getProjectionsSets(
   return data
 }
 
+export interface ActiveProjectionSet {
+  set_id: string
+  source: string
+  horizon: string
+  uploaded_at: string | null
+  filename: string | null
+  row_count: number
+  matched_count: number
+  unmatched_players: string[]
+  week: number | null
+  is_virtual: boolean
+}
+
+export async function getProjectionsActive(
+  horizon: string,
+): Promise<ActiveProjectionSet | null> {
+  const { data } = await client.get<ActiveProjectionSet | null>(
+    '/projections/active', { params: { horizon } },
+  )
+  return data
+}
+
+export async function putProjectionsActive(setId: string): Promise<void> {
+  await client.put('/projections/active', { set_id: setId })
+}
+
+export async function deleteProjectionsActive(horizon: string): Promise<void> {
+  await client.delete('/projections/active', { params: { horizon } })
+}
+
 export async function postProjections(
   formData: FormData,
 ): Promise<JsonRecord[]> {

@@ -6,10 +6,13 @@ import {
   formatApiError,
   getMatchupConfidence,
   getPowerRankings,
+  getProjectionsSets,
   getRostersCurrent,
   getScoreboardCurrent,
   postMatchupCommentary,
   postProjectedScoreboard,
+  putProjectionsActive,
+  deleteProjectionsActive,
 } from '../api'
 import { AiCommentaryCard } from '../components/AiCommentaryCard'
 import { ProjectionBadge } from '../components/ProjectionBadge'
@@ -886,6 +889,12 @@ export function InSeason() {
                   )}
                 </div>
               )}
+              {scoreboardView === 'projected' && (
+                <SourcePicker
+                  onActivate={(id) => putProjectionsActive(id)}
+                  onClear={() => deleteProjectionsActive('week')}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => setSettingsSheetOpen(false)}
@@ -1198,12 +1207,75 @@ export function InSeason() {
         <button
           type="button"
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="fixed bottom-24 right-4 z-[55] flex h-11 w-11 items-center justify-center rounded-full border border-slate-600 bg-slate-800/95 text-slate-100 shadow-lg md:bottom-8"
+          className="fixed bottom-6 right-6 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-slate-600 bg-slate-800/95 text-slate-300 shadow-lg backdrop-blur"
           aria-label="Back to top"
         >
-          <ArrowUp className="h-5 w-5" strokeWidth={2} />
+          <ArrowUp className="h-5 w-5" />
         </button>
       )}
+    </div>
+  )
+}
+
+
+function SourcePicker({
+  onActivate,
+  onClear,
+}: {
+  onActivate: (setId: string) => Promise<void>
+  onClear: () => Promise<void>
+}) {
+  const { data: sets, refetch } = useQuery({
+    queryKey: ['projections', 'sets', 'week'],
+    queryFn: () => getProjectionsSets({ horizon: 'week' }),
+    staleTime: 30_000,
+  })
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const handleActivate = async (setId: string) => {
+    setBusy(setId)
+    try { await onActivate(setId) } catch { /* ignore */ }
+    await refetch()
+    setBusy(null)
+  }
+
+  const handleClear = async () => {
+    setBusy('clear')
+    try { await onClear() } catch { /* ignore */ }
+    await refetch()
+    setBusy(null)
+  }
+
+  const weekSets = (sets ?? []).filter(
+    (s: Record<string, unknown>) => String(s.source ?? '') !== 'espn',
+  )
+
+  if (weekSets.length === 0) return null
+
+  return (
+    <div className="mt-4 space-y-2">
+      <p className="text-xs font-medium text-slate-400">Active source</p>
+      {weekSets.map((s: Record<string, unknown>) => (
+        <button
+          key={String(s.set_id)}
+          type="button"
+          onClick={() => handleActivate(String(s.set_id))}
+          disabled={busy != null}
+          className="w-full min-h-[40px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-left text-sm text-slate-200"
+        >
+          {String(s.source ?? '').toUpperCase()} · Week {String(s.week ?? '—')}
+          {busy === String(s.set_id) && ' …'}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={handleClear}
+        disabled={busy != null}
+        className="w-full min-h-[40px] rounded-lg border border-dashed border-slate-600 bg-transparent px-3 py-2 text-left text-sm text-slate-400"
+      >
+        Switch to ESPN live
+        {busy === 'clear' && ' …'}
+      </button>
     </div>
   )
 }

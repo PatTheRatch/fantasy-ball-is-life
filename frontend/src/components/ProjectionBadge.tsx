@@ -1,42 +1,49 @@
 import { useQuery } from '@tanstack/react-query'
-import { getProjectionsSets } from '../api'
+import { getProjectionsActive } from '../api'
+import type { ActiveProjectionSet } from '../api'
 
-interface ProjectionSet {
-  set_id: string
-  source: string
-  horizon: string
-  uploaded_at: string
-  filename: string | null
+function sourceLabel(source: string): string {
+  if (source === 'bbm') return 'BBM'
+  if (source === 'espn') return 'ESPN'
+  return source.toUpperCase()
 }
 
-async function fetchActiveSet(horizon: string): Promise<ProjectionSet | null> {
-  const sets = await getProjectionsSets({ horizon })
-  if (sets.length === 0) return null
-  return sets[0] as unknown as ProjectionSet
+function formatDate(iso: string | null, isVirtual: boolean): string {
+  if (isVirtual || !iso) return 'live'
+  return new Date(iso).toLocaleDateString()
 }
 
 export function ProjectionBadge({ horizon }: { horizon: 'season' | 'week' }) {
-  const { data } = useQuery({
+  const { data: active } = useQuery<ActiveProjectionSet | null>({
     queryKey: ['projections', 'active', horizon],
-    queryFn: () => fetchActiveSet(horizon),
+    queryFn: () => getProjectionsActive(horizon),
     staleTime: 60_000,
   })
 
-  if (!data) return null
-
-  const sourceLabel =
-    data.source === 'bbm' ? 'BBM' : data.source.toUpperCase()
-  const date = new Date(data.uploaded_at).toLocaleDateString()
+  // No active set → fall through to default (ESPN for week, nothing for season)
+  if (!active) {
+    if (horizon === 'week') {
+      // ESPN is the default — show it
+      return (
+        <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-700/60 bg-slate-900/80 px-3 py-1 text-xs text-slate-400">
+          <span className="font-medium text-slate-300">Projections</span>
+          <span className="text-slate-500">·</span>
+          <span>{sourceLabel('espn')}</span>
+          <span className="text-slate-500">·</span>
+          <span>live</span>
+        </div>
+      )
+    }
+    return null
+  }
 
   return (
     <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-700/60 bg-slate-900/80 px-3 py-1 text-xs text-slate-400">
-      <span className="font-medium text-slate-300">
-        Projections
-      </span>
+      <span className="font-medium text-slate-300">Projections</span>
       <span className="text-slate-500">·</span>
-      <span>{sourceLabel}</span>
+      <span>{sourceLabel(active.source)}</span>
       <span className="text-slate-500">·</span>
-      <span>{date}</span>
+      <span>{formatDate(active.uploaded_at, active.is_virtual)}</span>
     </div>
   )
 }
