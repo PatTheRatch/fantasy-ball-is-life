@@ -219,3 +219,65 @@ P-1 through P-3 are the load-bearing pieces (a real source-agnostic accessor
 existing consumers actually read through). P-4 is UI polish on top of a
 working P-2/P-3. P-5 is intentionally last — it's the one adapter with
 unresolved real-world access questions, and nothing else in v1 depends on it.
+
+---
+
+## Addendum: post-merge review — precedence & lifetime decisions (2026-07-14)
+
+P-1..P-5 merged and were reviewed against this spec (Claude, 2026-07-14). The
+adapters, store, and endpoints individually work as scoped. The review found a
+cluster of bugs sharing one root cause the spec never pinned down: **precedence
+and lifetime for the `week` horizon** — when an uploaded set, the live ESPN
+source, and a per-request override disagree, who wins and for how long.
+Confirmed consequences in the merged code:
+
+- An uploaded weekly BBM set stays active forever (no expiry, no clear
+  affordance) — live ESPN becomes unreachable without hand-editing
+  `manifest.json`, defeating the ESPN-first goal of the addendum above.
+- The In-Season "BBM File" per-request upload is dead: the framework path in
+  `get_projected_scoreboard()` always yields rows (ESPN fallback), so the
+  legacy `bbm_df` branch is unreachable — an uploaded file silently renders
+  ESPN numbers instead.
+- `ProjectionBadge` shows the most recently *uploaded* set, not the *active*
+  one (wrong after a rollback via `PUT /projections/active`).
+- A bare `except Exception` around the framework path hides any live
+  `EspnAdapter` failure — invisible degradation to the legacy path, no log.
+- P-3's optimizer swap is capability-only: no production `OptimizeLineup`
+  call site passes `projections_rows`, so uploads have zero effect on the
+  live Draft Room.
+- `HashtagAdapter` maps `fgm`/`ftm` columns to fields that don't exist on
+  `PlayerProjection` and never derives FG%/FT% from makes+attempts — that
+  data is silently dropped.
+- Both `get_current_rosters()` and `EspnAdapter` hardcode the `2026_last_N`
+  stats key — silently all-zero projections at next season's rollover.
+
+**Decisions (Patrick, 2026-07-14):**
+
+1. **Week-scoped uploads + manual clear.** `ProjectionSet` gains a `week`
+   field (for `horizon='week'` sets), defaulted from the current matchup
+   period at upload time and overridable in the upload form.
+   `load_active('week')` honors a set only while its week matches the current
+   matchup week — ESPN comes back automatically at week rollover. A manual
+   clear affordance also exists for mid-week escape.
+2. **ESPN is a virtual, always-available set.** Registered in the manifest
+   (`source='espn'`, no parquet file). Selecting it is the ordinary
+   `PUT /projections/active`; picker and badge treat it uniformly
+   ("Projections · ESPN Last 15 · live"). The registry special-cases the
+   virtual id by calling `EspnAdapter` live.
+3. **Explicit request wins.** A per-request `projections` param or uploaded
+   `bbm_df` overrides the store for that request only; the store is the
+   default when the request doesn't specify a source. Restores the original
+   per-request upload semantics.
+
+Symmetry note: clearing/expiring the `season` horizon falls back to the
+optimizer's legacy on-disk `BBM_PROJECTIONS_PATH` read — acceptable, but say
+so in the endpoint description rather than leaving it implicit.
+
+### Fix-PR sequence
+
+| PR | Scope | Notes |
+|---|---|---|
+| **P-6** | Store/registry semantics: `week` field on `ProjectionSet` + week-scoped `load_active`; virtual ESPN set + clear affordance; precedence in `get_projected_scoreboard()` (explicit request → store → ESPN live), restoring the per-request `bbm_df` path; replace the silent `except Exception` with a logged fallback | The load-bearing fix — everything else builds on these semantics |
+| **P-7** | Badge + picker: `ProjectionBadge` reads the true active set (incl. virtual ESPN, e.g. via an `is_active` flag or a dedicated active endpoint); In-Season source picker gains an "Uploaded set" option and a switch-back-to-ESPN affordance | Depends on P-6 |
+| **P-8** | Deliver P-3's original claim: wire `get_active_projections('season')` into the draft router's `OptimizeLineup` construction sites (legacy disk read as fallback); contract test at the router level, not just the translation function | Closes the "capability-only" finding |
+| **P-9** | Small fixes: `HashtagAdapter` derives FG%/FT% from FGM/FGA + FTM/FTA when only makes/attempts are present (or the dead mapping + comment are removed); remove unused `_BASE_STATS`; derive the `{SEASON}_last_N` stats key from config in both `get_current_rosters()` and `EspnAdapter` | Independent of P-6/P-7; can land any time |
