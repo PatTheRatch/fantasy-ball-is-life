@@ -1459,7 +1459,7 @@ def get_current_rosters(
                 "nine_cat_averages": "".join(player.nine_cat_averages),
                 "playerId": player.playerId,
                 "stats_last_15": player.stats.get(f"{_season_year()}_last_15", {}),
-                "stats_total": player.stats.get("2026_total", {}),
+                "stats_total": player.stats.get(f"{_season_year()}_total", {}),
             }
 
             # per-window stats (Last 15, Last 30, etc.)
