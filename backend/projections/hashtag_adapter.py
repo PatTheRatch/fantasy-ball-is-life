@@ -50,9 +50,7 @@ _COLUMN_MAP: dict[str, tuple[str, bool]] = {
     "to":      ("to_pg", False),
     "fg%":     ("fg_pct", True),
     "ft%":     ("ft_pct", True),
-    "fgm":     ("fgm_pg", False),   # not stored directly; used to derive
     "fga":     ("fga_pg", False),
-    "ftm":     ("ftm_pg", False),   # not stored directly
     "fta":     ("fta_pg", False),
 }
 
@@ -197,7 +195,19 @@ class HashtagAdapter:
                 elif attr == "fg_pct":  fg_pct = val
                 elif attr == "ft_pct":  ft_pct = val
 
-            # Derived: try FGM from FG% * FGA if not directly provided
+            # Derive FG%/FT% from makes+attempts when percentages are
+            # absent but the underlying counting stats are present.
+            if fg_pct is None:
+                fgm_val = _safe_float(row.get("fgm"))
+                fga_val = fga_pg  # already read from the column map
+                if fgm_val > 0 and fga_val > 0:
+                    fg_pct = fgm_val / fga_val
+            if ft_pct is None:
+                ftm_val = _safe_float(row.get("ftm"))
+                fta_val = fta_pg
+                if ftm_val > 0 and fta_val > 0:
+                    ft_pct = ftm_val / fta_val
+
             teams: Optional[str] = None
             for tcol in ("team", "nba team"):
                 if tcol in df.columns:

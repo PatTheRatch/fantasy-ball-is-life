@@ -107,10 +107,6 @@ class ProjectionAdapter(Protocol):
 # EspnAdapter — P-1
 # ---------------------------------------------------------------------------
 
-# Column-set needed per stat category.  REB is derived (OREB + DREB) and
-# not listed here because ESPN provides OREB/DREB separately.
-_BASE_STATS = ["PTS", "BLK", "AST", "STL", "3PM", "FTA", "FTM", "FGM", "FGA", "TO"]
-
 
 class EspnAdapter:
     """Turn ESPN rolling-stat averages into canonical projections.
@@ -178,7 +174,8 @@ class EspnAdapter:
         )
 
         window = self.window
-        stats_key = f"2026_last_{window}"
+        from backend.config import SEASON
+        stats_key = f"{SEASON}_last_{window}"
 
         results: list[PlayerProjection] = []
 

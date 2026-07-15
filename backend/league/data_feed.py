@@ -1388,6 +1388,12 @@ def resolve_roster_week_window(
     return pd.to_datetime(start), pd.to_datetime(end)
 
 
+def _season_year() -> int:
+    """P-9: derive the stats-key year from config instead of hardcoding 2026."""
+    from backend.config import SEASON
+    return int(SEASON)
+
+
 def get_current_rosters(
     h: ESPNHandles,
     week_start_date: Optional[str] = None,
@@ -1418,7 +1424,7 @@ def get_current_rosters(
     BASE_STATS = ["PTS", "BLK", "AST", "STL", "3PM", "FTA", "FTM", "FGM", "FGA", "TO"]
 
     def get_window_stats(player_stats: dict, window: int) -> dict:
-        stats_key = f"2026_last_{window}"
+        stats_key = f"{_season_year()}_last_{window}"
         window_stats = player_stats.get(stats_key, {})
         avg = window_stats.get("avg", {}) or {}
 
@@ -1452,7 +1458,7 @@ def get_current_rosters(
                 "player_name": player.name,
                 "nine_cat_averages": "".join(player.nine_cat_averages),
                 "playerId": player.playerId,
-                "stats_last_15": player.stats.get("2026_last_15", {}),
+                "stats_last_15": player.stats.get(f"{_season_year()}_last_15", {}),
                 "stats_total": player.stats.get("2026_total", {}),
             }
 
