@@ -78,8 +78,9 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
     }
     return standings.map((s) => {
       const tn = norm(String(s.team_name ?? s.team ?? ''))
-      const st = statsMap[tn] ?? {}
-      return { ...s, _tn: tn, _stats: st, _rank: rankMap[tn] ?? {} }
+      const st: Record<string, unknown> = statsMap[tn] ?? {}
+      const rk: Record<string, unknown> = rankMap[tn] ?? {}
+      return { ...s, _tn: tn, _stats: st, _rank: rk }
     })
   }, [standings, stats, rankings])
 
