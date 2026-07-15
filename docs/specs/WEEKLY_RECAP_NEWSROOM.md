@@ -722,3 +722,87 @@ should it also carry a light "category leaders" strip (e.g. top scorer /
 rebounder of the week) distinct from F2-6's full standings? This changes F2-5's
 scope; needs a product call before build. Recommended default: **Awards only**,
 rename the tab, leave all stat surfaces to F2-6 — but Patrick decides.
+
+---
+
+## Addendum: F2-6 Standings & Season Stats tab — full scope (2026-07-15)
+
+Expands the F2-6 row and acceptance criterion §2.19 into an implementable spec.
+The heaviest single tab: deterministic-only (no AI), but it joins **three**
+snapshot arrays (`standings`, `season_stats`, `power_rankings`) by team name
+and offers grouped/sortable views. Same "always load from the snapshot" model
+as the numeric parts of Power Rankings — source is `getSnapshot`, no
+`getPublishedRecap`.
+
+### Sequencing (important)
+
+F2-5 (Awards) and this tab both edit `NewsroomLayout.tsx` (the TABS array +
+render branches). Do **not** build in parallel off `main` — branch off merged
+F2-5 (or off `feat/awards-tab`). F2-5 already set the tab order (Standings
+before Awards) and the "Standings" label; F2-6 only flips its `enabled: true`
+and adds the render branch.
+
+### Column → source mapping
+
+Join the three arrays by **normalized** team name (watch trailing-space names
+like `"Chat GTP inspired "`). A team present in one array but missing from
+another must still render (blank cells), never crash.
+
+| Group | Column | Source |
+|---|---|---|
+| Overview | rank | `standings.standing` (ESPN standing/seed) |
+| Overview | team | `standings.team_name` |
+| Overview | record | `standings.wins / losses / ties` |
+| Overview | win % | `standings.win_pct` |
+| Overview | playoff status | `standings.in_playoffs` (**new field — see §Data model**) |
+| Category Stats · totals | 9 cats | `season_stats[<CAT>]` (season sums). **TO is stored negated in the all-play convention — display as a positive count.** |
+| Category Stats · per-week avg | 9 cats | **computed**: season total ÷ weeks played (see §Data model) |
+| Category Stats · ranks | 9 cats | `power_rankings["<cat>_rank"]`, key = `cat.lower().replace('%','_pct') + "_rank"` (`pts_rank` … `fg_pct_rank`, `ft_pct_rank`, `to_rank`) |
+| Advanced | all-play win % | `season_stats "Total Win %"` (== `power_rankings.allplay_win_pct`) |
+| Advanced | luck ratio | `season_stats "Win % Ratio"` |
+| Advanced | power rank | `power_rankings.rank` |
+| Advanced | movement | `power_rankings.rank_change` (▲/▼; reuse PowerRankingsTab's arrow helper) |
+| Activity | transaction count | `standings.moves + trades + drops` |
+| Activity | transaction awards | the `transaction-addict` entry in `snapshot.award_candidates` (title + winner), if present |
+
+### Data model impact — resolved decisions (Patrick, 2026-07-15)
+
+1. **Playoff status → new `in_playoffs` field on each standings row.** The
+   snapshot cannot answer "in the playoff picture" from `standings` alone
+   (`playoff_team_count` isn't carried, and `playoff_context` is `None` on
+   regular weeks). Fix: in `assemble_weekly_snapshot`, read
+   `playoff_team_count` from `league_settings` (assembly already fetches
+   settings for `_build_playoff_context`) and set `in_playoffs = (standing <=
+   playoff_team_count)` on **each standings row**. Put it in the standings rows,
+   NOT a new top-level snapshot field — `standings_json` already round-trips
+   through the store; a new scalar field would need a store/column change and
+   silently drop on reload. This is the only backend change in F2-6.
+2. **Per-week-average denominator = weeks played, from the snapshot.** Use the
+   number of matchup weeks included in `season_stats` (i.e. up to
+   `snapshot.week`); a single consistent count, documented in a comment. Avg =
+   season total ÷ that count.
+
+### Acceptance criteria
+
+Per §2.19-20, plus: pinned/sticky team column with the stat columns scrolling
+inside their own `overflow-x` container (page body never scrolls sideways);
+group toggle Overview / Category Stats / Advanced / Activity, with a
+totals ↔ per-week-avg ↔ ranks sub-toggle inside Category Stats; sortable by any
+visible column; readable at 375px (the group toggle keeps each view narrow).
+Deterministic-only — no `AiTakeBadge` on this tab.
+
+### Test plan
+
+- Renders each group; the Category Stats sub-toggle switches totals/avg/ranks;
+  header click sorts; a team in `standings` but absent from `power_rankings`
+  renders with blank rank cells (no crash).
+- Per-week-avg math (total ÷ weeks) unit-checked on a fixture.
+- Backend: `assemble_weekly_snapshot` sets `in_playoffs` on standings rows
+  (seed ≤ `playoff_team_count`); existing suite stays green.
+- Frontend `npm run lint` + `npm run build` pass.
+
+### Rollback / failure
+
+Additive tab (flip `enabled: false` to remove). `in_playoffs` is a purely
+additive standings-row field; nothing else reads it, so it can't regress other
+tabs.
