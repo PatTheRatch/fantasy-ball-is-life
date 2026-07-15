@@ -1,4 +1,4 @@
-"""On-disk projection store + manifest (P-2).
+"""On-disk projection store + manifest (P-2, updated P-6).
 
 ``data/projections/`` gitignored directory.  One parquet file per
 ``ProjectionSet``, with a ``manifest.json`` that tracks active sets
@@ -7,11 +7,22 @@ per horizon.
 Atomic ingest (§6 of the spec): write parquet to a temp path in the
 same directory, then ``os.replace`` into place before updating the
 manifest.
+
+P-6 semantic updates (post-merge review, 2026-07-14):
+  - ``ProjectionSet.week`` scopes ``horizon='week'`` sets to a matchup
+    period; ``load_active('week', current_week=...)`` only honors a set
+    when its week matches the caller's current week.
+  - Virtual ESPN sentinel ``ESPN_VIRTUAL_SET_ID`` — selecting it as
+    active tells the registry to call ``EspnAdapter`` live instead of
+    loading a parquet.
+  - ``clear_horizon()`` resets a horizon to its default (ESPN for week,
+    nothing for season).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -30,16 +41,21 @@ from backend.projections.adapter import PlayerProjection
 DEFAULT_STORE_DIR = Path("data/projections")
 MANIFEST_FILENAME = "manifest.json"
 
+# Sentinel: activating this set_id means "use ESPN live" for the week horizon.
+ESPN_VIRTUAL_SET_ID = "espn-live"
+
+_log = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
-# ProjectionSet metadata (spec §3)
+# ProjectionSet metadata (spec §3 + P-6 `week` field)
 # ---------------------------------------------------------------------------
 
 @dataclass
 class ProjectionSet:
     """Metadata for one ingested projection set."""
 
-    set_id: str                              # uuid
+    set_id: str                              # uuid, or ESPN_VIRTUAL_SET_ID
     source: str                              # "bbm" | "espn" | "hashtag" | "internal" | "custom"
     horizon: str                             # "season" | "week"
     uploaded_at: str                         # ISO-8601 UTC
@@ -47,6 +63,7 @@ class ProjectionSet:
     row_count: int = 0
     matched_count: int = 0
     unmatched_players: list[str] = field(default_factory=list)
+    week: Optional[int] = None              # P-6: matchup week (for horizon='week')
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +92,7 @@ class _Manifest:
                     "row_count": s.row_count,
                     "matched_count": s.matched_count,
                     "unmatched_players": s.unmatched_players,
+                    "week": s.week,
                 }
                 for s in self.sets
             ],
@@ -92,6 +110,7 @@ class _Manifest:
                 row_count=s.get("row_count", 0),
                 matched_count=s.get("matched_count", 0),
                 unmatched_players=s.get("unmatched_players", []),
+                week=s.get("week"),
             )
             for s in data.get("sets", [])
         ]
@@ -143,10 +162,13 @@ class ProjectionStore:
         uploaded_at: Optional[str] = None,
         matched_count: int = 0,
         unmatched_players: Optional[Sequence[str]] = None,
+        week: Optional[int] = None,
     ) -> ProjectionSet:
         """Persist canonical projection rows as parquet.  Atomic write.
 
-        Returns the ``ProjectionSet`` metadata record.
+        For ``horizon='week'``, the ``week`` field scopes this set to a
+        specific matchup period.  When omitted, the caller should pass it
+        explicitly (the router defaults it from the ESPN matchup period).
         """
         if uploaded_at is None:
             uploaded_at = datetime.now(timezone.utc).isoformat()
@@ -171,6 +193,7 @@ class ProjectionStore:
             row_count=len(rows),
             matched_count=matched_count,
             unmatched_players=list(unmatched_players or []),
+            week=week,
         )
         self._manifest.sets.insert(0, pset)
         self._manifest.active[horizon] = set_id
@@ -180,7 +203,13 @@ class ProjectionStore:
     # ---- load --------------------------------------------------------
 
     def load_set(self, set_id: str) -> Optional[list[PlayerProjection]]:
-        """Load a specific set by ID."""
+        """Load a specific set by ID.
+
+        The virtual ESPN set returns ``None`` (the registry calls
+        ``EspnAdapter`` live instead of reading a parquet).
+        """
+        if set_id == ESPN_VIRTUAL_SET_ID:
+            return None  # special-cased by the registry
         for s in self._manifest.sets:
             if s.set_id == set_id:
                 fname = f"{s.source}_{s.horizon}_{set_id}.parquet"
@@ -191,11 +220,32 @@ class ProjectionStore:
                 return _dataframe_to_rows(df)
         return None
 
-    def load_active(self, horizon: str) -> Optional[list[PlayerProjection]]:
-        """Load the currently-active set for ``horizon``, if any."""
+    def load_active(
+        self,
+        horizon: str,
+        current_week: Optional[int] = None,
+    ) -> Optional[list[PlayerProjection]]:
+        """Load the currently-active set for ``horizon``, if any.
+
+        P-6 week-scoping: for ``horizon='week'``, the active set is
+        only honored when ``current_week`` is provided and matches the
+        set's ``week`` field.  If no set is active or the week doesn't
+        match, returns ``None`` (caller falls through to ESPN).
+        """
         active_id = self._manifest.active.get(horizon)
         if not active_id:
             return None
+
+        # Virtual ESPN sentinel — don't load a file
+        if active_id == ESPN_VIRTUAL_SET_ID:
+            return None
+
+        # Week-scoped check
+        if horizon == "week" and current_week is not None:
+            active_set = self._find_set(active_id)
+            if active_set is not None and active_set.week != current_week:
+                return None  # week mismatch → fall through
+
         return self.load_set(active_id)
 
     # ---- list ---------------------------------------------------------
@@ -205,8 +255,24 @@ class ProjectionStore:
         source: Optional[str] = None,
         horizon: Optional[str] = None,
     ) -> list[ProjectionSet]:
-        """List all uploaded sets, optionally filtered."""
-        result = self._manifest.sets
+        """List all uploaded sets, optionally filtered.
+
+        P-6: virtual ESPN set is included when ``source=None`` or
+        ``source='espn'`` and ``horizon='week'``.
+        """
+        result = list(self._manifest.sets)
+        # Always include the virtual ESPN set for the week horizon
+        if (source is None or source == "espn") and (horizon is None or horizon == "week"):
+            # Check if it's already in the manifest (from a prior clear)
+            if not any(s.set_id == ESPN_VIRTUAL_SET_ID for s in result):
+                result.insert(0, ProjectionSet(
+                    set_id=ESPN_VIRTUAL_SET_ID,
+                    source="espn",
+                    horizon="week",
+                    uploaded_at="",  # always available
+                    filename=None,
+                    week=None,       # not week-scoped
+                ))
         if source:
             result = [s for s in result if s.source == source]
         if horizon:
@@ -216,16 +282,47 @@ class ProjectionStore:
     # ---- activate -----------------------------------------------------
 
     def set_active(self, set_id: str) -> bool:
-        """Promote a previously-uploaded set to active.
+        """Promote a set to active.
 
-        Returns True if the set was found and activated, False otherwise.
+        ``ESPN_VIRTUAL_SET_ID`` is always accepted (no file needed).
+        Returns True on success.
         """
+        if set_id == ESPN_VIRTUAL_SET_ID:
+            self._manifest.active["week"] = ESPN_VIRTUAL_SET_ID
+            self._save_manifest()
+            return True
         for s in self._manifest.sets:
             if s.set_id == set_id:
                 self._manifest.active[s.horizon] = set_id
                 self._save_manifest()
                 return True
         return False
+
+    # ---- clear ---------------------------------------------------------
+
+    def clear_horizon(self, horizon: str) -> bool:
+        """Reset a horizon to its default (ESPN for week, none for season).
+
+        P-6: this is the "clear" affordance — after clearing, the
+        registry falls through to live ESPN (week) or the optimizer's
+        legacy disk read (season, documented at the router level).
+        """
+        if horizon == "week":
+            self._manifest.active["week"] = ESPN_VIRTUAL_SET_ID
+            self._save_manifest()
+            return True
+        # For season: reset to nothing (legacy BBM_PROJECTIONS_PATH)
+        self._manifest.active.pop(horizon, None)
+        self._save_manifest()
+        return True
+
+    # ---- helpers -------------------------------------------------------
+
+    def _find_set(self, set_id: str) -> Optional[ProjectionSet]:
+        for s in self._manifest.sets:
+            if s.set_id == set_id:
+                return s
+        return None
 
 
 # ---------------------------------------------------------------------------

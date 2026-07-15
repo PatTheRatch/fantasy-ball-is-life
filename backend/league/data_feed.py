@@ -1615,21 +1615,20 @@ def get_projected_scoreboard(
     projections='BBM',
     bbm_df=None,
 ) -> pd.DataFrame:
-    """
-    Compute projected standings and box scores for the week.
+    """Compute projected standings and box scores for the week.
+
+    Precedence (P-6): per-request explicit choice (``projections`` param
+    or uploaded ``bbm_df``) → active stored set (week-scoped) → ESPN live.
 
     Returns
     -------
-    final_week_standings : pd.DataFrame
-        Columns: ['team', 'projected_wins', 'projected_losses', 'projected_ties', 'opponent']
     final_scoreboard : pd.DataFrame
-        Long format projected scores by team / stat.
-        Columns: ['team', 'stat', 'projected_score', 'projected_result']
-    current_scoreboard : pd.DataFrame
-        Whatever get_current_scoreboard returns.
+        Long format with home_team, away_team, stat,
+        projected_home_score, projected_home_result, etc.
     """
 
     # --- Config ---
+    import logging
     COUNTING_STATS = ['PTS', 'BLK', 'AST', 'STL', 'REB', '3PM', 'FTA', 'FTM', 'FGM', 'FGA', 'TO']
     RESULT_STATS   = ['PTS', 'BLK', 'AST', 'STL', 'REB', '3PM', 'FT%', 'FG%', 'TO']
 
@@ -1644,33 +1643,40 @@ def get_projected_scoreboard(
     # --- Pull current data ---
     current_scoreboard = get_current_scoreboard(h, scoring_period=current_matchup_period)
 
-    # --- Try the framework path first (P-3: get_active_projections) ----
-    projected_future_stats = None
-    try:
-        from backend.projections import get_active_projections
-        week_start_dt, _ = resolve_roster_week_window(
-            pd.to_datetime('now'), week_end_date,
-            current_matchup_period=current_matchup_period,
-            league_current_week=getattr(h.league, "currentMatchupPeriod", None),
-        )
-        proj_rows = get_active_projections(
-            "week",
-            handles=h,
-            window=int(projections) if projections.isdigit() else 15,
-            week_end_date=week_end_date,
-            week_start_date=str(week_start_dt.date()) if pd.notna(week_start_dt) else None,
-            current_matchup_period=current_matchup_period,
-        )
-        if proj_rows:
-            projected_future_stats = _build_projected_team_stats_from_rows(proj_rows)
-            if not projected_future_stats.empty:
-                # Convert to the shape the rest of the function expects
-                # (team-level, columns = counting stats)
-                pass  # _build_projected_team_stats_from_rows already returns correct shape
-    except Exception:
-        projected_future_stats = None
+    # --- P-6: explicit per-request choice wins over store ---
+    # When the caller says "use BBM" AND provides a file, skip the store
+    # entirely — this is a one-shot override that does NOT mutate the
+    # active set.
+    explicit_bbm_request = (projections == 'BBM') and (bbm_df is not None)
 
-    # --- Fallback: legacy path (get_current_rosters) ----
+    # --- Framework path (store → ESPN live), unless explicit BBM ----
+    projected_future_stats = None
+    if not explicit_bbm_request:
+        try:
+            from backend.projections import get_active_projections
+            week_start_dt, _ = resolve_roster_week_window(
+                pd.to_datetime('now'), week_end_date,
+                current_matchup_period=current_matchup_period,
+                league_current_week=getattr(h.league, "currentMatchupPeriod", None),
+            )
+            proj_rows = get_active_projections(
+                "week",
+                handles=h,
+                window=int(projections) if projections.isdigit() else 15,
+                week_end_date=week_end_date,
+                week_start_date=str(week_start_dt.date()) if pd.notna(week_start_dt) else None,
+                current_matchup_period=current_matchup_period,
+            )
+            if proj_rows:
+                projected_future_stats = _build_projected_team_stats_from_rows(proj_rows)
+        except Exception as e:
+            logging.warning(
+                "get_projected_scoreboard: framework path failed, falling back to legacy — %s: %s",
+                type(e).__name__, e,
+            )
+            projected_future_stats = None
+
+    # --- Legacy path (explicit BBM request, or framework fallback) ----
     if projected_future_stats is None or projected_future_stats.empty:
         team_rosters = get_current_rosters(
             h,

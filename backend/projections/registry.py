@@ -1,11 +1,15 @@
-"""Projection-source registry (P-2).
+"""Projection-source registry (P-2, updated P-6).
 
-Precedence for each horizon:
-  ``week``  — uploaded BBM set (store) → live ESPN (EspnAdapter)
-  ``season`` — uploaded BBM set (store) → empty (no live source yet)
+Precedence (P-6 post-merge review):
+  ``week``  — explicit per-request override (caller's responsibility)
+              → store (week-scoped) → ESPN live
+  ``season`` — store → empty (legacy optimizer disk read is P-8)
 
-The actual consumer swap (projected scoreboard calling this instead of
-the legacy ``get_current_rosters`` path) is P-3.
+P-6: ``load_active('week')`` is week-scoped — only honored when the
+set's week matches the caller's current matchup week.  ESPN is a
+virtual set (``ESPN_VIRTUAL_SET_ID``) that can be selected via the
+ordinary activate flow; the registry special-cases that id by calling
+``EspnAdapter`` live instead of loading a parquet.
 """
 
 from __future__ import annotations
@@ -27,13 +31,20 @@ def get_active_projections(
 ) -> "list[PlayerProjection]":
     """Canonical projections for ``horizon``.
 
-    Precedence (per horizon):
-      ``week``  — store (uploaded BBM) → ESPN live Last-N
-      ``season`` — store (uploaded BBM) → empty
+    Precedence (P-6):
+      ``week``  — store (week-scoped) → ESPN live
+      ``season`` — store → empty (optimizer legacy disk fallback is P-8)
+
+    For ``horizon='week'``, ``load_active`` receives
+    ``current_week=current_matchup_period`` so only a set uploaded for
+    this specific matchup week is honored.  Stale sets from prior weeks
+    fall through to live ESPN automatically.
     """
-    # ---- check the store first (uploaded sets win) ----
-    store = _get_store()  # defaults to data/projections/
-    rows = store.load_active(horizon)
+    store = _get_store()
+
+    # ---- check the store (week-scoped for horizon='week') ----
+    current_week = current_matchup_period if horizon == "week" else None
+    rows = store.load_active(horizon, current_week=current_week)
     if rows is not None:
         return rows
 

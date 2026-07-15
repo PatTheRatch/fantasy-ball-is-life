@@ -229,7 +229,7 @@ class TestProjectionStore:
 
     def test_save_set_adds_to_manifest(self, store, sample_rows):
         store.save_set(sample_rows, source="bbm", horizon="season", uploaded_at="2026-01-01T00:00:00")
-        sets = store.list_sets()
+        sets = store.list_sets(source="bbm")
         assert len(sets) == 1
         assert sets[0].source == "bbm"
         assert sets[0].horizon == "season"

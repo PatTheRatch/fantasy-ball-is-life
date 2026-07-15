@@ -121,6 +121,19 @@ async def projections_upload(
     # ---- persist ----
     # horizon is either explicit from the form field, or auto-detected
     effective_horizon = horizon or _infer_horizon_from_df(raw_df)
+    # For week-horizon uploads, default the week from the current
+    # ESPN matchup period so the set auto-expires at week rollover.
+    upload_week: Optional[int] = None
+    if effective_horizon == "week":
+        try:
+            from backend.api.deps import _handles
+            h2 = _handles()
+            upload_week = int(getattr(h2.league, "currentMatchupPeriod", 0) or 0)
+            if upload_week <= 0:
+                upload_week = None
+        except Exception:
+            upload_week = None
+
     store = _get_store()
     pset = store.save_set(
         rows,
@@ -130,6 +143,7 @@ async def projections_upload(
         uploaded_at=datetime.now(timezone.utc).isoformat(),
         matched_count=matched,
         unmatched_players=unmatched,
+        week=upload_week,
     )
 
     return {
@@ -213,12 +227,31 @@ def projections_sets(
 
 @router.put("/projections/active")
 def projections_activate(body: ActivateBody) -> Dict[str, Any]:
-    """Promote a previously-uploaded set to active for its horizon."""
+    """Promote a previously-uploaded set (or the virtual ESPN set via
+    ``espn-live``) to active for its horizon.
+
+    For the ``season`` horizon, clearing or expiring the active set falls
+    back to the draft optimizer's legacy on-disk ``BBM_PROJECTIONS_PATH``
+    read (wiring the optimizer to ``get_active_projections('season')`` is
+    P-8).
+    """
     store = _get_store()
     ok = store.set_active(body.set_id)
     if not ok:
         raise HTTPException(status_code=404, detail=f"Set '{body.set_id}' not found.")
     return {"status": "ok", "set_id": body.set_id}
+
+
+@router.delete("/projections/active")
+def projections_clear(horizon: str = Query("week", description="Horizon to clear ('week' or 'season')")) -> Dict[str, Any]:
+    """Clear the active set for ``horizon``, reverting to the default source.
+
+    ``week``  → live ESPN (EspnAdapter)
+    ``season`` → legacy on-disk BBM_PROJECTIONS_PATH (optimizer P-8)
+    """
+    store = _get_store()
+    store.clear_horizon(horizon)
+    return {"status": "ok", "horizon": horizon, "message": f"Reverted {horizon} to default source."}
 
 
 # ---------------------------------------------------------------------------
