@@ -55,9 +55,22 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
   const stats = (snap?.season_stats ?? []) as Record<string, unknown>[]
   const rankings = (snap?.power_rankings ?? []) as Record<string, unknown>[]
 
+  // Moves = ADDs only (the limited weekly waiver/FA resource; the paired
+  // DROP and trades don't consume it). Trades counted separately.
   const txnCounts = useMemo(() => {
     const m: Record<string, number> = {}
     for (const t of (snap?.transactions ?? []) as Record<string, unknown>[]) {
+      if (t.action_type !== 'ADD') continue
+      const tn = norm(String(t.team_name ?? ''))
+      if (tn) m[tn] = (m[tn] || 0) + 1
+    }
+    return m
+  }, [snap?.transactions])
+
+  const tradeCounts = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const t of (snap?.transactions ?? []) as Record<string, unknown>[]) {
+      if (t.action_type !== 'TRADE') continue
       const tn = norm(String(t.team_name ?? ''))
       if (tn) m[tn] = (m[tn] || 0) + 1
     }
@@ -99,6 +112,7 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
       if (col === 'powerRank') return Number(pr.rank ?? 99)
       if (col === 'movement') return -(Number(pr.rank_change ?? 0))
       if (col === 'transactions') return txnCounts[r._tn as string] ?? 0
+      if (col === 'trades') return tradeCounts[r._tn as string] ?? 0
       return Number(stats[col] ?? 0)
     }
     return [...rows].sort((a, b) => {
@@ -106,7 +120,7 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
       const vb = get(b, sort.col)
       return (va - vb) * dir
     })
-  }, [rows, sort, txnCounts])
+  }, [rows, sort, txnCounts, tradeCounts])
 
   const weeksPlayed = Math.max(Number(snap?.week ?? week), 1)
 
@@ -181,6 +195,7 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
               <Th col="movement">±</Th>
               {/* Activity */}
               <Th col="transactions">Moves</Th>
+              <Th col="trades">Trades</Th>
             </tr>
           </thead>
           <tbody>
@@ -230,6 +245,9 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
                   </td>
                   <td className="px-2 py-2 tabular-nums text-slate-300">
                     {txnCounts[r._tn as string] ?? 0}
+                  </td>
+                  <td className="px-2 py-2 tabular-nums text-slate-300">
+                    {tradeCounts[r._tn as string] ?? 0}
                   </td>
                 </tr>
               )
