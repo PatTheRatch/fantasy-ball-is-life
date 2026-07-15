@@ -123,16 +123,23 @@ async def projections_upload(
     effective_horizon = horizon or _infer_horizon_from_df(raw_df)
     # For week-horizon uploads, default the week from the current
     # ESPN matchup period so the set auto-expires at week rollover.
+    # Must use the same value load_active receives (caller's
+    # current_matchup_period, or ESPN live if none provided).
     upload_week: Optional[int] = None
     if effective_horizon == "week":
         try:
             from backend.api.deps import _handles
             h2 = _handles()
             upload_week = int(getattr(h2.league, "currentMatchupPeriod", 0) or 0)
-            if upload_week <= 0:
-                upload_week = None
         except Exception:
             upload_week = None
+        if upload_week is None or upload_week <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Cannot determine current matchup week. "
+                       "Week-horizon uploads require a valid ESPN matchup period. "
+                       "Retry during an active matchup week.",
+            )
 
     store = _get_store()
     pset = store.save_set(
@@ -155,6 +162,7 @@ async def projections_upload(
         "row_count": pset.row_count,
         "matched_count": pset.matched_count,
         "unmatched_players": pset.unmatched_players,
+        "week": pset.week,
     }
 
 
