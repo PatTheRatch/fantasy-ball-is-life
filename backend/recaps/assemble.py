@@ -489,17 +489,17 @@ def _build_scoped_standings(league_api, week, warnings):
         except Exception:
             continue
         for m in matchups:
-            for side, opp in (("home", "away"), ("away", "home")):
+            winner = m.get("winner", "")
+            for side in ("home", "away"):
                 team = m.get(f"{side}_team", "")
                 if not team:
                     continue
-                wlt = m.get("winner", "")
-                if wlt == side:
+                if winner == team:
                     records[team]["wins"] += 1
-                elif wlt == opp:
-                    records[team]["losses"] += 1
-                else:
+                elif winner == "Tie" or not winner:
                     records[team]["ties"] += 1
+                else:
+                    records[team]["losses"] += 1
 
     if not records:
         return [], False
