@@ -26,7 +26,6 @@ from backend.draft.strategies import (
     custom_config,
     generate_portfolio,
 )
-from backend.draft import auction_sim as auction_mc
 
 
 def _load_season_projections() -> Optional[list]:
