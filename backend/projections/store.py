@@ -227,10 +227,11 @@ class ProjectionStore:
     ) -> Optional[list[PlayerProjection]]:
         """Load the currently-active set for ``horizon``, if any.
 
-        P-6 week-scoping: for ``horizon='week'``, the active set is
-        only honored when ``current_week`` is provided and matches the
-        set's ``week`` field.  If no set is active or the week doesn't
-        match, returns ``None`` (caller falls through to ESPN).
+        P-6 week-scoping: for ``horizon='week'``, a ``current_week``
+        MUST be provided and the active set's ``week`` must match it.
+        If ``current_week`` is ``None`` (e.g. badge fetches that don't
+        track the matchup week), the set is skipped and the caller falls
+        through to ESPN — stale uploads from prior weeks don't leak.
         """
         active_id = self._manifest.active.get(horizon)
         if not active_id:
@@ -241,7 +242,9 @@ class ProjectionStore:
             return None
 
         # Week-scoped check
-        if horizon == "week" and current_week is not None:
+        if horizon == "week":
+            if current_week is None:
+                return None  # require current_week for week-scoped sets
             active_set = self._find_set(active_id)
             if active_set is not None and active_set.week != current_week:
                 return None  # week mismatch → fall through

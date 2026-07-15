@@ -49,13 +49,12 @@ class TestWeekScoping:
         rows = store.load_active("week", current_week=6)
         assert rows is None
 
-    def test_active_set_ignored_without_current_week(self, store):
+    def test_active_set_requires_current_week(self, store):
         store.save_set(_sample_rows(), source="bbm", horizon="week", week=5,
                        uploaded_at="2026-01-01T00:00:00")
-        # No current_week provided → treated as match (backward compat
-        # for callers that don't pass a week — e.g. badge fetches)
+        # No current_week provided → skipped, falls through to ESPN
         rows = store.load_active("week")
-        assert rows is not None
+        assert rows is None
 
     def test_week_defaults_to_none_in_save(self, store):
         pset = store.save_set(_sample_rows(), source="bbm", horizon="season",
