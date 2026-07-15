@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronUp, ChevronDown } from 'lucide-react'
-import { getSnapshot } from '../api'
+import { getSnapshot, type JsonRecord } from '../api'
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 
@@ -78,8 +78,8 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
     }
     return standings.map((s) => {
       const tn = norm(String(s.team_name ?? s.team ?? ''))
-      const st: Record<string, unknown> = statsMap[tn] ?? {}
-      const rk: Record<string, unknown> = rankMap[tn] ?? {}
+      const st: JsonRecord = statsMap[tn] ?? {}
+      const rk: JsonRecord = rankMap[tn] ?? {}
       return { ...s, _tn: tn, _stats: st, _rank: rk }
     })
   }, [standings, stats, rankings])
@@ -88,17 +88,17 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
   const sorted: Record<string, unknown>[] = useMemo(() => {
     const dir = sort.dir === 'asc' ? 1 : -1
     const get = (r: Record<string, unknown>, col: string): number => {
-      const stats = r._stats as Record<string, unknown>
+      const stats = r._stats as JsonRecord
+      const pr = r._rank as JsonRecord
       if (col === 'rank') return Number(r.standing ?? 99)
       if (col === 'wins') return Number(r.wins ?? 0)
       if (col === 'losses') return Number(r.losses ?? 0)
       if (col === 'winPct') return Number(r.win_pct ?? 0) / 100
-      if (col === 'allplayPct') return Number(r._rank?.allplay_win_pct ?? 0) / 100
-      if (col === 'luckRatio') return Number(r._rank?.['Win % Ratio'] ?? 1)
-      if (col === 'powerRank') return Number(r._rank?.rank ?? 99)
-      if (col === 'movement') return -(Number(r._rank?.rank_change ?? 0))
+      if (col === 'allplayPct') return Number(pr.allplay_win_pct ?? 0) / 100
+      if (col === 'luckRatio') return Number(pr['Win % Ratio'] ?? 1)
+      if (col === 'powerRank') return Number(pr.rank ?? 99)
+      if (col === 'movement') return -(Number(pr.rank_change ?? 0))
       if (col === 'transactions') return txnCounts[r._tn as string] ?? 0
-      // Category: read from season_stats sub-object
       return Number(stats[col] ?? 0)
     }
     return [...rows].sort((a, b) => {
@@ -188,9 +188,10 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
               const wins = Math.round(Number(r.wins ?? 0))
               const losses = Math.round(Number(r.losses ?? 0))
               const wp = Number(r.win_pct ?? 0)
-              const rankCh = Number(r._rank?.rank_change ?? 0)
+              const rankCh = Number((r._rank as JsonRecord).rank_change ?? 0)
               const inP = r.in_playoffs === true
-              const stats = r._stats as Record<string, unknown>
+              const stats = r._stats as JsonRecord
+              const pr = r._rank as JsonRecord
               return (
                 <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                   <td className="sticky left-0 z-10 bg-slate-900 px-2 py-2 tabular-nums text-slate-400">{r.standing ?? '—'}</td>
@@ -210,13 +211,13 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
                     </td>
                   ))}
                   <td className="px-2 py-2 tabular-nums text-slate-300">
-                    {Number(r._rank?.allplay_win_pct ?? 0).toFixed(1)}%
+                    {Number(pr.allplay_win_pct ?? 0).toFixed(1)}%
                   </td>
                   <td className="px-2 py-2 tabular-nums text-slate-300">
-                    {Number(r._rank?.['Win % Ratio'] ?? 0).toFixed(2)}
+                    {Number(pr['Win % Ratio'] ?? 0).toFixed(2)}
                   </td>
                   <td className="px-2 py-2 tabular-nums text-slate-300">
-                    {r._rank?.rank ?? '—'}
+                    {String(pr.rank ?? '—')}
                   </td>
                   <td className="px-2 py-2 tabular-nums">
                     {rankCh > 0 ? (
