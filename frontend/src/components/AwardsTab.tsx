@@ -7,7 +7,6 @@ import {
   TrendingUp,
   RefreshCw,
   ArrowUpDown,
-  Users,
   Trophy,
 } from 'lucide-react'
 import { getSnapshot, getPublishedRecap } from '../api'

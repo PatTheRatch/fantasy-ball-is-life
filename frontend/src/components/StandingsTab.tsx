@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowUp, ArrowDown, ChevronUp, ChevronDown } from 'lucide-react'
+import { ChevronUp, ChevronDown } from 'lucide-react'
 import { getSnapshot } from '../api'
 
 /* ── helpers ─────────────────────────────────────────────────────── */
@@ -65,7 +65,7 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
   }, [snap?.transactions])
 
   // Join by normalized team name
-  const rows = useMemo(() => {
+  const rows: Record<string, unknown>[] = useMemo(() => {
     const statsMap: Record<string, Record<string, unknown>> = {}
     for (const r of stats) {
       const t = norm(String(r.Team ?? r.team ?? ''))
@@ -84,7 +84,7 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
   }, [standings, stats, rankings])
 
   // Sort
-  const sorted = useMemo(() => {
+  const sorted: Record<string, unknown>[] = useMemo(() => {
     const dir = sort.dir === 'asc' ? 1 : -1
     const get = (r: Record<string, unknown>, col: string): number => {
       const stats = r._stats as Record<string, unknown>
