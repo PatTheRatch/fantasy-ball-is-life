@@ -90,7 +90,8 @@ VALUE_COLS_WEEKLY = [
     "toV_weekly_proj", "League Value_weekly_proj"
 ]
 
-MATCHUP_WEEKS_2025_26 = {
+_MATCHUP_WEEK_CALENDARS: dict[int, dict[int, dict[str, str]]] = {
+    2026: {
     1:  {"start": "2025-10-21", "end": "2025-10-26"},
     2:  {"start": "2025-10-27", "end": "2025-11-02"},
     3:  {"start": "2025-11-03", "end": "2025-11-09"},
@@ -113,7 +114,19 @@ MATCHUP_WEEKS_2025_26 = {
     20: {"start": "2026-03-09", "end": "2026-03-15"}, # Playoff week
     21: {"start": "2026-03-16", "end": "2026-03-22"}, # Playoff week
     22: {"start": "2026-03-23", "end": "2026-03-29"}, # Championship week
+    },
 }
+
+# Backward-compatible alias (P-10: keyed by season year now).
+# New code should call get_matchup_weeks() instead.
+MATCHUP_WEEKS_2025_26 = _MATCHUP_WEEK_CALENDARS[2026]
+
+
+def get_matchup_weeks(season_year=None):
+    from backend.config import SEASON
+    yr = int(SEASON) if season_year is None else int(season_year)
+    return _MATCHUP_WEEK_CALENDARS.get(yr, _MATCHUP_WEEK_CALENDARS[2026])
+
 
 # Categories where a lower value wins the head-to-head. Every other scoring
 # category is higher-is-better. Turnovers are stored as natural positive counts
@@ -1649,6 +1662,21 @@ def get_projected_scoreboard(
     # --- Pull current data ---
     current_scoreboard = get_current_scoreboard(h, scoring_period=current_matchup_period)
 
+    # --- P-10: guard inverted/empty window (offseason) ---
+    # When the projection window is inverted (now > week_end), there are
+    # no games remaining — return an empty scoreboard instead of silently
+    # producing all-zero projections.
+    now = pd.Timestamp.now()
+    resolved_end = pd.to_datetime(week_end_date) if week_end_date else None
+    if resolved_end is not None and now > resolved_end:
+        # Offseason / completed week: no future games to project.
+        # Return empty — callers should show the current scoreboard only.
+        return pd.DataFrame(columns=[
+            "home_team", "away_team", "stat",
+            "projected_home_score", "projected_away_score",
+            "projected_home_result", "projected_away_result",
+        ])
+
     # --- P-6: explicit per-request choice wins over store ---
     # When the caller says "use BBM" AND provides a file, skip the store
     # entirely — this is a one-shot override that does NOT mutate the
@@ -1692,7 +1720,6 @@ def get_projected_scoreboard(
             current_matchup_period=current_matchup_period,
             projections=projections,
         )
-        team_rosters.to_csv(f"week_{current_matchup_period+1}_roster.csv", index=False)  # debug output
 
         # Build projected future stats from legacy roster columns
         if projections != 'BBM':
@@ -1821,7 +1848,6 @@ def get_projected_scoreboard(
 
     # --- Add opponent column (one opponent per team for this week) ---
 
-    final_scoreboard.to_csv(f'Week {current_matchup_period}_scoreboard.csv', index=False)
 
     return final_scoreboard
 
