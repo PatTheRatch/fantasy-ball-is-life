@@ -310,6 +310,13 @@ def assemble_weekly_snapshot(
         playoff_context=playoff_context,
     )
 
+    # F2-5: compute deterministic awards from the assembled snapshot so
+    # award_candidates is always populated (even pre-generation).  The AI
+    # explanation line stays gated on a published recap.
+    from backend.recaps.awards import select_awards
+
+    snapshot.award_candidates = select_awards(snapshot)
+
     # Cache the result so the follow-up generate request reuses this assembly.
     # Only cache when the data is actually ready — a degraded snapshot from a
     # transient ESPN blip should not block recovery for the full TTL.
