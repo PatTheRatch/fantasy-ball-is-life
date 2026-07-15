@@ -194,7 +194,7 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
               const pr = r._rank as JsonRecord
               return (
                 <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                  <td className="sticky left-0 z-10 bg-slate-900 px-2 py-2 tabular-nums text-slate-400">{r.standing ?? '—'}</td>
+                  <td className="sticky left-0 z-10 bg-slate-900 px-2 py-2 tabular-nums text-slate-400">{String(r.standing ?? '—')}</td>
                   <td className="sticky left-[32px] z-10 bg-slate-900 px-2 py-2 font-medium text-white">
                     <div className="flex items-center gap-1.5">
                       {inP ? <span className="text-[10px] text-amber-400">★</span> : null}
