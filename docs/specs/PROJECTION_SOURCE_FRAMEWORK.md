@@ -281,3 +281,64 @@ so in the endpoint description rather than leaving it implicit.
 | **P-7** | Badge + picker: `ProjectionBadge` reads the true active set (incl. virtual ESPN, e.g. via an `is_active` flag or a dedicated active endpoint); In-Season source picker gains an "Uploaded set" option and a switch-back-to-ESPN affordance | Depends on P-6 |
 | **P-8** | Deliver P-3's original claim: wire `get_active_projections('season')` into the draft router's `OptimizeLineup` construction sites (legacy disk read as fallback); contract test at the router level, not just the translation function | Closes the "capability-only" finding |
 | **P-9** | Small fixes: `HashtagAdapter` derives FG%/FT% from FGM/FGA + FTM/FTA when only makes/attempts are present (or the dead mapping + comment are removed); remove unused `_BASE_STATS`; derive the `{SEASON}_last_N` stats key from config in both `get_current_rosters()` and `EspnAdapter` | Independent of P-6/P-7; can land any time |
+
+---
+
+## Addendum: season-boundary robustness + intra-week validation (2026-07-15)
+
+Prompted by two questions from Patrick while P-6 was in flight: what happens
+when the season is over or not yet started, and can the intra-week projected
+scoreboard actually be tested. Both investigated against the live league in
+its current (offseason) state; findings below.
+
+### What actually happens at the boundaries (verified live)
+
+- **Season over (current state):** benign. The real endpoint forces the
+  projection window to `now → week_end`; in the offseason that's *inverted*
+  (start after end), so zero games fall in it → projected == current final
+  tallies. `get_projected_scoreboard()` runs without error and shows finals.
+  Two minor artifacts:
+  - It writes a stray `Week {N}_scoreboard.csv` (and a `week_{N}_roster.csv`
+    on the legacy path) into the process working directory on **every** call —
+    leftover debug `.to_csv`. Real litter/perf bug.
+  - Viewing a *completed* week in projected mode with that week's own explicit
+    dates (not `now`) double-counts: current already holds the whole week and
+    the projection adds the same games again.
+- **Preseason (before week 1, games scheduled but unplayed):** the ideal case —
+  current == 0, full week projected. Fine.
+- **Next season (2026-27) — the real landmine:** the weekly calendar is a
+  hardcoded constant, `MATCHUP_WEEKS_2025_26`, containing 2025-26 dates only.
+  At rollover `currentMatchupPeriod` resets to 1, but week 1 still maps to last
+  October's dates, so the window never overlaps the new schedule →
+  `games_left = 0` for everyone → **projections silently return all zeros.**
+  Compounded by the `2026_last_N` stats-key hardcode (P-9). The feature does
+  not error at season start — it quietly returns nothing until both the
+  calendar and the stats-key year are updated, which is worse because nobody
+  notices.
+
+### Can intra-week be tested now?
+
+- **Not against live ESPN:** offseason has no in-progress games, and the
+  `now → week_end` window is empty, so the live path yields zero projections.
+  Genuine live validation is only possible once 2026-27 games are being played
+  (~Oct 2026) *and* the calendar is fixed.
+- **Historical replay does not work:** ESPN finalizes completed weeks, so
+  `get_current_scoreboard(past_week)` returns full-week finals, never a
+  "3 of 5 games played" mid-week snapshot. Replaying a past week gives
+  `final + remaining-games projection` = double count; a genuine partial week
+  cannot be reconstructed from history.
+- **What works now:** a synthetic-fixture integration test. Build a fake
+  `ESPNHandles` (teams/rosters with Last-N averages + a schedule, plus a fake
+  partial box score) representing "Wednesday, 3 of 5 games played," and assert
+  the merge: `projected == current + avg × games_left`, plus the per-category
+  W/L logic. This validates the merge math and would catch the double-count and
+  inverted-window bugs. It does **not** validate live ESPN field shapes — that
+  is inherently a live-season check. (P-6's tests cover store/registry
+  precedence but no test exercises the current+projected merge itself.)
+
+### Fix-PR additions
+
+| PR | Scope | Notes |
+|---|---|---|
+| **P-10** | Season-boundary robustness: de-hardcode the weekly calendar (derive per-season, or key it by `config.SEASON` so rollover doesn't silently zero everything) and pair it with P-9's stats-key year fix; guard the inverted/empty window explicitly (return "no projection available" state rather than a misleading zeroed one); remove the stray `.to_csv` debug writes from the scoreboard/roster path | Higher-stakes than P-9's cosmetics — this is what silently breaks the whole projected view at next season's start |
+| **P-11** | Synthetic intra-week integration test: a fake `ESPNHandles` at a mid-week state (partial box score + games remaining) asserting `projected == current + avg × games_left` and the per-category W/L result; the only way to validate the merge before live games return | Closes the untested-merge gap; complements P-6's precedence tests |
