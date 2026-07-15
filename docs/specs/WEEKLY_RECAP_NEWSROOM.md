@@ -806,3 +806,83 @@ Deterministic-only — no `AiTakeBadge` on this tab.
 Additive tab (flip `enabled: false` to remove). `in_playoffs` is a purely
 additive standings-row field; nothing else reads it, so it can't regress other
 tabs.
+
+---
+
+## Addendum: Post-launch fixes for the Awards & Standings tabs (2026-07-15)
+
+Two defects found after F2-5 / F2-6 shipped. Each is its own fix-PR for Aisha.
+(Two smaller frontend/award-count fixes — Transaction Addict ADD-only, and the
+Standings Moves/Trades split — were handled directly by Claude in PR #40 / #41
+and are not repeated here.)
+
+### FIX-A — Team of the Week is a duplicate of Blowout of the Week
+
+**Symptom.** `team-of-the-week` and `blowout-of-the-week` almost always name the
+same team.
+
+**Cause.** In `backend/recaps/awards.py`, `team-of-the-week` picks
+`max(decided, key=max(home_category_wins, away_category_wins))` — the team that
+won the most categories *in its own matchup*. With 9 categories and no ties,
+`home_wins + away_wins = 9`, so blowout margin `|home - away|` is a monotonic
+function of that same count. Both awards therefore optimize the same quantity
+and collapse onto the same matchup.
+
+**Fix — make Team of the Week a single-week all-play winner.** Award it to the
+team that would have gone best head-to-head against the *entire field* this
+week, not just its scheduled opponent. The machinery already exists:
+`WeeklyScoreboard.all_play(weeks=[week])` (`backend/league/scoreboard.py:217`)
+returns, per team, `Matchup Wins` (how many of the other N-1 teams it would have
+beaten on category count) and `Total Wins` (category-all-play wins across the
+field). Pick `max(rows, key=lambda r: (r["Matchup Wins"], r["Total Wins"]))`.
+
+- The single-week all-play isn't currently in the snapshot — `power_rankings` /
+  `season_stats` only call `all_play` over multi-week windows. Thread a
+  single-week all-play result into `assemble_weekly_snapshot` (reuse the
+  already-constructed `board` if possible — see FIX-B, same concern) and hand it
+  to `select_awards`, or compute it inside `select_awards` from a new snapshot
+  field.
+- Leave `blowout-of-the-week` unchanged — margin-in-your-own-game is the correct
+  definition for that one.
+- Test: on a fixture where the real-opponent winner and the field-wide winner
+  differ, the two awards name different teams.
+
+### FIX-B — Standings are always live-current, and win% is on the wrong scale
+
+**Symptom 1.** Browsing Week 12's recap shows the *same* standings as Week 21 —
+they never reflect the selected week.
+
+**Symptom 2.** Win% displays as `0.6%` for a ~63% team.
+
+**Cause.** `assemble_weekly_snapshot` calls `league_api.league_standings()` →
+`feed.standings_df(h)` (`backend/league/data_feed.py:805`), which reads ESPN's
+*live* `team.wins/losses/standing` (no week parameter anywhere in the chain).
+And `standings_df` stores `win_pct` as a 0–1 fraction, whereas every other
+`_pct` field (`allplay_win_pct`, `actual_win_pct`) is 0–100 — the frontend
+`StandingsTab.tsx` already assumes 0–100.
+
+**Fix.**
+1. **Week-scope the record.** Reuse `board.all_play(weeks=range(1, week+1))`
+   (already computed for power rankings via `assemble.py`'s `weeks_csv`). Its
+   `Actual Wins / Actual Losses / Actual Ties` are the real head-to-head record
+   accumulated through week N (`scoreboard.py:182-199`) — exactly "standings as
+   of this week." Rank teams by Actual Win % descending to produce `standing`
+   (do **not** use ESPN's live `playoffSeed`, also always current-day).
+2. **Fix the scale.** Emit `win_pct` (and any replacement) as 0–100, matching
+   the other `_pct` fields. No frontend change needed.
+3. **Avoid a second ESPN round-trip.** Prefer reusing one `_scoreboard()` /
+   `board` instance for both power rankings and standings within the same
+   assembly request rather than re-instantiating.
+4. **Reconcile `in_playoffs`.** `_annotate_standings_playoffs`
+   (`assemble.py:358`) compares `standing` to `playoff_team_count`. Once
+   `standing` is the recomputed week-scoped rank, keep comparing against that
+   recomputed rank (the point is "as of this week"), not ESPN's live seed.
+5. Team identity (name/owners) still comes from live team metadata — only the
+   record is week-scoped.
+
+**Tests.** Two different browsed weeks yield different W/L/rank (currently
+identical — the repro); a known team renders `63.0%` not `0.6%`; existing
+`test_recaps.py` / `test_snapshot_cache.py` stay green.
+
+**Rollback.** Revert to `league_api.league_standings()` — week-blind again, as
+today.
