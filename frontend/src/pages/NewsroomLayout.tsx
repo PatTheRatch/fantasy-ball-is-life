@@ -9,6 +9,7 @@ import { MatchupsTab } from '../components/MatchupsTab'
 import { PowerRankingsTab } from '../components/PowerRankingsTab'
 import { TransactionsTab } from '../components/TransactionsTab'
 import { AwardsTab } from '../components/AwardsTab'
+import { StandingsTab } from '../components/StandingsTab'
 
 const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 
@@ -24,7 +25,7 @@ const TABS: TabDef[] = [
   { id: 'matchups', label: 'Matchups', Icon: Swords, enabled: true },
   { id: 'power-rankings', label: 'Power Rankings', Icon: TrendingUp, enabled: true },
   { id: 'transactions', label: 'Transactions', Icon: ArrowRightLeft, enabled: true },
-  { id: 'standings', label: 'Standings', Icon: Table2, enabled: false },
+  { id: 'standings', label: 'Standings', Icon: Table2, enabled: true },
   { id: 'awards', label: 'Awards', Icon: Trophy, enabled: true },
 ]
 
@@ -193,7 +194,10 @@ export function NewsroomLayout() {
       {activeTab === 'awards' && (
         <AwardsTab slug={effectiveSlug} season={season} week={week} />
       )}
-      {activeTab !== 'weekly-recap' && activeTab !== 'matchups' && activeTab !== 'power-rankings' && activeTab !== 'transactions' && activeTab !== 'awards' && (
+      {activeTab === 'standings' && (
+        <StandingsTab slug={effectiveSlug} season={season} week={week} />
+      )}
+      {activeTab !== 'weekly-recap' && activeTab !== 'matchups' && activeTab !== 'power-rankings' && activeTab !== 'transactions' && activeTab !== 'awards' && activeTab !== 'standings' && (
         <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-900/40 p-8">
           <p className="text-center text-slate-500">
             <span className="block text-lg font-semibold">Coming soon</span>
