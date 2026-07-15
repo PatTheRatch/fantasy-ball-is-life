@@ -34,7 +34,14 @@ export function ProjectionBadge({ horizon }: { horizon: 'season' | 'week' }) {
         </div>
       )
     }
-    return null
+    // Season with no active set → show a neutral badge
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-700/60 bg-slate-900/80 px-3 py-1 text-xs text-slate-400">
+        <span className="font-medium text-slate-300">Projections</span>
+        <span className="text-slate-500">·</span>
+        <span>none active</span>
+      </div>
+    )
   }
 
   return (
