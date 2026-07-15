@@ -285,6 +285,9 @@ def assemble_weekly_snapshot(
         "recap assembly: playoff_context took %.2fs", time.perf_counter() - playoff_started
     )
 
+    # F2-6: annotate standings with in_playoffs flag.
+    _annotate_standings_playoffs(standings)
+
     snapshot = WeeklyFactSnapshot(
         league={
             "id": league["id"],
@@ -349,6 +352,34 @@ def _championship_split(
     championship = [name for seed, name in seeded if seed <= playoff_team_count]
     consolation = [name for seed, name in seeded if seed > playoff_team_count]
     return championship, consolation
+
+
+
+def _annotate_standings_playoffs(standings: list[dict[str, Any]]) -> None:
+    """F2-6: tag each standings row with in_playoffs (True/False).
+
+    Uses the standings'' standing'' (ESPN playoffSeed) field — seeds
+    1..playoff_team_count made the real playoffs.  playoff_team_count
+    is read from the live league settings (fetches independently
+    so this helper works standalone; the assembly path still calls
+    _build_playoff_context for the rich playoff-context data).
+
+    Mutates standings rows in place so the field round-trips through
+    the JSON store (a new scalar on the snapshot would silently drop).
+    """
+    for row in standings:
+        row["in_playoffs"] = False  # default
+    try:
+        settings = league_api.league_settings()
+        ptc = settings.get("playoff_team_count")
+        if ptc:
+            ptc = int(ptc)
+            for row in standings:
+                seed = row.get("standing")
+                if seed is not None:
+                    row["in_playoffs"] = int(seed) <= ptc
+    except Exception:
+        pass  # settings unavailable — all rows stay False
 
 
 def _build_playoff_context(
