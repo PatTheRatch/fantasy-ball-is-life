@@ -53,7 +53,7 @@ control. Both now archived read-only; the consolidated code lives in this repo.
 | FastAPI backend (`backend/api/`, routers by concern) | League meta, standings, power rankings, matchup win-probability, rosters, transactions, scoreboards, projections upload, optimizer, Draft Room | **Keep · backbone** |
 | AI commentary (`/matchup-commentary`, `/league-recap`, `/season-commentary`) | Calls Claude to write recaps directly — already replaces the ChatGPT copy-paste workflow. Uses a deprecated model in 3 spots | **Keep · update model** |
 | React web app (`frontend/`, React 19 + Vite + Tailwind) | In-Season, Recap, Season pages built; API client fully wired; Draft page is a 26-line stub | **Keep · finish** |
-| Streamlit dashboard (`app.py`, 4 tabs) | Draft Optimizer / In-Season / Weekly Recap / Season — the working internal tool | **Keep as internal** |
+| Streamlit dashboard (`app.py`, 4 tabs) | Draft Optimizer / In-Season / Weekly Recap / Season — the working internal tool | **Retired (P-1, tag `legacy-streamlit`, 2026-07-16).** Tag marks the last commit containing `app.py`; `git checkout tags/legacy-streamlit` + `streamlit run app.py` restores the internal tool for reference. |
 | Config + docs (`config.py`, `requirements.txt`, `ESPN_ACCESS_HANDOFF.md`) | Env-var credentials; the handoff doc written to seed exactly this project | **Keep** |
 
 ---

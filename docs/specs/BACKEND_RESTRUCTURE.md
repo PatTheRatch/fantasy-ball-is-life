@@ -48,8 +48,7 @@ layout (13 top-level modules at the time of writing, 6 of them draft-related).
 ## 2. Acceptance criteria
 
 1. All backend modules live under a `backend/` package, grouped by concern
-   (§4 layout). No root-level `.py` files except `app.py` (Streamlit
-   internal tool, which imports from the package).
+   (§4 layout). No root-level `.py` files.
 2. **Zero wire-format changes.** Every endpoint keeps its exact path,
    request schema, and response schema. The frontend requires no changes
    beyond none at all — `frontend/src/api.ts` is untouched.
@@ -101,7 +100,6 @@ No externally visible API or UI change (criterion 2). Internal layout:
           commentary.py          # /matchup-commentary, /league-recap, /season-commentary
           projections.py         # /projections upload + feed
           optimizer.py           # legacy /optimizer/* endpoints
-    app.py                       # Streamlit internal tool (root), imports backend.*
     tests/                       # imports updated, structure unchanged
 
 **Phasing:**
@@ -109,7 +107,7 @@ No externally visible API or UI change (criterion 2). Internal layout:
 - **PR 1 — the move + rename.** `git mv` modules into the package **with
   their new basenames** (Aisha Q2: rename now — `optimize_lineup.py` →
   `draft/optimizer.py`, `draft_strategies.py` → `draft/strategies.py`, etc.),
-  update imports everywhere (tests, `app.py`), add the empty reserved
+  update imports everywhere (tests), add the empty reserved
   `backend/projections/__init__.py` (Aisha Q3), and keep `api.py` intact as
   `backend/api/main.py` plus the deprecated root shim (§6). Mechanical;
   reviewable as a rename diff.
@@ -131,7 +129,7 @@ redundant prefix drops — that navigability *is* the point of the restructure.
   which also proves no import silently depends on the old layout.
 - Manual smoke after PR 1 and PR 2: `uvicorn backend.api.main:app` boots;
   `/health` 200; one `/draft/plans` round trip against the ESPN-isolated
-  launcher (same pattern the test suite uses); `streamlit run app.py` boots.
+  launcher (same pattern the test suite uses).
 - `pip install -e .`-style packaging is explicitly **out of scope** (no
   `pyproject.toml` build config yet — the repo is an app, not a library).
 
