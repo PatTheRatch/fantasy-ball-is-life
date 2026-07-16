@@ -1,15 +1,23 @@
 # Feature Spec: Product Platform Overhaul — GM's Cockpit Shell
 
-**Status: DRAFT** — pending Patrick (product) + Aisha (architecture) review.
-Nothing in the P-series is implementation-authorized until this header says
-APPROVED.
+**Status: APPROVED** — Patrick (product) authorized implementation
+2026-07-16 ("start implementing — get this popping"), confirming
+D-P1..D-P6. The Q-A architecture questions are resolved with the spec's
+proposed defaults (recorded in §2); Aisha may re-open any of them via a
+spec addendum PR if implementation surfaces a real problem — flag first,
+don't silently diverge.
+
+**Delivery model:** all P-series work lands on the integration branch
+**`platform/p-series`**, NOT `main` — see §14. `main` keeps serving the
+league untouched until Patrick signs off on the overhaul as a whole.
 
 **Handoff note for agents (Claude, Codex, Cursor):** this spec is the single
 source of truth for the platform overhaul. Before implementing, read this
 spec + `docs/PROJECT_DOSSIER.md` + `docs/AISHA_OPERATING_MANUAL.md` +
 `CONTRIBUTING.md`. Commit often, write tests, keep PRs small and in the
 stated order — later PRs assume earlier ones landed. If you hit an ambiguity
-not covered here, flag it — do not guess. Pull `main` before starting.
+not covered here, flag it — do not guess. All P-series work branches from
+and merges back to `platform/p-series` (see §14), never `main`.
 
 **Author:** Claude Code (lead engineer), from the full product/UX/architecture
 review conducted 2026-07-16 at Patrick's request.
@@ -121,18 +129,28 @@ this spec must leave that a config flip, per Dossier Decision A.
   (recap draft, AI commentary), publish/rollback, solver runs, admin
   force-refresh. "Load X" buttons are a bug after P-6.
 
-### Open for Aisha (architecture review)
+### Resolved architecture defaults (locked 2026-07-16 with product sign-off)
 
-- **Q-A1.** Worker runtime: Render Cron Job invoking a FastAPI admin
-  endpoint, vs. a separate worker process, vs. Supabase pg_cron + HTTP
-  trigger. Spec assumes **Render Cron → authenticated FastAPI endpoint**
-  (fewest moving parts; same codebase, same deploy). Push back if wrong.
-- **Q-A2.** Refresh cadence: proposed 15 min during NBA game windows
-  (~23:00–06:00 UTC in season), 6 h otherwise, manual force-refresh for
-  admins. Tune freely.
-- **Q-A3.** Snapshot table design: extend `league_week_snapshots` vs. new
-  `league_state_snapshots` table (§3.3 proposes the latter — different
-  lifecycle: rolling current-state vs. immutable per-week editorial record).
+- **Q-A1 → resolved.** Worker runtime: **Render Cron Job → authenticated
+  FastAPI endpoint** (`POST /admin/refresh/{league_id}`, guarded by a
+  `WORKER_SECRET` env var compared constant-time). Fewest moving parts:
+  same codebase, same deploy, no second service. Re-open only if run
+  durations start exceeding Render's HTTP timeout for cron-invoked calls.
+- **Q-A2 → resolved.** Cadence: **15 min during NBA game windows, 6 h
+  otherwise**, both configurable via env (`REFRESH_CRON_ACTIVE`,
+  `REFRESH_CRON_IDLE`) so tuning is a dashboard edit, not a deploy. Admin
+  force-refresh button in the publishing desk.
+- **Q-A3 → resolved.** **New `league_state_snapshots` table** per §3.3 —
+  rolling current-state upserts are a different lifecycle from
+  `league_week_snapshots`' immutable editorial records; mixing them invites
+  accidental overwrites of published history. `week` stays a data column,
+  NOT part of the unique key (the unique key is `league_id, season, phase`
+  — one live row per phase).
+- **§4 encryption → resolved.** ESPN creds encrypted with **pgcrypto
+  (symmetric, key from backend env `CRED_ENCRYPTION_KEY`)**, decrypted only
+  in the worker path. No Supabase Vault dependency. Columns are
+  service-role-only via RLS either way; the cookies are short-lived
+  credentials, not passwords.
 
 ---
 
@@ -216,8 +234,8 @@ as `recap_editions`), writable by service role only.
 ## 4. Multi-league configuration (closing the audit finding)
 
 - `leagues` table gains: `espn_league_id bigint`, `espn_season int`,
-  `espn_swid text`, `espn_s2 text` (encrypted at rest — Supabase Vault or
-  pgcrypto; Aisha to pick), `timezone text`.
+  `espn_swid text`, `espn_s2 text` (encrypted at rest via pgcrypto — see
+  the resolved §2 default), `timezone text`.
 - The worker iterates `leagues` rows; `connect()` / `get_cached_my_league()`
   take explicit `(league_id, season, credentials)` instead of reading
   module constants. `config.LEAGUE_ID` / `SWID` / `ESPN_S2` become the
@@ -399,6 +417,37 @@ mid-build.
 - Light mode, native mobile wrapper.
 - Public self-serve signup (invite-gated only until launch decision).
 - Bot delivery of recaps (existing future phase, unchanged).
+
+---
+
+## 14. Branching & delivery model (P-series)
+
+Patrick's requirement: the overhaul must be testable side-by-side against
+the current app, with `main` continuing to serve the league untouched.
+
+- **Integration branch: `platform/p-series`**, cut from `main` at spec
+  approval. Every P-x lands as its own PR **targeting
+  `platform/p-series`**, never `main`. CI runs on all PRs regardless of
+  base, so each P-x still gets the full backend+frontend gate.
+- **Keeping current:** before opening each new P-x PR, merge latest `main`
+  into `platform/p-series` (`git checkout platform/p-series && git merge
+  origin/main`) so in-season fixes on `main` keep flowing in. Resolve
+  conflicts on the integration branch, never by rebasing published
+  history.
+- **Preview deployment (Patrick, one-time Render setup):** duplicate the
+  two Render services — a second Web Service and a second Static Site,
+  both with **Branch = `platform/p-series`**, same env vars plus the new
+  ones each P-x introduces (`WORKER_SECRET`, `REFRESH_CRON_*`,
+  `CRED_ENCRYPTION_KEY`), and the preview frontend's `VITE_API_BASE`
+  pointed at the preview backend URL (plus that origin added via the
+  preview backend's `PUBLIC_APP_URL`). Supabase: the preview stack may
+  share the production Supabase project — new tables (§3.3) are additive
+  and RLS-guarded — but destructive migration testing happens on a
+  Supabase branch/staging project first.
+- **Definition of done for the whole series:** P-1..P-8 merged to
+  `platform/p-series`, §3.5 criteria green on the preview stack, Patrick
+  has lived on the preview app for at least a week of real usage, then one
+  reviewed merge of `platform/p-series` → `main` ships the overhaul.
 
 ---
 
