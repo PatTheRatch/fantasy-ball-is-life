@@ -1521,48 +1521,64 @@ def get_current_rosters(
     return team_rosters
 
 
+# Counting categories for the lineup-based catalyst feature.
+# FG%/FT% don't sum; TO framing is negative — skip all three.
+CATALYST_COUNTING_STATS = {"PTS", "REB", "AST", "STL", "BLK", "3PM"}
+# Slots whose stats don't contribute to the team's category total.
+CATALYST_BENCH_SLOTS = {"BE", "IR", "FA"}
+
+
+def lineup_catalyst_data(lineup) -> dict[str, dict]:
+    """Sum active-slot players' per-category totals & find the top contributor.
+
+    Returns ``{stat: {"leader_name": str|None, "leader_value": float,
+    "team_total": float}}`` for each counting stat. Bench/IR players are
+    excluded so ``team_total`` matches ESPN's official category value.
+
+    IMPORTANT — reliability caveat: this reads ``BoxPlayer.points_breakdown``,
+    which espn-api populates from the *last* stat split in the player's stats
+    array. That split is not guaranteed to be the matchup-period (weekly) total
+    — it can be a season split or a projection depending on ESPN's payload
+    ordering. The downstream sanity gate in ``canonical_matchups`` (drop the
+    catalyst when ``team_total`` != the official category value) is the guard:
+    if the split is wrong the sums won't match and the catalyst is silently
+    discarded rather than shown incorrectly. This function must therefore stay
+    cheap and side-effect free, and is unit-tested against synthetic lineups.
+    """
+    if not lineup:
+        return {}
+    sums: dict[str, float] = {s: 0.0 for s in CATALYST_COUNTING_STATS}
+    leaders: dict[str, list[tuple[str, float]]] = {s: [] for s in CATALYST_COUNTING_STATS}
+    for player in lineup:
+        slot = getattr(player, "slot_position", "FA") or "FA"
+        if slot in CATALYST_BENCH_SLOTS:
+            continue
+        pb = getattr(player, "points_breakdown", {}) or {}
+        name = getattr(player, "name", None)
+        for s in CATALYST_COUNTING_STATS:
+            v = pb.get(s, 0)
+            if v:
+                try:
+                    vf = float(v)
+                except (TypeError, ValueError):
+                    continue
+                sums[s] += vf
+                leaders[s].append((name, vf))
+    # Sort leaders descending per stat, pick the top.
+    result: dict[str, dict] = {}
+    for s in CATALYST_COUNTING_STATS:
+        leaders[s].sort(key=lambda x: x[1], reverse=True)
+        top = leaders[s][0] if leaders[s] else (None, 0.0)
+        result[s] = {
+            "leader_name": top[0],
+            "leader_value": top[1],
+            "team_total": sums[s],
+        }
+    return result
+
+
 def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None) -> pd.DataFrame:
-    # Counting categories for the lineup-based catalyst feature.
-    # FG%/FT% don't sum; TO framing is negative — skip all three.
-    _CATALYST_COUNTING_STATS = {"PTS", "REB", "AST", "STL", "BLK", "3PM"}
-    # Slots that don't contribute to the category total.
-    _CATALYST_BENCH_SLOTS = {"BE", "IR", "FA"}
-
-    def _lineup_catalyst_data(lineup) -> dict[str, dict]:
-        """Sum active-slot players' per-category totals & find the top contributor.
-
-        Returns ``{stat: {\"leader_name\": str, \"leader_value\": float,
-        \"team_total\": float}}`` for each counting stat.
-        """
-        if not lineup:
-            return {}
-        sums: dict[str, float] = {s: 0.0 for s in _CATALYST_COUNTING_STATS}
-        leaders: dict[str, list[tuple[str, float]]] = {s: [] for s in _CATALYST_COUNTING_STATS}
-        for player in lineup:
-            slot = getattr(player, "slot_position", "FA") or "FA"
-            if slot in _CATALYST_BENCH_SLOTS:
-                continue
-            pb = getattr(player, "points_breakdown", {}) or {}
-            for s in _CATALYST_COUNTING_STATS:
-                v = pb.get(s, 0)
-                if v:
-                    try:
-                        vf = float(v)
-                    except (TypeError, ValueError):
-                        continue
-                    sums[s] += vf
-                    leaders[s].append((player.name, vf))
-        # Sort leaders descending per stat, pick the top.
-        result: dict[str, dict] = {}
-        for s in _CATALYST_COUNTING_STATS:
-            leaders[s].sort(key=lambda x: x[1], reverse=True)
-            top = leaders[s][0] if leaders[s] else (None, 0.0)
-            result[s] = {
-                "leader_name": top[0],
-                "leader_value": top[1],
-                "team_total": sums[s],
-            }
-        return result
+    _CATALYST_COUNTING_STATS = CATALYST_COUNTING_STATS
 
     current_scoreboards = []
     if scoring_period is None or scoring_period <= h.league.currentMatchupPeriod:
@@ -1592,10 +1608,10 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
                 pass
 
             # --- Catalyst: compute active-slot leader per counting stat ---
-            home_cat = _lineup_catalyst_data(
+            home_cat = lineup_catalyst_data(
                 getattr(matchup, "home_lineup", None) or []
             )
-            away_cat = _lineup_catalyst_data(
+            away_cat = lineup_catalyst_data(
                 getattr(matchup, "away_lineup", None) or []
             )
 

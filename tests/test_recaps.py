@@ -1217,3 +1217,91 @@ class TestCategoryCatalyst:
         m = matchups[0]
         pts = next(c for c in m["categories"] if c["stat"] == "PTS")
         assert "catalyst" not in pts
+
+
+# ── lineup_catalyst_data: the real box-score extraction path ──────────
+# These exercise data_feed.lineup_catalyst_data directly (bench exclusion,
+# leader selection, active-slot summation) — the logic the synthetic
+# canonical_matchups tests above never touch because they inject the
+# already-computed catalyst fields.
+from backend.league.data_feed import lineup_catalyst_data
+
+
+class _FakePlayer:
+    """Minimal BoxPlayer stand-in: name, slot_position, points_breakdown."""
+
+    def __init__(self, name, slot_position, points_breakdown):
+        self.name = name
+        self.slot_position = slot_position
+        self.points_breakdown = points_breakdown
+
+
+class TestLineupCatalystData:
+    def test_empty_lineup_returns_empty(self):
+        assert lineup_catalyst_data([]) == {}
+        assert lineup_catalyst_data(None) == {}
+
+    def test_active_sum_and_leader(self):
+        lineup = [
+            _FakePlayer("Jokic", "PG", {"PTS": 300, "REB": 120}),
+            _FakePlayer("Role", "SG", {"PTS": 150, "REB": 40}),
+        ]
+        out = lineup_catalyst_data(lineup)
+        assert out["PTS"]["team_total"] == 450.0
+        assert out["PTS"]["leader_name"] == "Jokic"
+        assert out["PTS"]["leader_value"] == 300.0
+        assert out["REB"]["leader_name"] == "Jokic"
+        assert out["REB"]["team_total"] == 160.0
+
+    def test_bench_and_ir_excluded_from_total(self):
+        lineup = [
+            _FakePlayer("Starter", "SF", {"STL": 20}),
+            _FakePlayer("Benched", "BE", {"STL": 100}),
+            _FakePlayer("Injured", "IR", {"STL": 100}),
+            _FakePlayer("FreeAgent", "FA", {"STL": 100}),
+        ]
+        out = lineup_catalyst_data(lineup)
+        # Only the SF's 20 counts; bench/IR/FA are dropped.
+        assert out["STL"]["team_total"] == 20.0
+        assert out["STL"]["leader_name"] == "Starter"
+
+    def test_leader_is_max_not_first(self):
+        lineup = [
+            _FakePlayer("Small", "PG", {"BLK": 2}),
+            _FakePlayer("Big", "C", {"BLK": 9}),
+            _FakePlayer("Mid", "PF", {"BLK": 5}),
+        ]
+        out = lineup_catalyst_data(lineup)
+        assert out["BLK"]["leader_name"] == "Big"
+        assert out["BLK"]["leader_value"] == 9.0
+        assert out["BLK"]["team_total"] == 16.0
+
+    def test_non_counting_stats_absent_from_output(self):
+        lineup = [_FakePlayer("A", "PG", {"PTS": 10, "FG%": 0.5, "TO": 3})]
+        out = lineup_catalyst_data(lineup)
+        assert set(out.keys()) == {"PTS", "REB", "AST", "STL", "BLK", "3PM"}
+        assert "FG%" not in out
+        assert "TO" not in out
+
+    def test_missing_breakdown_and_nonnumeric_are_safe(self):
+        lineup = [
+            _FakePlayer("NoData", "PG", {}),
+            _FakePlayer("Garbage", "SG", {"AST": "not-a-number"}),
+            _FakePlayer("Real", "SF", {"AST": 12}),
+        ]
+        out = lineup_catalyst_data(lineup)
+        assert out["AST"]["team_total"] == 12.0
+        assert out["AST"]["leader_name"] == "Real"
+        # A stat nobody recorded yields no leader, zero total.
+        assert out["PTS"]["leader_name"] is None
+        assert out["PTS"]["team_total"] == 0.0
+
+    def test_missing_slot_position_defaults_to_excluded_fa(self):
+        # A player object without slot_position falls back to "FA" -> excluded.
+        class _NoSlot:
+            name = "Ghost"
+            points_breakdown = {"PTS": 50}
+
+        out = lineup_catalyst_data([_NoSlot()])
+        assert out["PTS"]["team_total"] == 0.0
+        assert out["PTS"]["leader_name"] is None
