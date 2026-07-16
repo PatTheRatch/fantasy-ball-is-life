@@ -15,6 +15,23 @@ function winnerLabel(row: Record<string, unknown>): string {
   return `${home} ${homeWins}–${awayWins} ${away}`
 }
 
+function GameCount({
+  homeGp,
+  awayGp,
+}: {
+  homeGp: unknown
+  awayGp: unknown
+}) {
+  const h = typeof homeGp === 'number' ? homeGp : null
+  const a = typeof awayGp === 'number' ? awayGp : null
+  if (h === null && a === null) return null
+  return (
+    <span className="ml-2 text-xs text-slate-500 tabular-nums">
+      ({h ?? '—'} GP vs {a ?? '—'} GP)
+    </span>
+  )
+}
+
 function CategoryBreakdown({ categories }: { categories: Record<string, unknown>[] }) {
   return (
     <div className="mt-3 overflow-x-auto">
@@ -180,6 +197,7 @@ function MatchupCard({
           <p className="font-bold text-white">
             {winnerLabel(row)}
             <BracketBadge bracket={row.bracket} />
+            <GameCount homeGp={row.home_games_played} awayGp={row.away_games_played} />
           </p>
           {tiebreakResolved && (
             <p className="mt-0.5 text-xs text-amber-400">

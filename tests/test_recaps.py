@@ -955,3 +955,265 @@ def test_generate_recovers_from_malformed_llm_json(monkeypatch):
 
     result = generate.generate_structured_recap(snapshot)
     assert "big" in result.headline
+
+
+# ── Matchup enrichments: GP + Catalyst ────────────────────────────────
+
+_COUNTING_STATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM"]
+
+
+def _make_scoreboard_row(
+    home_team="Alpha",
+    away_team="Beta",
+    stat="PTS",
+    home_score=100,
+    away_score=90,
+    *,
+    home_gp=None,
+    away_gp=None,
+    home_leader_name=None,
+    home_leader_value=None,
+    home_team_total=None,
+    away_leader_name=None,
+    away_leader_value=None,
+    away_team_total=None,
+    espn_winner=None,
+):
+    row = {
+        "home_team": home_team,
+        "away_team": away_team,
+        "stat": stat,
+        "current_home_score": home_score,
+        "current_away_score": away_score,
+        "espn_winner": espn_winner,
+        "home_games_played": home_gp,
+        "away_games_played": away_gp,
+    }
+    if stat in {"PTS", "REB", "AST", "STL", "BLK", "3PM"}:
+        row.update({
+            "home_catalyst_leader_name": home_leader_name,
+            "home_catalyst_leader_value": home_leader_value,
+            "home_catalyst_team_total": home_team_total,
+            "away_catalyst_leader_name": away_leader_name,
+            "away_catalyst_leader_value": away_leader_value,
+            "away_catalyst_team_total": away_team_total,
+        })
+    else:
+        row.update({
+            "home_catalyst_leader_name": None,
+            "home_catalyst_leader_value": None,
+            "home_catalyst_team_total": None,
+            "away_catalyst_leader_name": None,
+            "away_catalyst_leader_value": None,
+            "away_catalyst_team_total": None,
+        })
+    return row
+
+
+def _nine_cat_rows(home="Alpha", away="Beta", **overrides):
+    """Build a full 9-cat scoreboard for one matchup.  *overrides* accepts
+    keyword args like ``home_gp=28``, ``PTS_home_leader_name=\"Jokic\"``,
+    ``PTS_home_leader_value=120``, ``PTS_home_team_total=450``."""
+    rows = []
+    for stat in STAT_ORDER:
+        kwargs: dict[str, Any] = {}
+        kwargs["home_team"] = home
+        kwargs["away_team"] = away
+        kwargs["stat"] = stat
+        # Default: home wins every cat by a comfortable margin (ratio > 0.10).
+        kwargs["home_score"] = overrides.get("home_score", 100)
+        kwargs["away_score"] = overrides.get("away_score", 50)
+        kwargs["home_gp"] = overrides.get("home_gp")
+        kwargs["away_gp"] = overrides.get("away_gp")
+        # Pull per-stat leader values from overrides when present.
+        for side in ("home", "away"):
+            for field in ("leader_name", "leader_value", "team_total"):
+                key = f"{stat}_{side}_{field}"
+                kwargs[f"{side}_{field}"] = overrides.get(key)
+        # Per-stat score overrides (e.g. PTS_home_score=95).
+        for side in ("home", "away"):
+            key = f"{stat}_{side}_score"
+            if key in overrides:
+                kwargs[f"{side}_score"] = overrides[key]
+        rows.append(_make_scoreboard_row(**kwargs))
+    return rows
+
+
+class TestMatchupGP:
+    def test_gp_attached_to_matchup(self):
+        rows = _nine_cat_rows(home_gp=32, away_gp=28)
+        matchups = canonical_matchups(rows, 1)
+        assert len(matchups) == 1
+        m = matchups[0]
+        assert m["home_games_played"] == 32
+        assert m["away_games_played"] == 28
+
+    def test_gp_none_when_absent(self):
+        rows = _nine_cat_rows()  # no home_gp/away_gp passed
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        assert m["home_games_played"] is None
+        assert m["away_games_played"] is None
+
+
+class TestCategoryCatalyst:
+    def test_carried_when_share_above_half(self):
+        """Player with >60% share reports shape='carried' with correct share."""
+        rows = _nine_cat_rows(
+            PTS_home_score=450,
+            PTS_away_score=50,
+            PTS_home_leader_name="Jokic",
+            PTS_home_leader_value=300,
+            PTS_home_team_total=450,
+            # Away also needs valid totals (won't be used — home wins)
+            PTS_away_leader_name="Bench",
+            PTS_away_leader_value=1,
+            PTS_away_team_total=50,
+        )
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        pts = next(c for c in m["categories"] if c["stat"] == "PTS")
+        cat = pts["catalyst"]
+        assert cat["leader_name"] == "Jokic"
+        assert cat["leader_value"] == 300.0
+        assert cat["team_total"] == 450.0
+        assert cat["share"] == pytest.approx(0.6667, abs=1e-4)
+        assert cat["shape"] == "carried"
+
+    def test_team_effort_when_share_below_half(self):
+        rows = _nine_cat_rows(
+            PTS_home_score=450,
+            PTS_away_score=50,
+            PTS_home_leader_name="Jokic",
+            PTS_home_leader_value=100,
+            PTS_home_team_total=450,
+            PTS_away_leader_name="Bench",
+            PTS_away_leader_value=1,
+            PTS_away_team_total=50,
+        )
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        pts = next(c for c in m["categories"] if c["stat"] == "PTS")
+        assert pts["catalyst"]["shape"] == "team effort"
+
+    def test_sanity_gate_drops_mismatched_total(self):
+        """When player-sum ≠ official value, catalyst is dropped."""
+        rows = _nine_cat_rows(
+            PTS_home_leader_name="Jokic",
+            PTS_home_leader_value=300,
+            PTS_home_team_total=999,  # way off the official 100
+            PTS_away_leader_name="Bench",
+            PTS_away_leader_value=1,
+            PTS_away_team_total=50,
+        )
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        pts = next(c for c in m["categories"] if c["stat"] == "PTS")
+        assert "catalyst" not in pts
+
+    def test_bench_players_excluded_via_missing_data(self):
+        """bench players would have leader_name=None (no active-slot data)."""
+        rows = _nine_cat_rows(
+            PTS_home_leader_name=None,  # no active leader
+            PTS_home_leader_value=None,
+            PTS_home_team_total=None,
+            PTS_away_leader_name="Someone",
+            PTS_away_leader_value=10,
+            PTS_away_team_total=50,
+        )
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        pts = next(c for c in m["categories"] if c["stat"] == "PTS")
+        # Home won PTS (100 > 50) but has no leader data — catalyst skipped.
+        assert "catalyst" not in pts
+
+    def test_to_fg_ft_never_produce_catalyst(self):
+        rows = _nine_cat_rows()
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        for cat in m["categories"]:
+            if cat["stat"] in ("TO", "FG%", "FT%"):
+                assert "catalyst" not in cat, f"{cat['stat']} should not have catalyst"
+
+    def test_max_two_catalysts_per_matchup(self):
+        """Even if many categories qualify, ≤2 are selected."""
+        rows = _nine_cat_rows()
+        # Make every counting stat very close (margin_ratio → 0).
+        for stat in _COUNTING_STATS:
+            idx = STAT_ORDER.index(stat)
+            rows[idx]["current_home_score"] = 100
+            rows[idx]["current_away_score"] = 99
+            rows[idx]["home_catalyst_leader_name"] = "Star"
+            rows[idx]["home_catalyst_leader_value"] = 40
+            rows[idx]["home_catalyst_team_total"] = 100
+            rows[idx]["away_catalyst_leader_name"] = "Role"
+            rows[idx]["away_catalyst_leader_value"] = 10
+            rows[idx]["away_catalyst_team_total"] = 99
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        assert len(m["catalysts"]) <= 2
+        # Should be the two smallest margin_ratios.
+        margins = [c["margin"] for c in m["catalysts"]]
+        assert margins == sorted(margins)
+
+    def test_catalyst_only_for_winning_side(self):
+        """Away-winning category gets away leader, not home."""
+        rows = _nine_cat_rows()
+        # Make home lose PTS.
+        pts_row = rows[STAT_ORDER.index("PTS")]
+        pts_row["current_home_score"] = 50
+        pts_row["current_away_score"] = 100
+        pts_row["home_catalyst_leader_name"] = "Loser"
+        pts_row["home_catalyst_leader_value"] = 25
+        pts_row["home_catalyst_team_total"] = 50
+        pts_row["away_catalyst_leader_name"] = "Winner"
+        pts_row["away_catalyst_leader_value"] = 80
+        pts_row["away_catalyst_team_total"] = 100
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        pts = next(c for c in m["categories"] if c["stat"] == "PTS")
+        assert pts["winner"] == "away"
+        assert pts["catalyst"]["leader_name"] == "Winner"
+
+    def test_notability_close_margin_qualifies(self):
+        """margin_ratio ≤ 0.10 qualifies for notability."""
+        rows = _nine_cat_rows(
+            PTS_home_score=100,
+            PTS_away_score=95,  # margin=5, ratio=0.05
+            PTS_home_leader_name="Jokic",
+            PTS_home_leader_value=40,
+            PTS_home_team_total=100,
+            PTS_away_leader_name="X",
+            PTS_away_leader_value=10,
+            PTS_away_team_total=95,
+        )
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        assert any(c["stat"] == "PTS" for c in m["catalysts"])
+
+    def test_notability_concentrated_qualifies(self):
+        """share ≥ 0.60 qualifies even with wide margin."""
+        rows = _nine_cat_rows(
+            PTS_home_score=100,
+            PTS_away_score=30,  # wide margin (ratio=0.70)
+            PTS_home_leader_name="Jokic",
+            PTS_home_leader_value=70,  # 70/100 = 0.70 share
+            PTS_home_team_total=100,
+            PTS_away_leader_name="X",
+            PTS_away_leader_value=1,
+            PTS_away_team_total=30,
+        )
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        assert any(c["stat"] == "PTS" for c in m["catalysts"])
+
+    def test_tied_category_no_catalyst(self):
+        """A tied category has no winner → no catalyst."""
+        rows = _nine_cat_rows()
+        pts_row = rows[STAT_ORDER.index("PTS")]
+        pts_row["current_home_score"] = 100
+        pts_row["current_away_score"] = 100  # tie
+        matchups = canonical_matchups(rows, 1)
+        m = matchups[0]
+        pts = next(c for c in m["categories"] if c["stat"] == "PTS")
+        assert "catalyst" not in pts

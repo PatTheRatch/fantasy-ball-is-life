@@ -81,6 +81,41 @@ def _number(value: Any) -> Optional[float]:
 
 
 def canonical_matchups(scoreboard: list[dict[str, Any]], week: int) -> list[dict[str, Any]]:
+    # ── Catalyst helpers ──────────────────────────────────────────────
+    _CATALYST_COUNTING_STATS = {"PTS", "REB", "AST", "STL", "BLK", "3PM"}
+    # Tolerate a 1.0-unit drift between the active-player sum and the
+    # official category value (floating-point + roster-sync edge cases).
+    _CATALYST_SANITY_TOLERANCE = 1.0
+
+    def _catalyst_for_side(
+        stat: str, side: str, row: dict[str, Any], official_value: Optional[float]
+    ) -> Optional[dict[str, Any]]:
+        """Return a catalyst dict for *side* if the data passes the sanity gate.
+        Returns None when the gate fails or data is absent."""
+        prefix = f"{side}_catalyst_"
+        leader_name = row.get(f"{prefix}leader_name")
+        leader_value = _number(row.get(f"{prefix}leader_value"))
+        team_total = _number(row.get(f"{prefix}team_total"))
+        if leader_name is None or leader_value is None or team_total is None:
+            return None
+        if official_value is None:
+            return None
+        if team_total <= 0:
+            return None
+        # Sanity gate: player-sum must match the official value closely.
+        if abs(team_total - official_value) > _CATALYST_SANITY_TOLERANCE:
+            return None
+        share = leader_value / team_total
+        shape = "carried" if share >= 0.50 else "team effort"
+        return {
+            "leader_name": leader_name,
+            "leader_value": round(leader_value, 1),
+            "team_total": round(team_total, 1),
+            "share": round(share, 4),
+            "shape": shape,
+        }
+
+    # ── Group rows by matchup ─────────────────────────────────────────
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in scoreboard:
         stat = str(row.get("stat") or "").upper()
@@ -97,6 +132,9 @@ def canonical_matchups(scoreboard: list[dict[str, Any]], week: int) -> list[dict
         matchup_id = f"week-{week}:{_slug(home)}-vs-{_slug(away)}"
         categories: list[dict[str, Any]] = []
         home_wins = away_wins = ties = 0
+        # Collect potential catalysts across categories for notability selection.
+        raw_catalysts: list[dict[str, Any]] = []
+
         for row in sorted(
             rows,
             key=lambda item: STAT_ORDER.index(str(item.get("stat")).upper()),
@@ -118,16 +156,41 @@ def canonical_matchups(scoreboard: list[dict[str, Any]], week: int) -> list[dict
             else:
                 winner = "away"
                 away_wins += 1
-            categories.append(
-                {
-                    "evidence_id": f"{matchup_id}:category:{_slug(stat)}",
-                    "stat": stat,
-                    "home_value": home_value,
-                    "away_value": away_value,
-                    "winner": winner,
-                    "complete": complete,
-                }
-            )
+
+            cat_entry: dict[str, Any] = {
+                "evidence_id": f"{matchup_id}:category:{_slug(stat)}",
+                "stat": stat,
+                "home_value": home_value,
+                "away_value": away_value,
+                "winner": winner,
+                "complete": complete,
+            }
+            # Catalyst: only for counting stats, only for the winning side.
+            if stat in _CATALYST_COUNTING_STATS and winner in ("home", "away"):
+                official_value = home_value if winner == "home" else away_value
+                cat = _catalyst_for_side(stat, winner, row, official_value)
+                if cat is not None:
+                    # margin_ratio for notability: how close the category was.
+                    max_val = max(home_value or 0, away_value or 0)
+                    margin = abs((home_value or 0) - (away_value or 0))
+                    margin_ratio = margin / max_val if max_val > 0 else 1.0
+                    cat["stat"] = stat
+                    cat["margin"] = round(margin, 1)
+                    cat["margin_ratio"] = round(margin_ratio, 4)
+                    raw_catalysts.append(cat)
+                    cat_entry["catalyst"] = cat
+
+            categories.append(cat_entry)
+
+        # ── Notability selection: ≤2 catalysts per matchup ────────────
+        # A category qualifies if decided AND (close OR concentrated).
+        notable = [
+            c for c in raw_catalysts
+            if c.get("margin_ratio", 1.0) <= 0.10 or c.get("share", 0.0) >= 0.60
+        ]
+        # Sort: smallest margin_ratio first, tie-break by highest share.
+        notable.sort(key=lambda c: (c.get("margin_ratio", 1.0), -c.get("share", 0.0)))
+        selected_catalysts = notable[:2]
 
         tally_winner = (
             "home" if home_wins > away_wins else "away" if away_wins > home_wins else "tie"
@@ -143,6 +206,10 @@ def canonical_matchups(scoreboard: list[dict[str, Any]], week: int) -> list[dict
             winner_side = tally_winner
             tiebreak_resolved = False
 
+        # ── GP: Games Played (None when league doesn't track it) ──────
+        home_gp = rows[0].get("home_games_played")
+        away_gp = rows[0].get("away_games_played")
+
         matchups.append(
             {
                 "matchup_id": matchup_id,
@@ -157,6 +224,9 @@ def canonical_matchups(scoreboard: list[dict[str, Any]], week: int) -> list[dict
                 ),
                 "tiebreak_resolved": tiebreak_resolved,
                 "categories": categories,
+                "home_games_played": home_gp,
+                "away_games_played": away_gp,
+                "catalysts": selected_catalysts,
             }
         )
     return matchups

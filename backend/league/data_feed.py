@@ -1522,6 +1522,48 @@ def get_current_rosters(
 
 
 def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None) -> pd.DataFrame:
+    # Counting categories for the lineup-based catalyst feature.
+    # FG%/FT% don't sum; TO framing is negative — skip all three.
+    _CATALYST_COUNTING_STATS = {"PTS", "REB", "AST", "STL", "BLK", "3PM"}
+    # Slots that don't contribute to the category total.
+    _CATALYST_BENCH_SLOTS = {"BE", "IR", "FA"}
+
+    def _lineup_catalyst_data(lineup) -> dict[str, dict]:
+        """Sum active-slot players' per-category totals & find the top contributor.
+
+        Returns ``{stat: {\"leader_name\": str, \"leader_value\": float,
+        \"team_total\": float}}`` for each counting stat.
+        """
+        if not lineup:
+            return {}
+        sums: dict[str, float] = {s: 0.0 for s in _CATALYST_COUNTING_STATS}
+        leaders: dict[str, list[tuple[str, float]]] = {s: [] for s in _CATALYST_COUNTING_STATS}
+        for player in lineup:
+            slot = getattr(player, "slot_position", "FA") or "FA"
+            if slot in _CATALYST_BENCH_SLOTS:
+                continue
+            pb = getattr(player, "points_breakdown", {}) or {}
+            for s in _CATALYST_COUNTING_STATS:
+                v = pb.get(s, 0)
+                if v:
+                    try:
+                        vf = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    sums[s] += vf
+                    leaders[s].append((player.name, vf))
+        # Sort leaders descending per stat, pick the top.
+        result: dict[str, dict] = {}
+        for s in _CATALYST_COUNTING_STATS:
+            leaders[s].sort(key=lambda x: x[1], reverse=True)
+            top = leaders[s][0] if leaders[s] else (None, 0.0)
+            result[s] = {
+                "leader_name": top[0],
+                "leader_value": top[1],
+                "team_total": sums[s],
+            }
+        return result
+
     current_scoreboards = []
     if scoring_period is None or scoring_period <= h.league.currentMatchupPeriod:
         matchups = h.league.box_scores(matchup_period=scoring_period)
@@ -1534,8 +1576,31 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
                 away_team = matchup.away_team.team_name
             except:
                 away_team = 'Bye'
+
+            # --- GP: Games Played per team (None when league doesn't track it) ---
+            home_gp = None
+            away_gp = None
+            try:
+                gp_entry = matchup.home_stats.get("GP") or {}
+                home_gp = gp_entry.get("value")
+            except Exception:
+                pass
+            try:
+                gp_entry = matchup.away_stats.get("GP") or {}
+                away_gp = gp_entry.get("value")
+            except Exception:
+                pass
+
+            # --- Catalyst: compute active-slot leader per counting stat ---
+            home_cat = _lineup_catalyst_data(
+                getattr(matchup, "home_lineup", None) or []
+            )
+            away_cat = _lineup_catalyst_data(
+                getattr(matchup, "away_lineup", None) or []
+            )
+
             for stat, stat_value in matchup.away_stats.items():
-                current_scoreboards.append({
+                row = {
                     "away_team": away_team,
                     "home_team": home_team,
                     # Turnovers are stored as a natural positive count (fewer is
@@ -1549,7 +1614,26 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
                     # ESPN resolves by a tiebreak rule (e.g. playoff seed); callers
                     # should prefer this field over their own tally when it's set.
                     "espn_winner": getattr(matchup, "winner", None),
-                })
+                    # GP fields — repeated across per-category rows (same as espn_winner).
+                    "home_games_played": home_gp,
+                    "away_games_played": away_gp,
+                }
+                # Attach catalyst data for counting stats (None for non-counting).
+                if stat in _CATALYST_COUNTING_STATS:
+                    row["home_catalyst_leader_name"] = home_cat.get(stat, {}).get("leader_name")
+                    row["home_catalyst_leader_value"] = home_cat.get(stat, {}).get("leader_value")
+                    row["home_catalyst_team_total"] = home_cat.get(stat, {}).get("team_total")
+                    row["away_catalyst_leader_name"] = away_cat.get(stat, {}).get("leader_name")
+                    row["away_catalyst_leader_value"] = away_cat.get(stat, {}).get("leader_value")
+                    row["away_catalyst_team_total"] = away_cat.get(stat, {}).get("team_total")
+                else:
+                    row["home_catalyst_leader_name"] = None
+                    row["home_catalyst_leader_value"] = None
+                    row["home_catalyst_team_total"] = None
+                    row["away_catalyst_leader_name"] = None
+                    row["away_catalyst_leader_value"] = None
+                    row["away_catalyst_team_total"] = None
+                current_scoreboards.append(row)
     else:
         matchups = h.league.scoreboard(scoring_period)
         for matchup in matchups:
@@ -1564,6 +1648,14 @@ def get_current_scoreboard(h: ESPNHandles, scoring_period: Optional[int] = None)
                     "current_away_score": 0,
                     "stat": stat,
                     "espn_winner": getattr(matchup, "winner", None),
+                    "home_games_played": None,
+                    "away_games_played": None,
+                    "home_catalyst_leader_name": None,
+                    "home_catalyst_leader_value": None,
+                    "home_catalyst_team_total": None,
+                    "away_catalyst_leader_name": None,
+                    "away_catalyst_leader_value": None,
+                    "away_catalyst_team_total": None,
                 })
 
 

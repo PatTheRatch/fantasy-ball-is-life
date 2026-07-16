@@ -463,6 +463,29 @@ def build_structured_recap_prompts(
     if recap_voice:
         system_prompt += f"\n\nLEAGUE-SPECIFIC VOICE NOTES (apply on top of the above):\n{recap_voice}"
 
+    # Matchup enrichments: GP + catalyst guidance.
+    has_gp = any(
+        m.get("home_games_played") is not None or m.get("away_games_played") is not None
+        for m in (snapshot.get("matchups") or [])
+    )
+    if has_gp:
+        system_prompt += (
+            "\n\nGAMES PLAYED: each matchup may carry home_games_played / away_games_played. "
+            "Mention the games-played gap only when it's lopsided and the short-handed team "
+            "still won or nearly won. Do not list the numbers otherwise."
+        )
+    has_catalysts = any(
+        bool(m.get("catalysts")) for m in (snapshot.get("matchups") or [])
+    )
+    if has_catalysts:
+        system_prompt += (
+            "\n\nCATALYSTS: some matchups list a 'catalysts' array (≤2 per matchup). "
+            "Each catalyst names the player who drove a close or breakout category for the "
+            "winning side — work it into that matchup's beat naturally. Do not list the "
+            "stats; just name the player and the feel ('carried' = one-man show, "
+            "'team effort' = balanced contribution)."
+        )
+
     ranked_teams = [
         str(row.get("team") or row.get("Team") or "")
         for row in (snapshot.get("power_rankings") or [])
