@@ -94,6 +94,16 @@ this spec must leave that a config flip, per Dossier Decision A.
 - **D-P2. No Next.js migration.** SEO-relevant surfaces are exactly two
   (landing page, published recaps); the existing plan for F2-7 (FastAPI
   prerender/OG route) covers them. React + Vite stays.
+  *Contested by a second-opinion review (2026-07-16, see Addendum) which
+  recommends porting to Next.js for SSR/server sessions/streaming. Decision
+  stands: the app's heavy surfaces (Draft Room, In-Season) are
+  client-state-dense and would be `"use client"` throughout, negating
+  server-component benefits; nested league routes and auth work identically
+  in react-router + Supabase; and the port burns 1–2 weeks of the P-series
+  on plumbing with no user-visible gain. Revisit trigger: if a public
+  multi-league launch makes per-league SEO pages (public team/player pages,
+  many-league landing surfaces) a real requirement, reopen this decision
+  then — the component layer built in P-2 ports either way.*
 - **D-P3. Snapshot-serving becomes the default read model** (§3). Live
   ESPN calls move out of the request path for every league-analytics
   surface. The admin "Generate Draft" flow may still force a fresh pull.
@@ -101,6 +111,15 @@ this spec must leave that a config flip, per Dossier Decision A.
   billing does not. Nobody pays before multi-league works.
 - **D-P5. League Home replaces `/draft` as the default route.** Tools keep
   first-class nav but stop being the front door.
+- **D-P6. Reads auto-load; only generation is manual.** The current UI is
+  click-to-fetch throughout (`InSeason.tsx`: `loadActiveScoreboard`,
+  `markLoaded('powerRankings')`, etc.) — an artifact of the era when every
+  read was an expensive live ESPN call. Once P-3 makes reads cheap Postgres
+  hits, every read surface fetches automatically on mount via React Query
+  (with `StateBlock` skeletons). Explicit buttons remain **only** for
+  actions that cost real money or mutate state: LLM generation
+  (recap draft, AI commentary), publish/rollback, solver runs, admin
+  force-refresh. "Load X" buttons are a bug after P-6.
 
 ### Open for Aisha (architecture review)
 
@@ -230,6 +249,10 @@ as `recap_editions`), writable by service role only.
 - Flat `/draft`, `/in-season`, `/season`, `/recap` become redirects into the
   league-scoped equivalents (single-league: redirect resolves via
   `VITE_RECAP_LEAGUE_SLUG` exactly as `Recap.tsx` does today).
+- Logged-in `/` resolves by membership count: exactly one league → straight
+  to `/leagues/:slug`; more than one → a minimal league-picker list (a
+  trivial page once `league_memberships` is read — build it in P-6 rather
+  than reserving a separate `/app` route for later).
 - Mobile `BottomTabBar` / desktop `TopNav`: **Home · Matchup · Newsroom ·
   Standings · More** ("More" sheet: Draft Room, Season tools, Settings,
   admin). Draft Room swaps into the bar in preseason (settings-driven date
@@ -264,6 +287,13 @@ as `recap_editions`), writable by service role only.
   editorial headlines; fix the slate-on-slate contrast failures
   (`text-slate-600` on dark backgrounds) as part of the pass. Dark-first
   stays; no light mode in the P-series.
+- **Accent + radius consolidation (measured, not hypothetical):** the Draft
+  Room leans emerald, In-Season mixes red and emerald, the newsroom is red;
+  corner radii span `rounded-md/-lg/-xl/-full` with no rule. Define one
+  semantic accent scale (brand accent = the newsroom red; emerald reserved
+  for positive deltas/wins, red-negative for losses — never both as page
+  themes) and a two-step radius scale. P-2's re-cut tabs adopt it; the
+  P-7 decompositions finish the sweep.
 - **Recharts** added; first consumers: power-ranking movement sparklines and
   category-margin bars in matchup detail.
 - `formatApiError` (`frontend/src/api.ts`) splits user-facing copy from dev
@@ -318,8 +348,8 @@ as `recap_editions`), writable by service role only.
 | **P-3** | Snapshot worker + `league_state_snapshots` + read-path inversion (§3) | — | §3.5 criteria all green in production logs |
 | **P-4** | Multi-league config: creds → `leagues` rows, kill module constants, seed script (§4) | P-3 | No `config.LEAGUE_ID` references outside the seed script; worker iterates DB rows |
 | **P-5** | Auth surfaces: AuthProvider, /login, /signup (invite-gated), profile menu (§6) | P-2 | Login lives at /login; WeeklyRecapTab consumes context; recap admin flow unchanged |
-| **P-6** | IA re-root + League Home (§5, §8) | P-2, P-3, P-5 | New default route; old routes redirect; Home < 1 s from snapshots |
-| **P-7** | Monolith decomposition: DraftPage + InSeason splits, matchup detail route (§8) | P-2, P-6 | `InSeason.tsx` off the CI ignore list; no file in `pages/` > 500 lines |
+| **P-6** | IA re-root + League Home + league picker (§5, §8) | P-2, P-3, P-5 | New default route; old routes redirect; Home < 1 s from snapshots; zero manual load buttons on Home (D-P6) |
+| **P-7** | Monolith decomposition: DraftPage + InSeason splits, matchup detail route (§8) | P-2, P-6 | `InSeason.tsx` off the CI ignore list; no file in `pages/` > 500 lines; all read surfaces auto-load (D-P6 complete) |
 | **P-8** | Landing page + F2-7 OG/prerender (existing plan, unblocked here) | P-6 | Logged-out `/` renders static landing; recap URLs unfurl in WhatsApp |
 
 P-1 and P-2 can run in parallel. P-3 is the critical path. One PR each,
@@ -369,3 +399,45 @@ mid-build.
 - Light mode, native mobile wrapper.
 - Public self-serve signup (invite-gated only until launch decision).
 - Bot delivery of recaps (existing future phase, unchanged).
+
+---
+
+## Addendum: disposition of the second-opinion review (2026-07-16)
+
+Patrick commissioned an independent AI review of the same scope and asked
+for its findings to be folded in by judgment. Its full text lives outside
+the repo; the disposition of every substantive point:
+
+**Adopted into this spec:**
+- *"Everything requires manual button clicks — it's an API testing tool,
+  not a dashboard."* Correct, and previously under-weighted here. Now
+  **D-P6** (auto-loading reads), wired into P-6/P-7 completion criteria.
+  Root cause is architectural (reads used to be expensive live ESPN calls),
+  which is why D-P6 depends on P-3, not on UI willpower.
+- *Visual inconsistency across pages.* Directionally correct (its specifics
+  were off — the Draft Room's accent is emerald, not amber). Verified
+  against the code: emerald vs red page accents, four corner radii in use.
+  Now an explicit accent/radius consolidation item in §7.
+- *A "my leagues" surface for multi-league accounts.* Adopted as the
+  logged-in `/` league-picker in §5 (P-6) rather than a separate `/app`
+  route — one page fewer, same capability.
+
+**Considered and rejected:**
+- *Port the frontend to Next.js.* Rejected; reasoning and a concrete
+  revisit trigger recorded inline at **D-P2**. Its own migration table
+  concedes the backend, database, API client, and components all survive
+  unchanged — meaning the port buys plumbing, not product, at this stage.
+- *Replace top/bottom nav with a sidebar.* Rejected: a five-destination
+  consumer app on mobile wants bottom tabs (the native pattern already
+  in place); sidebars fit dense multi-section SaaS, which this is not.
+- *League-connect UI (ESPN cookie capture) in the first five actions.*
+  Stays a §4/§13 non-goal: it's the hardest UX in the product and gates
+  nothing in the P-series, since rows are seeded by script until the
+  public-launch decision. Building it first would front-load the riskiest
+  work for zero current users.
+
+**Already convergent (no change needed):** retire Streamlit; league
+dashboard as the hub ("the page users see 90% of the time"); league-scoped
+URLs; shadcn-style components + Recharts; preserve the entire backend;
+auth before dashboard. Two independent reviews landing on the same
+skeleton is decent evidence the skeleton is right.
