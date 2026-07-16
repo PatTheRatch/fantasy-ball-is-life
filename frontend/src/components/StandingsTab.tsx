@@ -37,6 +37,34 @@ function catVal(stats: Record<string, unknown>, cat: string, view: CatView, week
 type SortDir = 'asc' | 'desc'
 type SortKey = { col: string; dir: SortDir }
 
+/* ── sortable header cell (module-scope so it isn't re-created each render) ── */
+
+function SortIcon({ col, sort }: { col: string; sort: SortKey }) {
+  if (sort.col !== col) return null
+  return sort.dir === 'asc' ? <ChevronUp className="inline h-3 w-3" /> : <ChevronDown className="inline h-3 w-3" />
+}
+
+function Th({
+  col,
+  children,
+  sort,
+  onSort,
+}: {
+  col: string
+  children: React.ReactNode
+  sort: SortKey
+  onSort: (col: string) => void
+}) {
+  return (
+    <th
+      className="cursor-pointer select-none whitespace-nowrap px-2 py-1.5 text-left text-[11px] font-medium text-slate-400 hover:text-white"
+      onClick={() => onSort(col)}
+    >
+      {children} <SortIcon col={col} sort={sort} />
+    </th>
+  )
+}
+
 /* ── main component ──────────────────────────────────────────────── */
 
 export function StandingsTab({ slug, season, week }: { slug: string; season: number; week: number }) {
@@ -128,20 +156,6 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
     setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' })
   }
 
-  const SortIcon = ({ col }: { col: string }) => {
-    if (sort.col !== col) return null
-    return sort.dir === 'asc' ? <ChevronUp className="inline h-3 w-3" /> : <ChevronDown className="inline h-3 w-3" />
-  }
-
-  const Th = ({ col, children }: { col: string; children: React.ReactNode }) => (
-    <th
-      className="cursor-pointer select-none whitespace-nowrap px-2 py-1.5 text-left text-[11px] font-medium text-slate-400 hover:text-white"
-      onClick={() => handleSort(col)}
-    >
-      {children} <SortIcon col={col} />
-    </th>
-  )
-
   // Early returns — all hooks above this line
   if (isLoading) return <p className="text-slate-400">Loading standings…</p>
   if (error) {
@@ -182,20 +196,20 @@ export function StandingsTab({ slug, season, week }: { slug: string; season: num
               {/* Overview */}
               <th className="sticky left-0 z-10 bg-slate-900 px-2 py-1.5 text-left text-[11px] font-medium text-slate-400">#</th>
               <th className="sticky left-[32px] z-10 bg-slate-900 px-2 py-1.5 text-left text-[11px] font-medium text-slate-300">Team</th>
-              <Th col="wins">W</Th>
-              <Th col="losses">L</Th>
-              <Th col="winPct">Win%</Th>
+              <Th col="wins" sort={sort} onSort={handleSort}>W</Th>
+              <Th col="losses" sort={sort} onSort={handleSort}>L</Th>
+              <Th col="winPct" sort={sort} onSort={handleSort}>Win%</Th>
               <th className="px-2 py-1.5 text-left text-[11px] font-medium text-slate-400">Playoffs</th>
               {/* Category Stats */}
-              {CATS.map(c => <Th key={c} col={c}>{c}</Th>)}
+              {CATS.map(c => <Th key={c} col={c} sort={sort} onSort={handleSort}>{c}</Th>)}
               {/* Advanced */}
-              <Th col="allplayPct">All-Play%</Th>
-              <Th col="luckRatio">Luck</Th>
-              <Th col="powerRank">PR</Th>
-              <Th col="movement">±</Th>
+              <Th col="allplayPct" sort={sort} onSort={handleSort}>All-Play%</Th>
+              <Th col="luckRatio" sort={sort} onSort={handleSort}>Luck</Th>
+              <Th col="powerRank" sort={sort} onSort={handleSort}>PR</Th>
+              <Th col="movement" sort={sort} onSort={handleSort}>±</Th>
               {/* Activity */}
-              <Th col="transactions">Moves</Th>
-              <Th col="trades">Trades</Th>
+              <Th col="transactions" sort={sort} onSort={handleSort}>Moves</Th>
+              <Th col="trades" sort={sort} onSort={handleSort}>Trades</Th>
             </tr>
           </thead>
           <tbody>
