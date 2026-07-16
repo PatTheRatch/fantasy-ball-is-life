@@ -886,3 +886,113 @@ identical — the repro); a known team renders `63.0%` not `0.6%`; existing
 
 **Rollback.** Revert to `league_api.league_standings()` — week-blind again, as
 today.
+
+---
+
+## Addendum: Matchup context — Games Played + Category Catalyst (2026-07-16)
+
+Two deterministic enrichments to the Matchups snapshot that give the recap more
+texture *without* bloating the AI prompt. Both hang off the **existing**
+`league.box_scores()` call the recap already makes — the recap-matchups path is
+`scoreboard_current(week)` → `feed.get_current_scoreboard` (`data_feed.py:1524`)
+→ `box_scores()` → `recaps.assemble.canonical_matchups` (`assemble.py:82`). No
+new ESPN request for either feature.
+
+Principle: **compute the facts server-side; feed the AI at most a line or two.**
+Raw box scores never enter the prompt.
+
+### FEATURE GP — Games Played per team
+
+**Data.** `box_scores()` returns `H2HCategoryBoxScore` whose `home_stats` /
+`away_stats` map ESPN's `cumulativeScore.scoreByStat` through `STATS_MAP` —
+which includes `GP` (stat id `42`), not just the 9 scoring categories.
+`get_current_scoreboard` currently reads only the 9 category values and drops
+`GP`.
+
+**Build.**
+1. In `get_current_scoreboard`, read `matchup.home_stats.get('GP')` /
+   `away_stats.get('GP')` (the `.get('value')` inside), and attach
+   `home_games_played` / `away_games_played` to every scoreboard row for that
+   matchup (team-level value repeated across the per-category rows — mirrors how
+   `espn_winner` is already carried).
+2. In `canonical_matchups`, read them off `rows[0]` (same pattern as
+   `espn_winner` at `assemble.py:137`) and set `home_games_played` /
+   `away_games_played` on the matchup dict. `None` when ESPN doesn't track GP
+   for this league — never fabricate.
+3. Expose both numbers in the matchup facts block of the recap prompt
+   (`backend/commentary/prompts.py`), with one guiding line: *"mention the games-
+   played gap only when it's lopsided and the short-handed team still won/nearly
+   won."* Two integers per matchup — negligible prompt cost.
+
+**Frontend.** Optional: show `GP` as a small sub-label under each team's
+category-win tally in `MatchupsTab.tsx`. Deterministic, no AI gate.
+
+**Verify.** Confirm one real matchup payload actually contains `GP` in
+`scoreByStat` before assuming presence; if a league doesn't track it, the fields
+stay `None` and the prompt line is skipped.
+
+### FEATURE CAT — Category Catalyst (who drove a category)
+
+**Goal.** "They won steals by one — and it was all one guy (15 of 22)" vs. "a
+balanced team effort." A single distilled fact per notable category, not a
+player dump.
+
+**Data.** The same `box_scores()` matchups carry `home_lineup` / `away_lineup`
+= `BoxPlayer` list; each has `.name`, `.slot_position`, and `.points_breakdown`
+(per-category values via `STATS_MAP`).
+
+**Build (server-side, deterministic).**
+1. In `get_current_scoreboard`, for each team, sum only players in **active
+   slots** (exclude `BE` / `IR` via `slot_position`) — bench stats don't count
+   toward the category total. For each **counting** category (`PTS, REB, AST,
+   STL, BLK, 3PM` — skip `FG%`/`FT%`, which don't sum, and `TO`, whose "catalyst"
+   framing is negative/confusing), find the top contributor: `leader_name`,
+   `leader_value`, `team_total` (sum of active players), `share =
+   leader_value / team_total`.
+2. **Sanity gate:** if the summed `team_total` doesn't match the official
+   category value from `home_stats`/`away_stats` (within a small tolerance),
+   drop the catalyst for that category rather than emit a wrong share — the
+   `points_breakdown` split can be imperfect.
+3. Attach a compact `catalyst` to each category record in `canonical_matchups`,
+   for the **winning** side only.
+
+**Notability selection (bounds prompt size).** Only surface a catalyst to the
+AI when the category is decided AND either:
+- **close:** `margin_ratio = |home_value − away_value| / max(home_value,
+  away_value) ≤ 0.10` (uniform across counting stats and their magnitudes), OR
+- **concentrated:** winner's `share ≥ 0.60` (a clear go-off worth calling out
+  even in a comfortable category).
+
+Cap at **2 catalysts per matchup** (smallest `margin_ratio` first, tie-break by
+highest `share`). `shape = "carried"` when `share ≥ 0.50`, else `"team effort"`.
+
+**Prompt.** Feed only the selected catalysts (≤2/matchup) into the matchup facts
+block: e.g. `{stat: STL, margin: 1, leader: "Dyson Daniels", leader_value: 15,
+team_total: 22, share: 0.68, shape: "carried"}`. Guidance: *"if a catalyst is
+present, work it into that matchup's beat naturally; don't list stats."* ~40
+tokens each, ≤80 per matchup.
+
+**Perf.** No new fetch — `get_current_scoreboard` already calls `box_scores()`.
+Catalyst math is a bounded loop over ~13 players × 6 cats per team. Recap
+generation is cached, so the marginal cost is one pandas pass at assembly time.
+
+**Season-over note.** Box scores for completed/historical weeks are available
+(unlike live projections), so both features are testable now against past weeks.
+
+### Tests
+
+- GP: a fixture matchup exposes `home_games_played`/`away_games_played`; absent-
+  GP league leaves them `None` and the prompt line is skipped.
+- CAT: on a fixture where one active player holds >60% of a category, the
+  catalyst reports that player with the right `share` and `shape: "carried"`;
+  the sanity gate drops a category whose player-sum ≠ official total; bench
+  players are excluded; TO / FG% / FT% never produce a catalyst; no matchup
+  emits more than 2 catalysts.
+- Existing `test_recaps.py` snapshot-shape tests stay green (both features add
+  optional fields only).
+
+### Rollback
+
+Both are additive matchup fields + additive prompt lines. Remove the prompt
+lines to silence them; remove the field population to fully revert. No other tab
+or code path reads them.
