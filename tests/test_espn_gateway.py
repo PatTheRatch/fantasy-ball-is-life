@@ -210,16 +210,18 @@ def test_league_teams_returns_502_on_espn_unavailable(monkeypatch):
     assert resp.status_code == 502
 
 
-def test_league_standings_returns_500_on_unexpected_error(monkeypatch):
+def test_league_standings_returns_empty_on_no_snapshot(monkeypatch):
+    """P-3b: missing snapshot → empty response, never a 500."""
     from fastapi.testclient import TestClient
 
     import backend.api.main as api
-    from backend.api.routers import league as league_router
 
-    def _raise_generic():
-        raise ValueError("unexpected bug")
-
-    monkeypatch.setattr(league_router, "_handles", _raise_generic)
+    # Patch _snapshot_read to simulate missing snapshot
+    monkeypatch.setattr(
+        "backend.api.routers.league._snapshot_read",
+        lambda phase, season=None: (None, None),
+    )
     client = TestClient(api.app)
     resp = client.get("/league/standings")
-    assert resp.status_code == 500
+    assert resp.status_code == 200
+    assert resp.json() == {"data": [], "fetched_at": None}

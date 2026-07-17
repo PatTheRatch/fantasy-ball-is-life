@@ -246,10 +246,10 @@ export async function getPowerRankings(
   weeks: string,
   recentWeeks = 3,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/power-rankings', {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>('/power-rankings', {
     params: { weeks, recent_weeks: recentWeeks },
   })
-  return data
+  return data.data ?? []
 }
 
 export async function getConfidence(params: {
@@ -296,20 +296,20 @@ export async function getLeagueTeams(): Promise<JsonRecord[]> {
 }
 
 export async function getLeagueStandings(): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/league/standings')
-  return data
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>('/league/standings')
+  return data.data ?? []
 }
 
 export async function getLeagueSettings(): Promise<LeagueSettings> {
-  const { data } = await client.get<LeagueSettings>('/league/settings')
-  return data
+  const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>('/league/settings')
+  return data.data
 }
 
 export async function getSeasonStats(weeks: string): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/season-stats', {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>('/season-stats', {
     params: { weeks },
   })
-  return data
+  return data.data ?? []
 }
 
 export async function postSeasonCommentary(

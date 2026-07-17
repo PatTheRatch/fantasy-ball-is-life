@@ -334,3 +334,59 @@ class RecapStore:
         if not rows:
             raise RecapStoreError("Recap edition could not be rolled back.")
         return rows[0]
+
+    def get_phase_snapshot(
+        self,
+        *,
+        league_id: str,
+        season: int,
+        phase: str,
+    ) -> dict[str, Any] | None:
+        """Return {payload_json, fetched_at} for one phase or None if missing.
+
+        Ordered by fetched_at DESC so the freshest snapshot wins when
+        multiple rows exist per (league_id, season, phase).
+        """
+        rows = self._request(
+            "GET",
+            "league_state_snapshots",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "phase": f"eq.{phase}",
+                "select": "payload_json,fetched_at",
+                "order": "fetched_at.desc",
+                "limit": "1",
+            },
+        )
+        return rows[0] if rows else None
+
+    def get_all_phases(
+        self,
+        *,
+        league_id: str,
+        season: int,
+    ) -> dict[str, dict[str, Any]]:
+        """Return {phase: {payload_json, fetched_at, week}} for all phases.
+
+        One row per phase; returns empty dict if nothing stored yet.
+        When multiple rows exist per phase, the freshest wins."""
+        rows = self._request(
+            "GET",
+            "league_state_snapshots",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "select": "phase,payload_json,fetched_at,week",
+                "order": "fetched_at.desc",
+            },
+        )
+        # Deduplicate: keep first (freshest) per phase
+        seen: set[str] = set()
+        result: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            p = r["phase"]
+            if p not in seen:
+                seen.add(p)
+                result[p] = r
+        return result

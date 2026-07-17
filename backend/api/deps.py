@@ -75,3 +75,61 @@ def _espn_http_exception(e: Exception) -> HTTPException:
 
 def _read_excel_bytes(data: bytes) -> pd.DataFrame:
     return pd.read_excel(io.BytesIO(data))
+
+
+# ── P-3b: read-path helper ────────────────────────────────────────────────────
+
+
+from functools import lru_cache
+
+
+@lru_cache(maxsize=4)
+def _resolve_league_uuid(espn_league_id: int) -> str | None:
+    """Resolve UUID league_id from ESPN league_id (P-3 single-league bridge).
+
+    Cached — the mapping is invariant within P-3. P-4 replaces this with
+    request-scoped league resolution.
+    """
+    from backend.recaps.store import RecapStore
+
+    store = RecapStore()
+    rows = store._request(
+        "GET",
+        "leagues",
+        params={
+            "espn_league_id": f"eq.{espn_league_id}",
+            "select": "id",
+        },
+    )
+    return rows[0]["id"] if rows else None
+
+
+def _snapshot_read(
+    phase: str,
+    *,
+    season: int | None = None,
+) -> tuple[Any, str | None]:
+    """Read one phase from league_state_snapshots → (payload, fetched_at).
+
+    Resolves league_id from the current config (single-league bridge).
+    P-4 replaces the config lookup with request-scoped league resolution.
+
+    Returns (payload_json, fetched_at) or (None, None) when no snapshot
+    exists yet.
+    """
+    from backend.config import LEAGUE_ID, SEASON
+
+    league_uuid = _resolve_league_uuid(LEAGUE_ID)
+    if not league_uuid:
+        return None, None
+
+    from backend.recaps.store import RecapStore
+
+    store = RecapStore()
+    s = season or SEASON
+
+    snap = store.get_phase_snapshot(league_id=league_uuid, season=s, phase=phase)
+    if not snap:
+        return None, None
+
+    return snap["payload_json"], snap["fetched_at"]
