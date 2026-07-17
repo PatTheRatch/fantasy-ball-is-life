@@ -1,14 +1,30 @@
 @import 'tailwindcss';
 
+/* ── Design tokens (P-2: formalized pg-* palette) ─────────────────────── */
 @theme {
   --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
-  --color-pg-bg: #0d1117;
-  --color-pg-card: #161b22;
-  --color-pg-border: #30363d;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Background hierarchy */
+  --color-pg-bg: #080c12;
+  --color-pg-card: #111820;
+  --color-pg-card-hover: #161e28;
+  --color-pg-border: #1c2532;
+
+  /* Accent: brand red (ESPN), reserved for CTAs, branding, key indicators */
   --color-pg-accent: #e03131;
-  --shadow-pg-card: 0 4px 24px rgba(0, 0, 0, 0.35);
+
+  /* Semantic colors — never used as page themes */
+  --color-pg-positive: #22c55e;   /* wins, positive deltas */
+  --color-pg-negative: #ef4444;   /* losses, negative deltas */
+  --color-pg-warning: #f59e0b;    /* ties, staleness, warnings */
+
+  /* Radius scale: two-step (containers: xl, inline: md) */
+  --radius-pg-sm: 0.375rem;       /* badges, pills, inline elements */
+  --radius-pg-lg: 0.75rem;        /* cards, tables, containers */
 }
 
+/* ── Global resets ──────────────────────────────────────────────────────── */
 html {
   @apply antialiased;
 }
