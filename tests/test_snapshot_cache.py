@@ -52,31 +52,29 @@ class TestSnapshotRead:
         assert mock_store.get_all_phases.called
         assert result is not None
 
-    def test_force_fresh_calls_league_api(self, league):
-        """force_fresh=True → pulls live ESPN."""
-        with patch.object(assemble, "league_api") as mock_api:
-            mock_api.power_rankings.return_value = [{"Team": "A"}]
-            mock_api.scoreboard_current.return_value = []
-            mock_api.transactions_week.return_value = []
-            mock_api.season_stats.return_value = []
+    def test_force_fresh_calls_live_espn(self, league):
+        """force_fresh=True → calls _live_power_rankings, not the snapshot path."""
+        with (
+            patch.object(assemble, "_live_power_rankings", return_value=[{"Team": "A", "Rank": 1}]) as mock_lpr,
+            patch.object(assemble, "league_api") as mock_api,
+            patch.object(assemble, "_build_scoped_standings", return_value=([], True)),
+            patch.object(assemble, "_build_single_week_ap", return_value=[]),
+            patch.object(assemble, "_build_playoff_context", return_value={"round_label": "", "round_index": 0, "total_rounds": 1, "is_championship": False}),
+            patch.object(assemble, "_annotate_standings_playoffs"),
+            patch("backend.recaps.awards.select_awards", return_value=[]),
+        ):
+            mock_api._handles.return_value = Mock()
 
-            with patch.object(
-                assemble, "_build_scoped_standings", return_value=([], True)
-            ):
-                with patch.object(
-                    assemble, "_build_single_week_ap", return_value=[]
-                ):
-                    with patch("backend.recaps.awards.select_awards", return_value=[]):
-                        result = assemble.assemble_weekly_snapshot(
-                            league=league,
-                            season=2026,
-                            week=12,
-                            week_start="2026-03-01",
-                            week_end="2026-03-07",
-                            force_fresh=True,
-                        )
+            assemble.assemble_weekly_snapshot(
+                league=league,
+                season=2026,
+                week=12,
+                week_start="2026-03-01",
+                week_end="2026-03-07",
+                force_fresh=True,
+            )
 
-        assert mock_api.power_rankings.called
+        assert mock_lpr.called
 
     def test_missing_snapshots_returns_degraded(self, league):
         """No snapshots → empty/degraded, not a 500."""

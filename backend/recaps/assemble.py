@@ -18,6 +18,7 @@ from backend.commentary.schemas import (
     PlayoffContext,
     WeeklyFactSnapshot,
 )
+from backend.league import data_feed as feed
 from backend.league.scoreboard import WeeklyScoreboard
 from backend.recaps import playoffs
 from backend.recaps.store import RecapStore
@@ -407,19 +408,23 @@ def assemble_weekly_snapshot(
             warnings,
         )
         single_week_all_play = _build_single_week_ap(league_api, week)
+
+        # Live ESPN fetchers — bypass the flipped league_api.* endpoints
+        h = league_api._handles()
+        _to_records = lambda df: df.to_dict(orient="records") if hasattr(df, "to_dict") else df
         scoreboard, scoreboard_ok = _capture(
             "Matchups",
-            lambda: league_api.scoreboard_current(scoring_period=week),
+            lambda: _to_records(feed.get_current_scoreboard(h, scoring_period=week)),
             warnings,
         )
         transactions, transactions_ok = _capture(
             "Transactions",
-            lambda: league_api.transactions_week(scoring_period=week),
+            lambda: feed.week_transactions_for_week(h, week=week),
             warnings,
         )
         season_stats, season_stats_ok = _capture(
             "Season statistics",
-            lambda: league_api.season_stats(weeks=weeks_csv),
+            lambda: _to_records(WeeklyScoreboard(h.league, season=season).all_play(weeks=[int(w.strip()) for w in weeks_csv.split(",") if w.strip()])),
             warnings,
         )
 
@@ -508,11 +513,9 @@ def assemble_weekly_snapshot(
     object.__setattr__(snapshot, "single_week_all_play", single_week_all_play)
     snapshot.award_candidates = select_awards(snapshot)
 
-    # Cache the result so the follow-up generate request reuses this assembly.
-    # Only cache when the data is actually ready — a degraded snapshot from a
-    # transient ESPN blip should not block recovery for the full TTL.
     logging.info(
-        "recap assembly: total %.2fs for %s", time.perf_counter() - assembly_started, ck
+        "recap assembly: total %.2fs for league=%s season=%s week=%s force_fresh=%s",
+        time.perf_counter() - assembly_started, league["id"], season, week, force_fresh,
     )
     return snapshot
 

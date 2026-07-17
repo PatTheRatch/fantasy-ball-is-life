@@ -1,14 +1,12 @@
 """League / standings / rosters / scoreboard endpoints."""
 from __future__ import annotations
 
-import logging
 import time
 from datetime import date
 from typing import Any, List, Optional
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.encoders import jsonable_encoder
 
 from backend.api.deps import (
     _df_records,
