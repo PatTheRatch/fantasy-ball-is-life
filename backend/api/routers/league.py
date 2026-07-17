@@ -17,6 +17,7 @@ from backend.api.deps import (
     _my_league,
     _read_excel_bytes,
     _scoreboard,
+    _snapshot_read,
 )
 from backend.league import data_feed as feed
 
@@ -78,214 +79,12 @@ def my_league_current_week_matchups(
 
 @router.get("/power-rankings")
 def power_rankings(
-    weeks: str = Query(..., description="Comma-separated week list, e.g. '1,2,3'"),
-    recent_weeks: int = Query(3, description="How many trailing weeks count as 'recent'"),
-) -> List[dict[str, Any]]:
-    """
-    Composite power rankings from the narrow-fetch WeeklyScoreboard:
-    - full window (all requested weeks)
-    - recent window (last N weeks from the requested set)
-    """
-    try:
-        board = _scoreboard()
-
-        all_weeks: List[int] = []
-        for tok in (weeks or "").split(","):
-            t = tok.strip()
-            if not t:
-                continue
-            all_weeks.append(int(t))
-        all_weeks = sorted(set(all_weeks))
-        if not all_weeks:
-            raise HTTPException(status_code=422, detail="`weeks` must include at least one week number.")
-
-        # Clamp to weeks that actually exist in this league's matchup data.
-        max_week = int(getattr(board, "max_week", 0) or 0)
-
-        if max_week > 0:
-            all_weeks = [w for w in all_weeks if 1 <= int(w) <= max_week]
-        if not all_weeks:
-            raise HTTPException(
-                status_code=422,
-                detail=f"No valid weeks in request. Valid range is 1..{max_week or 'N/A'}.",
-            )
-
-        rw = max(1, int(recent_weeks))
-        recent_list = all_weeks[-rw:] if len(all_weeks) >= 1 else all_weeks
-
-        # Weeks are already clamped to board.max_week above; this guards the
-        # residual case of a requested week with no matchup rows (e.g. an
-        # All-Star gap week) that the board reports as unavailable.
-        try:
-            df_full = board.all_play(weeks=all_weeks)
-            df_recent = board.all_play(weeks=recent_list)
-        except KeyError as ke:
-            bad = None
-            try:
-                if ke.args:
-                    bad = int(ke.args[0])
-            except Exception:
-                bad = None
-            if bad is None:
-                raise
-            all_weeks = [w for w in all_weeks if int(w) != bad]
-            if not all_weeks:
-                raise HTTPException(status_code=422, detail=f"Week {bad} is not available for this league.")
-            recent_list = all_weeks[-rw:] if len(all_weeks) >= 1 else all_weeks
-            _t0 = time.perf_counter()
-            df_full = board.all_play(weeks=all_weeks)
-            _t1 = time.perf_counter()
-            df_recent = board.all_play(weeks=recent_list)
-            logging.info(
-                "power_rankings: all_play(full=%d weeks) took %.2fs, "
-                "all_play(recent=%d weeks) took %.2fs",
-                len(all_weeks), _t1 - _t0, len(recent_list), time.perf_counter() - _t1,
-            )
-
-        if df_full is None or df_full.empty or "Team" not in df_full.columns:
-            raise HTTPException(status_code=500, detail="all_play returned empty full-window data.")
-        if df_recent is None or df_recent.empty or "Team" not in df_recent.columns:
-            raise HTTPException(status_code=500, detail="all_play returned empty recent-window data.")
-
-        # Normalize required columns.
-        for col in ["Total Win %", "Actual Win %"]:
-            if col in df_full.columns:
-                df_full[col] = pd.to_numeric(df_full[col], errors="coerce")
-        if "Total Win %" in df_recent.columns:
-            df_recent["Total Win %"] = pd.to_numeric(df_recent["Total Win %"], errors="coerce")
-
-        # Stat category ranks from the full window.
-        stat_cols = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
-        stat_cols_avail = [c for c in stat_cols if c in df_full.columns]
-        stats = df_full[["Team"] + stat_cols_avail].copy()
-        for c in stat_cols_avail:
-            stats[c] = pd.to_numeric(stats[c], errors="coerce")
-
-        ranks: dict[str, pd.Series] = {}
-        for c in stat_cols:
-            if c not in stats.columns:
-                continue
-            # Higher is better for all categories here (TO is already inverted upstream in the scoreboard).
-            ranks[c] = stats[c].rank(method="min", ascending=False).astype("Int64")
-
-        rank_df = pd.DataFrame({"Team": stats["Team"]})
-        for c, sr in ranks.items():
-            rank_df[f"{c.lower().replace('%','_pct')}_rank"] = sr
-
-        # Category dominance: fraction of categories where team is top-3 in league.
-        top3_counts = pd.Series(0, index=rank_df.index, dtype="int")
-        denom = 0
-        for c in stat_cols:
-            key = f"{c.lower().replace('%','_pct')}_rank"
-            if key in rank_df.columns:
-                denom += 1
-                top3_counts += (pd.to_numeric(rank_df[key], errors="coerce").fillna(999) <= 3).astype(int)
-        dominance = (top3_counts / float(denom or 9)).astype(float)
-
-        # Merge win% components.
-        base = df_full[["Team", "Total Win %", "Actual Win %"]].copy()
-        base = base.rename(columns={"Total Win %": "allplay_win_pct", "Actual Win %": "actual_win_pct"})
-        recent = df_recent[["Team", "Total Win %"]].copy().rename(columns={"Total Win %": "recent_allplay_win_pct"})
-
-        out = base.merge(recent, on="Team", how="left").merge(rank_df, on="Team", how="left")
-        out["category_dominance_score"] = dominance.values
-
-        # Composite score (normalize % -> 0..1).
-        out["composite_score"] = (
-            0.35 * (pd.to_numeric(out["allplay_win_pct"], errors="coerce").fillna(0) / 100.0)
-            + 0.35 * (pd.to_numeric(out["recent_allplay_win_pct"], errors="coerce").fillna(0) / 100.0)
-            + 0.20 * (pd.to_numeric(out["actual_win_pct"], errors="coerce").fillna(0) / 100.0)
-            + 0.10 * (pd.to_numeric(out["category_dominance_score"], errors="coerce").fillna(0))
-        )
-
-        out = out.sort_values("composite_score", ascending=False).reset_index(drop=True)
-        out["rank"] = out.index + 1
-
-        # Rank change: compare to the same calculation with the most recent week removed.
-        rank_change_map: dict[str, int] = {str(t): 0 for t in out["Team"].astype(str).tolist()}
-        if len(all_weeks) >= 2:
-            prev_weeks = all_weeks[:-1]
-            prev_recent = prev_weeks[-rw:] if prev_weeks else prev_weeks
-            _t2 = time.perf_counter()
-            df_full_prev = board.all_play(weeks=prev_weeks)
-            _t3 = time.perf_counter()
-            df_recent_prev = board.all_play(weeks=prev_recent)
-            logging.info(
-                "power_rankings: rank-change all_play(full=%d weeks) took %.2fs, "
-                "all_play(recent=%d weeks) took %.2fs",
-                len(prev_weeks), _t3 - _t2, len(prev_recent), time.perf_counter() - _t3,
-            )
-
-            for col in ["Total Win %", "Actual Win %"]:
-                if col in df_full_prev.columns:
-                    df_full_prev[col] = pd.to_numeric(df_full_prev[col], errors="coerce")
-            if "Total Win %" in df_recent_prev.columns:
-                df_recent_prev["Total Win %"] = pd.to_numeric(df_recent_prev["Total Win %"], errors="coerce")
-
-            stats_prev = df_full_prev[["Team"] + [c for c in stat_cols if c in df_full_prev.columns]].copy()
-            for c in stats_prev.columns:
-                if c != "Team":
-                    stats_prev[c] = pd.to_numeric(stats_prev[c], errors="coerce")
-
-            rank_df_prev = pd.DataFrame({"Team": stats_prev["Team"]})
-            top3_prev = pd.Series(0, index=rank_df_prev.index, dtype="int")
-            denom_prev = 0
-            for c in stat_cols:
-                if c not in stats_prev.columns:
-                    continue
-                denom_prev += 1
-                sr = stats_prev[c].rank(method="min", ascending=False).astype("Int64")
-                key = f"{c.lower().replace('%','_pct')}_rank"
-                rank_df_prev[key] = sr
-                top3_prev += (pd.to_numeric(sr, errors="coerce").fillna(999) <= 3).astype(int)
-
-            dom_prev = (top3_prev / float(denom_prev or 9)).astype(float)
-            base_prev = df_full_prev[["Team", "Total Win %", "Actual Win %"]].copy().rename(
-                columns={"Total Win %": "allplay_win_pct", "Actual Win %": "actual_win_pct"}
-            )
-            recent_prev = df_recent_prev[["Team", "Total Win %"]].copy().rename(columns={"Total Win %": "recent_allplay_win_pct"})
-            prev = base_prev.merge(recent_prev, on="Team", how="left").merge(rank_df_prev, on="Team", how="left")
-            prev["category_dominance_score"] = dom_prev.values
-            prev["composite_score"] = (
-                0.35 * (pd.to_numeric(prev["allplay_win_pct"], errors="coerce").fillna(0) / 100.0)
-                + 0.35 * (pd.to_numeric(prev["recent_allplay_win_pct"], errors="coerce").fillna(0) / 100.0)
-                + 0.20 * (pd.to_numeric(prev["actual_win_pct"], errors="coerce").fillna(0) / 100.0)
-                + 0.10 * (pd.to_numeric(prev["category_dominance_score"], errors="coerce").fillna(0))
-            )
-            prev = prev.sort_values("composite_score", ascending=False).reset_index(drop=True)
-            prev["rank"] = prev.index + 1
-            prev_rank_map = {str(r["Team"]): int(r["rank"]) for _, r in prev.iterrows()}
-            for _, r in out.iterrows():
-                team = str(r["Team"])
-                cur_rank = int(r["rank"])
-                prev_rank = prev_rank_map.get(team)
-                if prev_rank is None:
-                    rank_change_map[team] = 0
-                else:
-                    # Positive means moved up.
-                    rank_change_map[team] = int(prev_rank - cur_rank)
-
-        out["rank_change"] = out["Team"].astype(str).map(rank_change_map).fillna(0).astype(int)
-
-        # API response fields / naming.
-        resp_cols = [
-            "rank",
-            "Team",
-            "composite_score",
-            "rank_change",
-            "allplay_win_pct",
-            "recent_allplay_win_pct",
-            "actual_win_pct",
-            "category_dominance_score",
-        ] + [c for c in out.columns if c.endswith("_rank") and c != "rank"]
-
-        out = out[resp_cols].rename(columns={"Team": "team"})
-        return _df_records(out)
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Surface exception type to make debugging easier in the UI/clients.
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
+    weeks: Optional[str] = Query(None, description="Comma-separated week list (ignored — snapshot is pre-computed)"),
+    recent_weeks: int = Query(3, description="For API compat only (ignored)"),
+) -> dict[str, Any]:
+    """Read stored power rankings from the snapshot worker (P-3b)."""
+    payload, fetched_at = _snapshot_read("power_rankings")
+    return {"data": payload or [], "fetched_at": fetched_at}
 
 
 @router.get("/confidence")
@@ -442,55 +241,28 @@ def league_teams() -> List[dict[str, Any]]:
 
 
 @router.get("/league/standings")
-def league_standings() -> List[dict[str, Any]]:
-    try:
-        h = _handles()
-        return _df_records(feed.standings_df(h))
-    except Exception as e:
-        raise _espn_http_exception(e) from e
+def league_standings() -> dict[str, Any]:
+    """Read computed standings from the snapshot worker (P-3b)."""
+    payload, fetched_at = _snapshot_read("standings")
+    if payload is None:
+        return {"data": [], "fetched_at": None}
+    return {"data": payload, "fetched_at": fetched_at}
 
 
 @router.get("/league/settings")
 def league_settings() -> dict[str, Any]:
-    try:
-        h = _handles()
-        s = getattr(h.league, "settings", None)
-        out = {
-            "reg_season_count": getattr(s, "reg_season_count", None),
-            "playoff_team_count": getattr(s, "playoff_team_count", None),
-            "playoff_matchup_period_length": getattr(s, "playoff_matchup_period_length", None),
-            "name": getattr(s, "name", None),
-            "team_count": getattr(s, "team_count", None),
-            "acquisition_budget": getattr(s, "acquisition_budget", None),
-            "faab": getattr(s, "faab", None),
-            "scoring_type": getattr(s, "scoring_type", None),
-            "current_week": getattr(h.league, "currentMatchupPeriod", None),
-        }
-        return jsonable_encoder(out)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    """Read stored league settings from the snapshot worker (P-3b)."""
+    payload, fetched_at = _snapshot_read("settings")
+    return {"settings": payload or {}, "fetched_at": fetched_at}
 
 
 @router.get("/season-stats")
 def season_stats(
-    weeks: str = Query(..., description="Comma-separated list of week numbers, e.g. '1,2,3'"),
-) -> List[dict[str, Any]]:
-    try:
-        board = _scoreboard()
-        week_list = []
-        for tok in (weeks or "").split(","):
-            t = tok.strip()
-            if not t:
-                continue
-            week_list.append(int(t))
-        if not week_list:
-            raise HTTPException(status_code=422, detail="`weeks` must contain at least one integer week number.")
-        df = board.all_play(weeks=week_list)
-        return _df_records(df)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    weeks: Optional[str] = Query(None, description="Comma-separated week list (ignored — snapshot is pre-computed)"),
+) -> dict[str, Any]:
+    """Read stored season stats from the snapshot worker (P-3b)."""
+    payload, fetched_at = _snapshot_read("season_stats")
+    return {"data": payload or [], "fetched_at": fetched_at}
 
 
 @router.get("/rosters/{on_date}")
@@ -510,21 +282,11 @@ def transactions(
 
 @router.get("/transactions/week")
 def transactions_week(
-    scoring_period: int = Query(..., description="Fantasy matchup week number (e.g. 6), NOT an ESPN scoringPeriodId"),
-) -> List[dict[str, Any]]:
-    """Executed player-movement transactions (adds/drops + completed trades) for
-    a whole matchup week, via the ``mTransactions2`` adapter. This is the
-    recap-facing path; unlike the legacy date-range ``/transactions`` it is not
-    projection-dependent and does not rely on the broken communication feed.
-
-    Query param is named ``scoring_period`` for URL back-compat with existing
-    callers, but the value is the fantasy week number -- ``week_transactions_
-    for_week`` resolves the real ESPN scoringPeriodId(s) internally."""
-    try:
-        h = _handles()
-        return feed.week_transactions_for_week(h, week=scoring_period)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}") from e
+    scoring_period: Optional[int] = Query(None, description="Week number (ignored — snapshot is pre-computed)"),
+) -> dict[str, Any]:
+    """Read stored weekly transactions from the snapshot worker (P-3b)."""
+    payload, fetched_at = _snapshot_read("transactions")
+    return {"data": payload or [], "fetched_at": fetched_at}
 
 
 @router.get("/matchups")
@@ -534,69 +296,10 @@ def matchups(scoring_period: Optional[int] = None) -> List[dict[str, Any]]:
 
 
 @router.get("/scoreboard/current")
-def scoreboard_current(scoring_period: Optional[int] = None) -> List[dict[str, Any]]:
-    h = _handles()
-    df = feed.get_current_scoreboard(h, scoring_period=scoring_period)
-    if df is None or df.empty:
-        return []
-
-    # Weekly recap (and most UI) should use only the 9 standard categories.
-    # ESPN box scores often include FGM/FGA/FTM/FTA in addition to FG%/FT%.
-    keep_stats = {"PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"}
-
-    # If ESPN didn't provide FG%/FT% but did provide made/attempts, derive them.
-    stats_present = set(df.get("stat", pd.Series(dtype=str)).astype(str).unique().tolist())
-    need_fg = "FG%" not in stats_present and {"FGM", "FGA"} <= stats_present
-    need_ft = "FT%" not in stats_present and {"FTM", "FTA"} <= stats_present
-    if need_fg or need_ft:
-        wide = (
-            df.pivot_table(
-                index=["home_team", "away_team"],
-                columns="stat",
-                values=["current_home_score", "current_away_score"],
-                aggfunc="first",
-            )
-            .copy()
-        )
-        # Flatten columns like ("current_home_score","FGM") -> "current_home_score_FGM"
-        wide.columns = [f"{a}_{b}" for a, b in wide.columns]
-        wide = wide.reset_index()
-
-        extra_rows: list[dict[str, Any]] = []
-        for _, r in wide.iterrows():
-            if need_fg:
-                h_fgm = float(r.get("current_home_score_FGM", 0) or 0)
-                h_fga = float(r.get("current_home_score_FGA", 0) or 0)
-                a_fgm = float(r.get("current_away_score_FGM", 0) or 0)
-                a_fga = float(r.get("current_away_score_FGA", 0) or 0)
-                extra_rows.append(
-                    {
-                        "home_team": r["home_team"],
-                        "away_team": r["away_team"],
-                        "stat": "FG%",
-                        "current_home_score": (h_fgm / h_fga) if h_fga else 0.0,
-                        "current_away_score": (a_fgm / a_fga) if a_fga else 0.0,
-                    }
-                )
-            if need_ft:
-                h_ftm = float(r.get("current_home_score_FTM", 0) or 0)
-                h_fta = float(r.get("current_home_score_FTA", 0) or 0)
-                a_ftm = float(r.get("current_away_score_FTM", 0) or 0)
-                a_fta = float(r.get("current_away_score_FTA", 0) or 0)
-                extra_rows.append(
-                    {
-                        "home_team": r["home_team"],
-                        "away_team": r["away_team"],
-                        "stat": "FT%",
-                        "current_home_score": (h_ftm / h_fta) if h_fta else 0.0,
-                        "current_away_score": (a_ftm / a_fta) if a_fta else 0.0,
-                    }
-                )
-        if extra_rows:
-            df = pd.concat([df, pd.DataFrame(extra_rows)], ignore_index=True)
-
-    df = df[df["stat"].isin(keep_stats)].copy()
-    return _df_records(df)
+def scoreboard_current(scoring_period: Optional[int] = None) -> dict[str, Any]:
+    """Read stored scoreboard from the snapshot worker (P-3b)."""
+    payload, fetched_at = _snapshot_read("scoreboard")
+    return {"data": payload or [], "fetched_at": fetched_at}
 
 
 @router.get("/rosters/current")

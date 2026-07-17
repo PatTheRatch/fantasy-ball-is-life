@@ -22,43 +22,9 @@ from backend.commentary.schemas import (
 )
 from backend.league.scoreboard import WeeklyScoreboard
 from backend.recaps import playoffs
+from backend.recaps.store import RecapStore
 
 STAT_ORDER = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
-
-# --- snapshot cache -----------------------------------------------------------
-
-_CACHE_MAX_ENTRIES = 3
-_CACHE_TTL_SECONDS = 60
-_CACHE: dict[tuple[int, int, int], tuple[float, WeeklyFactSnapshot]] = {}
-"""App-level snapshot cache: key = (league_id, season, week), value = (monotonic timestamp, snapshot)."""
-
-
-def _cache_key(league: dict[str, Any], season: int, week: int) -> tuple[int, int, int]:
-    # Note: week_start / week_end are NOT in the key because both call sites
-    # (readiness and generate) derive them deterministically from the same
-    # `week` and `MATCHUP_WEEKS_2025_26` calendar. A caller passing custom
-    # dates for the same week would get a stale hit — this assumes the two
-    # recap endpoints always agree on the date window.
-    return (str(league.get("id") or ""), season, week)
-
-
-def _cache_get(key: tuple[str, int, int]) -> Optional[WeeklyFactSnapshot]:
-    entry = _CACHE.get(key)
-    if entry is None:
-        return None
-    ts, snapshot = entry
-    if time.monotonic() - ts > _CACHE_TTL_SECONDS:
-        _CACHE.pop(key, None)
-        return None
-    return snapshot
-
-
-def _cache_put(key: tuple[int, int, int], snapshot: WeeklyFactSnapshot) -> None:
-    _CACHE[key] = (time.monotonic(), snapshot)
-    while len(_CACHE) > _CACHE_MAX_ENTRIES:
-        oldest_key = min(_CACHE, key=lambda k: _CACHE[k][0])
-        _CACHE.pop(oldest_key, None)
-
 
 def _clear_snapshot_cache() -> None:
     _CACHE.clear()
@@ -268,49 +234,99 @@ def assemble_weekly_snapshot(
     week: int,
     week_start: str,
     week_end: str,
+    force_fresh: bool = False,
 ) -> WeeklyFactSnapshot:
-    """Collect facts server-side; callers provide only the selected week/date window.
+    """Collect facts server-side.
 
-    A short-TTL app-level cache (60 s) avoids redoing the full ESPN assembly when
-    the readiness and generation endpoints arrive seconds apart.
+    Default (P-3b): reads from league_state_snapshots (stale but fast,
+    never a 500).  ``force_fresh=True`` (admin generate) pulls live ESPN
+    first — the one user allowed to wait.
     """
-    # --- E3 snapshot cache check ---
     assembly_started = time.perf_counter()
-    ck = _cache_key(league, season, week)
-    cached = _cache_get(ck)
-    if cached is not None:
-        logging.info("recap assembly: cache hit for %s, skipping ESPN fetch", ck)
-        return cached
-    logging.info("recap assembly: cache miss for %s, assembling from ESPN", ck)
-
     warnings: list[str] = []
-    weeks_csv = ",".join(str(value) for value in range(1, week + 1))
 
-    # FIX-B: compute week-scoped standings from matchup results across
-    # weeks 1..week (not ESPN's live standings).  Win% stored 0–100.
-    standings, standings_ok = _build_scoped_standings(league_api, week, warnings)
-    rankings, rankings_ok = _capture(
-        "Power rankings",
-        lambda: league_api.power_rankings(weeks=weeks_csv, recent_weeks=3),
-        warnings,
-    )
-    single_week_all_play = _build_single_week_ap(league_api, week)
-    scoreboard, scoreboard_ok = _capture(
-        "Matchups",
-        lambda: league_api.scoreboard_current(scoring_period=week),
-        warnings,
-    )
-    transactions, transactions_ok = _capture(
-        "Transactions",
-        lambda: league_api.transactions_week(scoring_period=week),
-        warnings,
-    )
-    season_stats, season_stats_ok = _capture(
-        "Season statistics",
-        lambda: league_api.season_stats(weeks=weeks_csv),
-        warnings,
-    )
+    if not force_fresh:
+        # ── P-3b: read from stored snapshots ──────────────────────────────
+        store = RecapStore()
+        phases = store.get_all_phases(league_id=league["id"], season=season)
 
+        # standings: build from power_rankings payload (has wins/losses/ties)
+        pr = phases.get("power_rankings", {}).get("payload_json", [])
+        standings: list[dict[str, Any]] = []
+        standings_ok = bool(pr)
+        if standings_ok:
+            for row in pr:
+                standings.append({
+                    "team_name": row.get("Team", ""),
+                    "team_id": _slug(row.get("team") or row.get("Team")),
+                    "wins": row.get("wins", 0),
+                    "losses": row.get("losses", 0),
+                    "ties": row.get("ties", 0),
+                    "win_pct": 0.0,  # filled below
+                })
+            for s in standings:
+                total = s["wins"] + s["losses"] + s["ties"]
+                s["win_pct"] = round(s["wins"] / total * 100, 1) if total else 0.0
+            standings.sort(key=lambda r: (-r["win_pct"], -r["wins"]))
+            for i, s in enumerate(standings):
+                s["standing"] = i + 1
+
+        # power_rankings: direct from stored payload
+        rankings = pr or []
+        rankings_ok = bool(rankings)
+
+        # scoreboard
+        scoreboard = phases.get("scoreboard", {}).get("payload_json", []) or []
+        scoreboard_ok = bool(scoreboard)
+
+        # transactions
+        transactions = phases.get("transactions", {}).get("payload_json", []) or []
+        transactions_ok = bool(transactions)
+
+        # season_stats
+        season_stats = phases.get("season_stats", {}).get("payload_json", []) or []
+        season_stats_ok = bool(season_stats)
+
+        # single_week_all_play (cheap side-effect computation)
+        single_week_all_play: list[dict[str, Any]] = []
+
+        # fetched_at: use the newest phase timestamp
+        fetched_ats = [p.get("fetched_at") for p in phases.values()]
+        fetched_at = max(f for f in fetched_ats if f) if any(fetched_ats) else None
+
+        logging.info(
+            "recap assembly: snapshot read for league=%s season=%s week=%s "
+            "(fetched_at=%s)",
+            league["id"], season, week, fetched_at,
+        )
+    else:
+        # ── force_fresh: pull live ESPN (admin flow, slow) ─────────────────
+        weeks_csv = ",".join(str(v) for v in range(1, week + 1))
+
+        standings, standings_ok = _build_scoped_standings(league_api, week, warnings)
+        rankings, rankings_ok = _capture(
+            "Power rankings",
+            lambda: league_api.power_rankings(weeks=weeks_csv, recent_weeks=3),
+            warnings,
+        )
+        single_week_all_play = _build_single_week_ap(league_api, week)
+        scoreboard, scoreboard_ok = _capture(
+            "Matchups",
+            lambda: league_api.scoreboard_current(scoring_period=week),
+            warnings,
+        )
+        transactions, transactions_ok = _capture(
+            "Transactions",
+            lambda: league_api.transactions_week(scoring_period=week),
+            warnings,
+        )
+        season_stats, season_stats_ok = _capture(
+            "Season statistics",
+            lambda: league_api.season_stats(weeks=weeks_csv),
+            warnings,
+        )
+
+    # ── Cheap transforms (unchanged — run on stored OR fresh data) ────────
     matchups = canonical_matchups(scoreboard, week)
     complete_categories = bool(matchups) and all(
         len(matchup["categories"]) == len(STAT_ORDER)
@@ -351,11 +367,7 @@ def assemble_weekly_snapshot(
     for row in ranking_facts:
         row["team_id"] = _slug(row.get("team") or row.get("Team"))
 
-    playoff_started = time.perf_counter()
     playoff_context = _build_playoff_context(week, matchups, standings, warnings)
-    logging.info(
-        "recap assembly: playoff_context took %.2fs", time.perf_counter() - playoff_started
-    )
 
     # F2-6: annotate standings with in_playoffs flag.
     _annotate_standings_playoffs(standings)
@@ -385,24 +397,15 @@ def assemble_weekly_snapshot(
         playoff_context=playoff_context,
     )
 
-    # F2-5: compute deterministic awards from the assembled snapshot so
-    # award_candidates is always populated (even pre-generation).  The AI
-    # explanation line stays gated on a published recap.
+    # F2-5: compute deterministic awards from the assembled snapshot.
     from backend.recaps.awards import select_awards
 
-    # FIX-A: single-week all-play for Team of the Week.
-    # WeeklyFactSnapshot is a Pydantic model — use object.__setattr__
-    # for fields not declared in the model.
     object.__setattr__(snapshot, "single_week_all_play", single_week_all_play)
     snapshot.award_candidates = select_awards(snapshot)
 
-    # Cache the result so the follow-up generate request reuses this assembly.
-    # Only cache when the data is actually ready — a degraded snapshot from a
-    # transient ESPN blip should not block recovery for the full TTL.
-    if snapshot.data_quality.ready:
-        _cache_put(ck, snapshot)
     logging.info(
-        "recap assembly: total %.2fs for %s", time.perf_counter() - assembly_started, ck
+        "recap assembly: total %.2fs for league=%s season=%s week=%s force_fresh=%s",
+        time.perf_counter() - assembly_started, league["id"], season, week, force_fresh,
     )
     return snapshot
 

@@ -75,3 +75,46 @@ def _espn_http_exception(e: Exception) -> HTTPException:
 
 def _read_excel_bytes(data: bytes) -> pd.DataFrame:
     return pd.read_excel(io.BytesIO(data))
+
+
+# ── P-3b: read-path helper ────────────────────────────────────────────────────
+
+
+def _snapshot_read(
+    phase: str,
+    *,
+    season: int | None = None,
+) -> tuple[Any, str | None]:
+    """Read one phase from league_state_snapshots → (payload, fetched_at).
+
+    Resolves league_id from the current config (single-league bridge).
+    P-4 replaces the config lookup with request-scoped league resolution.
+
+    Returns (payload_json, fetched_at) or (None, None) when no snapshot
+    exists yet.
+    """
+    from backend.recaps.store import RecapStore
+    from backend.config import LEAGUE_ID
+
+    store = RecapStore()
+
+    # Resolve UUID league_id from the ESPN league_id in config
+    rows = store._request(
+        "GET",
+        "leagues",
+        params={
+            "espn_league_id": f"eq.{LEAGUE_ID}",
+            "select": "id",
+        },
+    )
+    if not rows:
+        return None, None
+
+    league_uuid = rows[0]["id"]
+    s = season or SEASON
+
+    snap = store.get_phase_snapshot(league_id=league_uuid, season=s, phase=phase)
+    if not snap:
+        return None, None
+
+    return snap["payload_json"], snap["fetched_at"]

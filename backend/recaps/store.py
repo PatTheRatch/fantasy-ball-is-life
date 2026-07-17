@@ -334,3 +334,43 @@ class RecapStore:
         if not rows:
             raise RecapStoreError("Recap edition could not be rolled back.")
         return rows[0]
+
+    def get_phase_snapshot(
+        self,
+        *,
+        league_id: str,
+        season: int,
+        phase: str,
+    ) -> dict[str, Any] | None:
+        """Return {payload_json, fetched_at} for one phase or None if missing."""
+        rows = self._request(
+            "GET",
+            "league_state_snapshots",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "phase": f"eq.{phase}",
+                "select": "payload_json,fetched_at",
+            },
+        )
+        return rows[0] if rows else None
+
+    def get_all_phases(
+        self,
+        *,
+        league_id: str,
+        season: int,
+    ) -> dict[str, dict[str, Any]]:
+        """Return {phase: {payload_json, fetched_at, week}} for all phases.
+
+        One row per phase; returns empty dict if nothing stored yet."""
+        rows = self._request(
+            "GET",
+            "league_state_snapshots",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "select": "phase,payload_json,fetched_at,week",
+            },
+        )
+        return {r["phase"]: r for r in rows}

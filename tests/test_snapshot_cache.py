@@ -1,219 +1,114 @@
-"""PR E3 — snapshot reuse across recap readiness and generation.
-
-assemble_weekly_snapshot() is called once for readiness and again for
-generation within seconds of each other. A short-TTL app-level cache
-(60 s, max 3 entries, FIFO eviction) avoids redoing the full ESPN
-assembly when the two requests arrive seconds apart.
-"""
+"""P-3b: Snapshot-based read path for assemble_weekly_snapshot."""
 
 from unittest.mock import Mock, patch
 
 import pytest
-import time
 
-from backend.recaps.assemble import (
-    _cache_get,
-    _cache_key,
-    _cache_put,
-    _clear_snapshot_cache,
-    _CACHE_TTL_SECONDS,
-    assemble_weekly_snapshot,
-)
+from backend.recaps import assemble
 
 
-@pytest.fixture(autouse=True)
-def _clear_cache():
-    """Clear the module-global cache before every test so they don't
-    contaminate each other under reordering or -k selection."""
-    _clear_snapshot_cache()
+def _make_phases(**overrides):
+    default = {
+        "power_rankings": {
+            "payload_json": [{"Team": "Alpha", "wins": 10, "losses": 5, "ties": 0}],
+            "fetched_at": "2026-01-01T00:00:00Z",
+        },
+        "scoreboard": {"payload_json": [], "fetched_at": "2026-01-01T00:00:00Z"},
+        "transactions": {"payload_json": [], "fetched_at": "2026-01-01T00:00:00Z"},
+        "season_stats": {"payload_json": [], "fetched_at": "2026-01-01T00:00:00Z"},
+        "settings": {"payload_json": {}, "fetched_at": "2026-01-01T00:00:00Z"},
+    }
+    default.update(overrides)
+    return default
 
 
-# --- unit tests: cache functions ----------------------------------------------
-
-def test_cache_get_returns_none_on_miss():
-    assert _cache_get((1, 2026, 5)) is None
-
-
-def test_cache_put_and_get():
-    from backend.commentary.schemas import WeeklyFactSnapshot
-
-    sn = WeeklyFactSnapshot.__new__(WeeklyFactSnapshot)
-    key = (1, 2026, 5)
-    _cache_put(key, sn)
-    assert _cache_get(key) is sn
+@pytest.fixture
+def league():
+    return {"id": "test-league-uuid", "slug": "test-league", "name": "Test League"}
 
 
-def test_cache_evicts_stale_entry():
-    from backend.commentary.schemas import WeeklyFactSnapshot
+class TestSnapshotRead:
+    def test_default_reads_from_snapshots(self, league):
+        """Not force_fresh → reads from snapshots, no ESPN call."""
+        mock_store = Mock()
+        mock_store.get_all_phases.return_value = _make_phases()
 
-    sn = WeeklyFactSnapshot.__new__(WeeklyFactSnapshot)
-    key = (1, 2026, 5)
-    _cache_put(key, sn)
+        # _build_playoff_context must return a dict (PlayoffContext-parseable)
+        playoff_ctx = {"round_label": None, "playoffs_active": False, "round_index": 0, "total_rounds": 1, "is_championship": False}
 
-    from backend.recaps import assemble
+        with patch.object(assemble, "RecapStore", return_value=mock_store):
+            with patch.object(
+                assemble, "_build_playoff_context", return_value=playoff_ctx
+            ):
+                # select_awards is imported inside the function — patch it
+                # in the module's namespace before calling
+                with patch(
+                    "backend.recaps.awards.select_awards", return_value=[]
+                ):
+                    result = assemble.assemble_weekly_snapshot(
+                        league=league,
+                        season=2026,
+                        week=12,
+                        week_start="2026-03-01",
+                        week_end="2026-03-07",
+                        force_fresh=False,
+                    )
 
-    old_ts = assemble._CACHE[key][0]
-    assemble._CACHE[key] = (old_ts - _CACHE_TTL_SECONDS - 1, sn)
+        assert mock_store.get_all_phases.called
+        assert result is not None
 
-    assert _cache_get(key) is None
+    def test_force_fresh_calls_league_api(self, league):
+        """force_fresh=True → pulls live ESPN."""
+        playoff_ctx = {"round_label": None, "playoffs_active": False, "round_index": 0, "total_rounds": 1, "is_championship": False}
 
+        with patch.object(assemble, "league_api") as mock_api:
+            mock_api.power_rankings.return_value = [{"Team": "A"}]
+            mock_api.scoreboard_current.return_value = []
+            mock_api.transactions_week.return_value = []
+            mock_api.season_stats.return_value = []
 
-def test_cache_fifo_eviction():
-    """Max 3 entries; the 4th evicts the oldest by insertion time."""
-    from backend.commentary.schemas import WeeklyFactSnapshot
-    from backend.recaps import assemble
+            with patch.object(
+                assemble, "_build_scoped_standings", return_value=([], True)
+            ):
+                with patch.object(
+                    assemble, "_build_single_week_ap", return_value=[]
+                ):
+                    with patch.object(
+                        assemble, "_build_playoff_context", return_value=playoff_ctx
+                    ):
+                        with patch.object(
+                            assemble, "select_awards", return_value=[]
+                        ):
+                            result = assemble.assemble_weekly_snapshot(
+                                league=league,
+                                season=2026,
+                                week=12,
+                                week_start="2026-03-01",
+                                week_end="2026-03-07",
+                                force_fresh=True,
+                            )
 
-    sn = WeeklyFactSnapshot.__new__(WeeklyFactSnapshot)
-    for i in range(3):
-        _cache_put((i, 2026, 1), sn)
+        assert mock_api.power_rankings.called
 
-    before = set(assemble._CACHE.keys())
-    _cache_put((99, 2026, 1), WeeklyFactSnapshot.__new__(WeeklyFactSnapshot))
-    after = set(assemble._CACHE.keys())
-    # Oldest key (0, 2026, 1) should be gone, new key present.
-    assert (0, 2026, 1) in before
-    assert (0, 2026, 1) not in after
-    assert (99, 2026, 1) in after
-    assert len(assemble._CACHE) == 3
+    def test_missing_snapshots_returns_degraded(self, league):
+        """No snapshots → empty/degraded, not a 500."""
+        mock_store = Mock()
+        mock_store.get_all_phases.return_value = {}
+        playoff_ctx = {"round_label": None, "playoffs_active": False, "round_index": 0, "total_rounds": 1, "is_championship": False}
 
+        with patch.object(assemble, "RecapStore", return_value=mock_store):
+            with patch.object(
+                assemble, "_build_playoff_context", return_value=playoff_ctx
+            ):
+                with patch("backend.recaps.awards.select_awards", return_value=[]):
+                    result = assemble.assemble_weekly_snapshot(
+                        league=league,
+                        season=2026,
+                        week=12,
+                        week_start="2026-03-01",
+                        week_end="2026-03-07",
+                        force_fresh=False,
+                    )
 
-def test_clear_snapshot_cache():
-    from backend.commentary.schemas import WeeklyFactSnapshot
-
-    sn = WeeklyFactSnapshot.__new__(WeeklyFactSnapshot)
-    _cache_put((1, 2026, 1), sn)
-    assert _cache_get((1, 2026, 1)) is sn
-    _clear_snapshot_cache()
-    assert _cache_get((1, 2026, 1)) is None
-
-
-# --- integration: assemble_weekly_snapshot uses the cache ---------------------
-
-def test_second_call_reuses_snapshot_from_cache(monkeypatch):
-    """Two calls with the same params within the TTL: the second must return
-    the exact same object, and the ESPN lambdas must run only once.
-
-    Uses the autouse cache-clear fixture and directly populates the cache to
-    bypass the data_quality.ready gate (which is tested separately).
-    """
-    from backend.recaps import assemble
-    from backend.commentary.schemas import WeeklyFactSnapshot
-
-    _clear_snapshot_cache()
-
-    call_count = 0
-
-    def _counting_standings(**kw):
-        nonlocal call_count
-        call_count += 1
-        return []
-
-    import backend.api.routers.league as league_api
-
-    monkeypatch.setattr(league_api, "league_standings", lambda **kw: [])
-    monkeypatch.setattr(league_api, "power_rankings", lambda **kw: [])
-    monkeypatch.setattr(league_api, "scoreboard_current", _counting_standings)
-    monkeypatch.setattr(league_api, "transactions_week", lambda **kw: [])
-    monkeypatch.setattr(league_api, "season_stats", lambda **kw: [])
-    monkeypatch.setattr(league_api, "league_settings", lambda: {})
-    monkeypatch.setattr(assemble, "_CACHE_TTL_SECONDS", 30)
-
-    league = {"id": 1, "slug": "test", "name": "Test", "recap_voice": None}
-
-    # First call — assemble and stash in cache directly.
-    s1 = assemble_weekly_snapshot(
-        league=league, season=2026, week=1,
-        week_start="2025-10-01", week_end="2025-10-07",
-    )
-    first_count = call_count
-    # Use time.monotonic() so the TTL check doesn't expire it.
-    assemble._CACHE[_cache_key(league, 2026, 1)] = (time.monotonic(), s1)
-
-    # Second call — should be a cache hit.
-    s2 = assemble_weekly_snapshot(
-        league=league, season=2026, week=1,
-        week_start="2025-10-01", week_end="2025-10-07",
-    )
-
-    assert s1 is s2
-    assert call_count == first_count  # no additional ESPN calls
-
-
-def test_different_week_is_cache_miss(monkeypatch):
-    """A different week must NOT return the cached snapshot."""
-    from backend.recaps import assemble
-
-    _clear_snapshot_cache()
-
-    call_count = 0
-
-    def _counting_standings(**kw):
-        nonlocal call_count
-        call_count += 1
-        return []
-
-    import backend.api.routers.league as league_api
-
-    monkeypatch.setattr(league_api, "league_standings", lambda **kw: [])
-    monkeypatch.setattr(league_api, "power_rankings", lambda **kw: [])
-    monkeypatch.setattr(league_api, "scoreboard_current", _counting_standings)
-    monkeypatch.setattr(league_api, "transactions_week", lambda **kw: [])
-    monkeypatch.setattr(league_api, "season_stats", lambda **kw: [])
-    monkeypatch.setattr(league_api, "league_settings", lambda: {})
-    monkeypatch.setattr(assemble, "_CACHE_TTL_SECONDS", 30)
-
-    league = {"id": 1, "slug": "test", "name": "Test", "recap_voice": None}
-
-    assemble_weekly_snapshot(
-        league=league, season=2026, week=1,
-        week_start="2025-10-01", week_end="2025-10-07",
-    )
-    after_first = call_count
-
-    assemble_weekly_snapshot(
-        league=league, season=2026, week=2,
-        week_start="2025-10-08", week_end="2025-10-14",
-    )
-
-    assert call_count > after_first  # new assembly ran
-
-
-def test_degraded_snapshot_not_cached(monkeypatch):
-    """A snapshot assembled during an ESPN blip (data_quality.ready=False)
-    must NOT be cached — the next request retries ESPN."""
-    from backend.recaps import assemble
-
-    _clear_snapshot_cache()
-
-    call_count = 0
-
-    def _count():
-        nonlocal call_count
-        call_count += 1
-        return []  # empty → ready will be False
-
-    import backend.api.routers.league as league_api
-
-    monkeypatch.setattr(league_api, "league_standings", _count)
-    monkeypatch.setattr(league_api, "power_rankings", lambda **kw: (_count() and []))
-    monkeypatch.setattr(league_api, "scoreboard_current", lambda **kw: (_count() and []))
-    monkeypatch.setattr(league_api, "transactions_week", lambda **kw: (_count() and []))
-    monkeypatch.setattr(league_api, "season_stats", lambda **kw: (_count() and []))
-    monkeypatch.setattr(league_api, "league_settings", lambda: {})
-    monkeypatch.setattr(assemble, "_CACHE_TTL_SECONDS", 30)
-
-    league = {"id": 1, "slug": "test", "name": "Test", "recap_voice": None}
-
-    s1 = assemble_weekly_snapshot(
-        league=league, season=2026, week=1,
-        week_start="2025-10-01", week_end="2025-10-07",
-    )
-    assert call_count == 6  # 5 lambdas + per-week standings fetch (wk 1)
-    assert s1.data_quality.ready is False
-
-    # Second call — cache should NOT have stored it, so lambdas run again.
-    assemble_weekly_snapshot(
-        league=league, season=2026, week=1,
-        week_start="2025-10-01", week_end="2025-10-07",
-    )
-    assert call_count == 12  # second full assembly
+        assert result is not None
+        assert not result.data_quality.ready
