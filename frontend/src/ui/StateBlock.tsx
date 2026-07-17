@@ -1,4 +1,4 @@
-import { AlertTriangle, Database, ServerCrash } from 'lucide-react'
+import { AlertTriangle, Database, Loader2, ServerCrash } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Card } from './Card'
 import { Skeleton } from './Skeleton'
@@ -118,4 +118,12 @@ export function StateBlock({
       {action && <div className="mt-1">{action}</div>}
     </Card>
   )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Loading spinner (compact, for inline use like buttons)                      */
+/* -------------------------------------------------------------------------- */
+
+export function Spinner({ className = '' }: { className?: string }) {
+  return <Loader2 className={`animate-spin ${className}`} />
 }

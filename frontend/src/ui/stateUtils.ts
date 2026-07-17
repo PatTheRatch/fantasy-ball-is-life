@@ -1,4 +1,3 @@
-import { Loader2 } from 'lucide-react'
 import type { StateBlockProps } from './StateBlock'
 
 /* -------------------------------------------------------------------------- */
@@ -29,12 +28,4 @@ export function inferStateBlock(input: InferStateInput): StateBlockProps & { sho
     return { state: 'empty', show: true }
   }
   return { state: 'empty', show: false }
-}
-
-/* -------------------------------------------------------------------------- */
-/* Loading spinner (compact, for inline use like buttons)                      */
-/* -------------------------------------------------------------------------- */
-
-export function Spinner({ className = '' }: { className?: string }) {
-  return <Loader2 className={`animate-spin ${className}`} />
 }

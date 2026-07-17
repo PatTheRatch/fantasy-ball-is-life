@@ -30,7 +30,6 @@ export function StaleBadge({ fetchedAt, className = '' }: StaleBadgeProps) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    setNow(Date.now())
     const interval = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(interval)
   }, [])

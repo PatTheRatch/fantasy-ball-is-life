@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getSnapshot, getPublishedRecap } from '../api'
+import { getSnapshot, getPublishedRecap, type RecapGeneratedContent } from '../api'
 import {
   Card,
   StateBlock,
@@ -123,7 +123,7 @@ function RankingCard({
 }: {
   row: Record<string, unknown>
   standing: { wins: number; losses: number; ties: number } | null
-  content: Record<string, unknown> | null
+  content: RecapGeneratedContent | null
 }) {
   const [open, setOpen] = useState(false)
   const pills = rankPillEntries(row)
