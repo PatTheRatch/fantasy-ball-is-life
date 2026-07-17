@@ -43,12 +43,12 @@ const directClient: AxiosInstance = axios.create({
   timeout: 120_000,
 })
 
-/** Prefer FastAPI `detail` when present (e.g. validation errors).
- *  P-2: splits user-facing copy (production) from dev detail (local). */
+/** Prefer FastAPI `detail` when present (e.g. validation errors). */
 export function formatApiError(err: unknown): string {
-  const isDev = import.meta.env.DEV
-
   if (axios.isAxiosError(err)) {
+    // The base actually used for this request (client or directClient) is more
+    // accurate than the module-level API_BASE when both are in play.
+    const usedBase = err.config?.baseURL ?? API_BASE
     if (err.response == null) {
       const code = err.code
       if (
@@ -56,19 +56,12 @@ export function formatApiError(err: unknown): string {
         code === 'ECONNREFUSED' ||
         (err.message && /network/i.test(err.message))
       ) {
-        if (isDev) {
-          const usedBase = err.config?.baseURL ?? API_BASE
-          return `Cannot reach the API (${usedBase}). Start the backend (e.g. uvicorn backend.api.main:app --reload --port 8000) and reload the page.`
-        }
-        return 'Cannot reach the server. Please check your connection and try again.'
+        return `Cannot reach the API (${usedBase}). Start the backend (e.g. uvicorn backend.api.main:app --reload --port 8000) and reload the page.`
       }
     }
     const st = err.response?.status
     if (st === 502 || st === 503) {
-      if (isDev) {
-        return `Bad gateway (${st}): the dev server could not reach FastAPI on port 8000, or the request timed out. Try setting VITE_API_BASE=http://127.0.0.1:8000 in frontend/.env to bypass the Vite proxy.`
-      }
-      return 'The server is temporarily unavailable. Please try again in a moment.'
+      return `Bad gateway (${st}): the dev server could not reach FastAPI on port 8000, or the request timed out. Start the API (uvicorn backend.api.main:app --reload --port 8000) and try again. If the API is running, try setting VITE_API_BASE=http://127.0.0.1:8000 in frontend/.env to bypass the Vite proxy.`
     }
     const d = err.response?.data as { detail?: unknown } | undefined
     if (d && typeof d === 'object' && d.detail !== undefined) {
