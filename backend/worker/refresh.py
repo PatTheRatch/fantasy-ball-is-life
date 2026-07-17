@@ -1,39 +1,36 @@
-"""Snapshot worker: pull ESPN → write league_state_snapshots.
+"""Snapshot worker: patch ESPN config → call league API → store computed output.
 
-Shadow mode (P-3a): stores RAW ESPN data for each phase. Computation
-(power rankings, scoped standings, canonical matchups) stays in
-``assemble_weekly_snapshot()`` — in P-3b it reads from these snapshots
-instead of calling live ESPN.
+Shadow mode (P-3a): writes snapshots but NOTHING reads from them yet.
+Read-path flip is P-3b.
+
+Per P-3's architecture: the worker calls the EXACT existing endpoint-level
+functions (league_api.power_rankings, league_api.season_stats, etc.) so
+the heavy compute (get_universe_wins) runs OFF the request path. P-3b's
+read endpoints become SELECT payload → return.
 
 Each phase is independently wrapped — one failure does not block the
 others. A failed refresh keeps the previous snapshot (staleness, never
 a 500 on reads).
-
-Per P-3's architecture: the worker calls the EXACT existing data_feed
-functions. It only moves WHERE they run.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Generator
 
 from backend.recaps.store import RecapStore
-from backend.league.data_feed import (
-    ESPNHandles,
-    standings_df,
-    week_transactions,
-)
-from espn_api.basketball import League
 
 logger = logging.getLogger(__name__)
 
 PHASES = [
     "standings",
+    "power_rankings",
     "scoreboard",
     "transactions",
+    "season_stats",
     "settings",
 ]
 
@@ -64,6 +61,76 @@ def upsert_phase(
     )
 
 
+@contextmanager
+def _patched_espn_config(
+    league_id: int,
+    season: int,
+    swid: str,
+    espn_s2: str,
+) -> Generator[None, None, None]:
+    """Temporarily swap ESPN credentials in the module-level config.
+
+    The league API functions read ``config.LEAGUE_ID`` etc. at import time;
+    we patch both the config source AND the modules that imported them so
+    all call paths see this league's credentials. Restored on exit.
+    """
+    import backend.config as config
+    import backend.league.data_feed as df
+    import backend.api.deps as deps
+
+    # Save originals across all modules that bind these names
+    originals = {
+        "config": {
+            "LEAGUE_ID": config.LEAGUE_ID,
+            "SEASON": config.SEASON,
+            "SWID": config.SWID,
+            "ESPN_S2": config.ESPN_S2,
+        },
+        "df": {
+            "LEAGUE_ID": df.LEAGUE_ID,
+            "SEASON": df.SEASON,
+            "SWID": df.SWID,
+            "ESPN_S2": df.ESPN_S2,
+        },
+        "deps": {
+            "LEAGUE_ID": deps.LEAGUE_ID,
+            "SEASON": deps.SEASON,
+        },
+    }
+
+    try:
+        # config module
+        config.LEAGUE_ID = league_id
+        config.SEASON = season
+        config.SWID = swid
+        config.ESPN_S2 = espn_s2
+
+        # data_feed module (imported from config at module top)
+        df.LEAGUE_ID = league_id
+        df.SEASON = season
+        df.SWID = swid
+        df.ESPN_S2 = espn_s2
+
+        # deps module (imported from config at module top)
+        deps.LEAGUE_ID = league_id
+        deps.SEASON = season
+
+        yield
+    finally:
+        config.LEAGUE_ID = originals["config"]["LEAGUE_ID"]
+        config.SEASON = originals["config"]["SEASON"]
+        config.SWID = originals["config"]["SWID"]
+        config.ESPN_S2 = originals["config"]["ESPN_S2"]
+
+        df.LEAGUE_ID = originals["df"]["LEAGUE_ID"]
+        df.SEASON = originals["df"]["SEASON"]
+        df.SWID = originals["df"]["SWID"]
+        df.ESPN_S2 = originals["df"]["ESPN_S2"]
+
+        deps.LEAGUE_ID = originals["deps"]["LEAGUE_ID"]
+        deps.SEASON = originals["deps"]["SEASON"]
+
+
 def refresh_league(
     *,
     league_id: str,
@@ -72,122 +139,88 @@ def refresh_league(
     espn_s2: str,
     swid: str,
 ) -> dict[str, str]:
-    """Pull ESPN → write all phases. One failure never blocks the rest.
+    """Patch ESPN config → call league API → write all 6 computed phases.
 
     Returns {phase: status_string} for logging.
+    Each phase is independently wrapped — one failure never blocks the rest.
     """
-    # ── Connect ESPN ──────────────────────────────────────────────────────────
-    try:
-        league = League(
-            league_id=espn_league_id,
-            year=espn_season,
-            espn_s2=espn_s2,
-            swid=swid,
-        )
-        handles = ESPNHandles(league=league)
-    except Exception as exc:
-        logger.error("refresh_league(%s): connect failed — %s", league_id, exc)
-        return {"connect": f"error: {exc}"}
-
-    current_week = _current_week(league)
-
     store = RecapStore()
     results: dict[str, str] = {}
 
-    for phase in PHASES:
-        started = time.monotonic()
-        fetched_at = datetime.now(timezone.utc).isoformat()
+    with _patched_espn_config(
+        league_id=espn_league_id,
+        season=espn_season,
+        swid=swid,
+        espn_s2=espn_s2,
+    ):
+        from backend.api.routers import league as league_api
+
+        # Resolve current week FIRST (needed for most phases)
         try:
-            payload = _load_phase(phase, handles, current_week)
-            upsert_phase(
-                store=store,
-                league_id=league_id,
-                season=espn_season,
-                week=current_week,
-                phase=phase,
-                payload=payload,
-                fetched_at=fetched_at,
-            )
-            elapsed = time.monotonic() - started
-            logger.info("refresh_league(%s): %s ok (%.1fs)", league_id, phase, elapsed)
-            results[phase] = f"ok ({elapsed:.1f}s)"
+            handles = league_api._handles()
+            current_week = int(getattr(handles.league, "current_week", 1) or 1)
         except Exception as exc:
-            elapsed = time.monotonic() - started
-            logger.warning(
-                "refresh_league(%s): %s FAILED (%.1fs) — %s",
-                league_id, phase, elapsed, exc,
-            )
-            results[phase] = f"error: {exc}"
+            logger.error("refresh_league(%s): connect failed — %s", league_id, exc)
+            return {"connect": f"error: {exc}"}
+
+        weeks_csv = ",".join(str(w) for w in range(1, current_week + 1))
+
+        for phase in PHASES:
+            started = time.monotonic()
+            fetched_at = datetime.now(timezone.utc).isoformat()
+            try:
+                payload = _load_phase(phase, league_api, current_week, weeks_csv)
+                upsert_phase(
+                    store=store,
+                    league_id=league_id,
+                    season=espn_season,
+                    week=current_week,
+                    phase=phase,
+                    payload=payload,
+                    fetched_at=fetched_at,
+                )
+                elapsed = time.monotonic() - started
+                logger.info(
+                    "refresh_league(%s): %s ok (%.1fs)", league_id, phase, elapsed
+                )
+                results[phase] = f"ok ({elapsed:.1f}s)"
+            except Exception as exc:
+                elapsed = time.monotonic() - started
+                logger.warning(
+                    "refresh_league(%s): %s FAILED (%.1fs) — %s",
+                    league_id, phase, elapsed, exc,
+                )
+                results[phase] = f"error: {exc}"
 
     return results
 
 
-# ── Phase loaders (reuse existing data_feed functions) ────────────────────────
+# ── Phase loaders (call the EXACT existing endpoint-level functions) ───────────
 
 
 def _load_phase(
     phase: str,
-    handles: ESPNHandles,
+    league_api,
     week: int,
+    weeks_csv: str,
 ) -> list[dict[str, Any]] | dict[str, Any]:
-    """Dispatch to the exact existing loader. Zero new analytics logic."""
+    """Dispatch to the exact existing league API function. Zero new logic."""
     if phase == "standings":
-        return _load_standings(handles)
+        return league_api.league_standings()
+
+    if phase == "power_rankings":
+        return league_api.power_rankings(weeks=weeks_csv, recent_weeks=3)
 
     if phase == "scoreboard":
-        return _load_scoreboard(handles, week)
+        return league_api.scoreboard_current(scoring_period=week)
 
     if phase == "transactions":
-        return _load_transactions(handles, week)
+        return league_api.transactions_week(scoring_period=week)
+
+    if phase == "season_stats":
+        return league_api.season_stats(weeks=weeks_csv)
 
     if phase == "settings":
-        return _load_settings(handles, week)
+        return league_api.league_settings()
 
     raise ValueError(f"Unknown phase: {phase}")
-
-
-def _load_standings(handles: ESPNHandles) -> list[dict[str, Any]]:
-    """standings_df — the exact existing loader."""
-    df = standings_df(handles)
-    return df.to_dict(orient="records")
-
-
-def _load_scoreboard(handles: ESPNHandles, week: int) -> list[dict[str, Any]]:
-    """Raw ESPN box scores for the current matchup period."""
-    boxes_df = handles.league.box_scores(matchup_period=week)
-    if boxes_df is None or (hasattr(boxes_df, "empty") and boxes_df.empty):
-        return []
-    return boxes_df.reset_index().to_dict(orient="records")
-
-
-def _load_transactions(handles: ESPNHandles, week: int) -> list[dict[str, Any]]:
-    """week_transactions — the exact existing loader."""
-    return week_transactions(handles, scoring_period=week)
-
-
-def _load_settings(handles: ESPNHandles, week: int) -> dict[str, Any]:
-    """League settings (acquisition type, playoff config, season length)."""
-    try:
-        settings = handles.league.settings
-        return {
-            "acquisition_type": str(getattr(settings, "acquisition_type", "")),
-            "trade_deadline": str(getattr(settings, "trade_deadline", "")),
-            "playoff_team_count": getattr(settings, "playoff_team_count", None),
-            "playoff_start": getattr(settings, "playoff_start", None),
-            "schedule": {
-                "total_matchups": (
-                    getattr(settings, "schedule", {}).get("total_matchups", week)
-                    if hasattr(settings, "schedule")
-                    else week
-                ),
-            },
-        }
-    except Exception:
-        return {"week": week}
-
-
-def _current_week(league) -> int:
-    try:
-        return getattr(league, "current_week", 1) or 1
-    except Exception:
-        return 1
