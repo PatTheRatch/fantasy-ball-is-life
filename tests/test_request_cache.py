@@ -147,7 +147,7 @@ def test_connect_reuses_cached_handles(monkeypatch):
         call_count += 1
         from espn_api.basketball import League as _League
         league = Mock(spec=_League)
-        league.league_id = df.LEAGUE_ID
+        league.league_id = 123456
         return league
 
     monkeypatch.setattr(df, "League", _counting_league)
@@ -192,7 +192,7 @@ def test_connect_refresh_after_middleware_lifecycle(monkeypatch):
         call_count += 1
         from espn_api.basketball import League as _League
         league = Mock(spec=_League)
-        league.league_id = df.LEAGUE_ID
+        league.league_id = 123456
         return league
 
     monkeypatch.setattr(df, "League", _counting_league)

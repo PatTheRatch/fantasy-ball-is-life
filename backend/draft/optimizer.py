@@ -12,13 +12,13 @@ from backend.config import (
     DO_NOT_DRAFT,
     DRAFT_LEAGUE_YEAR_DEFAULT,
     GAMES_PER_WEEK,
-    LEAGUE_ID,
     MIN_SEASON_GAMES_FILTER,
     POSITION_OVERRIDES,
     SOLVER_TIME_LIMIT_SECONDS,
 )
 from backend.draft import targets_mc as mc
 from backend.draft import values as player_values
+from backend.league.credentials import get_league_context
 
 shutup.please()
 
@@ -97,7 +97,9 @@ class OptimizeLineup:
             games_per_week = GAMES_PER_WEEK
         if value_source not in VALUE_SOURCES:
             raise ValueError(f"value_source={value_source!r} must be one of {VALUE_SOURCES}")
-        self.league = get_cached_my_league(LEAGUE_ID, year)
+        self.league = get_cached_my_league(
+            get_league_context().espn_league_id, year
+        )
         self.games_per_week = games_per_week
         self.excluded_players = exclude_players or []
         self.drafted_players = drafted_players or []

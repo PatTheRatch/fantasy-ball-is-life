@@ -174,8 +174,8 @@ class EspnAdapter:
         )
 
         window = self.window
-        from backend.config import SEASON
-        stats_key = f"{SEASON}_last_{window}"
+        from backend.league.credentials import get_league_context
+        stats_key = f"{get_league_context().espn_season}_last_{window}"
 
         results: list[PlayerProjection] = []
 
