@@ -59,6 +59,9 @@ class TestSnapshotRead:
             mock_api.scoreboard_current.return_value = []
             mock_api.transactions_week.return_value = []
             mock_api.season_stats.return_value = []
+            # Realistic settings (empty dict) so playoff_round() gets real
+            # None values, not a MagicMock that breaks its `< 2` int check.
+            mock_api.league_settings.return_value = {}
 
             with patch.object(
                 assemble, "_build_scoped_standings", return_value=([], True)
@@ -76,7 +79,11 @@ class TestSnapshotRead:
                             force_fresh=True,
                         )
 
-        assert mock_api.power_rankings.called
+        # force_fresh pulls live ESPN: rankings via _live_power_rankings()
+        # (NOT league_api.power_rankings, which now reads the snapshot), and
+        # scoreboard/transactions/season_stats straight from league_api.
+        assert mock_api.scoreboard_current.called
+        assert not mock_api.power_rankings.called
 
     def test_missing_snapshots_returns_degraded(self, league):
         """No snapshots → empty/degraded, not a 500."""

@@ -508,11 +508,10 @@ def assemble_weekly_snapshot(
     object.__setattr__(snapshot, "single_week_all_play", single_week_all_play)
     snapshot.award_candidates = select_awards(snapshot)
 
-    # Cache the result so the follow-up generate request reuses this assembly.
-    # Only cache when the data is actually ready — a degraded snapshot from a
-    # transient ESPN blip should not block recovery for the full TTL.
     logging.info(
-        "recap assembly: total %.2fs for %s", time.perf_counter() - assembly_started, ck
+        "recap assembly: total %.2fs for %s",
+        time.perf_counter() - assembly_started,
+        (league.get("id"), season, week),
     )
     return snapshot
 
