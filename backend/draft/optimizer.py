@@ -18,7 +18,7 @@ from backend.config import (
 )
 from backend.draft import targets_mc as mc
 from backend.draft import values as player_values
-from backend.league.credentials import get_league_context
+from backend.league.credentials import _require_context, get_league_context, LeagueContext
 
 shutup.please()
 
@@ -90,6 +90,8 @@ class OptimizeLineup:
         value_source=VALUE_SOURCE_BBM,
         projections_df: Optional[pd.DataFrame] = None,
         projections_rows: Optional[list] = None,
+        *,
+        league_context: LeagueContext | None = None,
     ):
         if year is None:
             year = DRAFT_LEAGUE_YEAR_DEFAULT
@@ -97,9 +99,9 @@ class OptimizeLineup:
             games_per_week = GAMES_PER_WEEK
         if value_source not in VALUE_SOURCES:
             raise ValueError(f"value_source={value_source!r} must be one of {VALUE_SOURCES}")
-        self.league = get_cached_my_league(
-            get_league_context().espn_league_id, year
-        )
+        # P-4: accept injected context (tests/CLI) or resolve from DB
+        ctx = league_context or _require_context()
+        self.league = get_cached_my_league(ctx.espn_league_id, year)
         self.games_per_week = games_per_week
         self.excluded_players = exclude_players or []
         self.drafted_players = drafted_players or []

@@ -16,7 +16,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from backend.league.credentials import get_league_context
+from backend.league.credentials import resolve_league_context
 from backend.recaps.store import RecapStore
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     Each phase is independently wrapped — one failure does not block the
     others. Returns a dict of ``{phase: "ok" | "error: ..."}``.
     """
-    ctx = get_league_context(slug=slug)
+    ctx = resolve_league_context(slug=slug)
     if ctx is None:
         raise RuntimeError(
             f"No league found{' for slug ' + slug if slug else ''} in the database. "

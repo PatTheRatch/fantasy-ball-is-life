@@ -14,7 +14,12 @@ from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 
 from backend.league import data_feed as feed
-from backend.league.credentials import get_league_context, LeagueContext
+from backend.league.credentials import (
+    LeagueContext,
+    _require_context,
+    get_league_context,
+    resolve_league_context,
+)
 from backend.league.fantasy import MyLeague
 from backend.league.gateway import espn_error_status_code
 
@@ -26,12 +31,14 @@ _CTX: LeagueContext | None = None
 def _resolve_ctx() -> LeagueContext:
     """Resolve the single league's credentials from the DB.
 
-    Cached for the process lifetime (single-league interim).
+    Checks the ContextVar first (tests can push a stub), then falls back
+    to ``resolve_league_context()`` which hits the DB.
+    Cached for the process lifetime after first resolution.
     P-4b replaces this with request-scoped resolution from the URL slug.
     """
     global _CTX
     if _CTX is None:
-        _CTX = get_league_context()
+        _CTX = get_league_context() or resolve_league_context()
         if _CTX is None:
             raise RuntimeError(
                 "No league found in the database. "

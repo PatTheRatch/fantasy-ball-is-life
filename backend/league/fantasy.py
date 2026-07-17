@@ -1,7 +1,7 @@
 import pandas as pd
 from espn_api.basketball import League
 
-from backend.league.credentials import get_league_context
+from backend.league.credentials import get_league_context, _require_context
 from backend.league.data_feed import LOWER_IS_BETTER_STATS
 from backend.league.scoreboard import WeeklyScoreboard
 from backend.league.scoreboard_fetch import (
@@ -14,10 +14,9 @@ from backend.league.scoreboard_fetch import (
 class MyLeague(League):
     def __init__(self, league_id, year, espn_s2=None, swid=None):
         if espn_s2 is None or swid is None:
-            ctx = get_league_context()
-            if ctx:
-                espn_s2 = ctx.espn_s2 if espn_s2 is None else espn_s2
-                swid = ctx.swid if swid is None else swid
+            ctx = get_league_context() or _require_context()
+            espn_s2 = ctx.espn_s2 if espn_s2 is None else espn_s2
+            swid = ctx.swid if swid is None else swid
         super().__init__(league_id, year, espn_s2=espn_s2, swid=swid)
         # Schedules can differ in length depending on playoffs/bye; use max.
         self.length_of_schedule = max((len(team.schedule) for team in self.teams), default=0)
