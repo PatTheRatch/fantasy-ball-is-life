@@ -2,10 +2,34 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getSnapshot, getPublishedRecap, type RecapGeneratedContent } from '../api'
-import { rankPillClass, rankPillEntries } from '../lib/inSeasonUtils'
-import { AiTakeBadge } from './AiTakeBadge'
+import {
+  Card,
+  StateBlock,
+  inferStateBlock,
+  AiTakeBadge,
+  RankPill,
+  MovementBadge,
+} from '../ui'
 
 const normTeam = (name: unknown) => String(name ?? '').trim().toLowerCase()
+
+/* ── Move from rankPillClass / rankPillEntries (inSeasonUtils) ──── */
+
+function rankPillEntries(row: Record<string, unknown>): { label: string; rank: number }[] {
+  const statKeys: [string, string][] = [
+    ['pts_rank', 'PTS'], ['reb_rank', 'REB'], ['ast_rank', 'AST'],
+    ['stl_rank', 'STL'], ['blk_rank', 'BLK'], ['3pm_rank', '3PM'],
+    ['fg_pct_rank', 'FG%'], ['ft_pct_rank', 'FT%'], ['to_rank', 'TO'],
+  ]
+  return statKeys
+    .map(([key, label]) => {
+      const r = Number(row[key])
+      return Number.isFinite(r) ? { label, rank: r } : null
+    })
+    .filter((x): x is { label: string; rank: number } => x !== null)
+}
+
+/* ── main component ──────────────────────────────────────────────── */
 
 export function PowerRankingsTab({
   slug,
@@ -22,37 +46,32 @@ export function PowerRankingsTab({
     retry: false,
   })
 
-  // The per-team blurbs come from the (optional) generated recap; the rankings
-  // themselves are deterministic and render with or without it.
   const recapQuery = useQuery({
     queryKey: ['recap', 'published', slug, season, week],
     queryFn: () => getPublishedRecap(slug, season, week),
     retry: false,
   })
 
-  if (snapshotQuery.isLoading) return <p className="text-slate-400">Loading power rankings…</p>
+  const stateBlock = inferStateBlock({
+    isLoading: snapshotQuery.isLoading,
+    isError: snapshotQuery.isError,
+    error: snapshotQuery.error,
+    data: snapshotQuery.data?.snapshot,
+    isEmpty: (d) => {
+      if (!d) return true
+      const rankings = (d as Record<string, unknown>).power_rankings
+      return !Array.isArray(rankings) || rankings.length === 0
+    },
+  })
 
-  if (snapshotQuery.error) {
-    const status = (snapshotQuery.error as { response?: { status: number } })?.response?.status
-    if (status === 404) {
-      return <p className="text-slate-500">No rankings data for this week.</p>
-    }
-    return <p className="text-red-400">Could not load power rankings.</p>
+  if (stateBlock.show) {
+    return <StateBlock {...stateBlock} />
   }
 
-  const snapshot = snapshotQuery.data?.snapshot as Record<string, unknown> | undefined
+  const snapshot = snapshotQuery.data!.snapshot as Record<string, unknown>
   const content = recapQuery.data?.edition?.structured_content_json
-
-  if (!snapshot) {
-    return <p className="text-slate-500">No rankings data for this week.</p>
-  }
-
   const rankings = (snapshot.power_rankings as Record<string, unknown>[]) || []
   const standings = (snapshot.standings as Record<string, unknown>[]) || []
-
-  if (rankings.length === 0) {
-    return <p className="text-slate-500">No ranking data for this week.</p>
-  }
 
   const standingMap: Record<string, { wins: number; losses: number; ties: number }> = {}
   for (const s of standings) {
@@ -65,7 +84,7 @@ export function PowerRankingsTab({
 
   return (
     <div className="space-y-4 pb-8">
-      <p className="text-xs text-slate-600">
+      <p className="text-xs text-slate-500">
         Rankings are algorithmic (all-play win rate, category dominance, recent form).
         Team blurbs are AI-written and may reflect model opinion.
       </p>
@@ -83,19 +102,9 @@ export function PowerRankingsTab({
   )
 }
 
-function movementArrow(change: unknown): string {
-  const n = Number(change)
-  if (!Number.isFinite(n) || n === 0) return '—'
-  return n > 0 ? `▲${Math.abs(n)}` : `▼${Math.abs(n)}`
-}
+/* ── Rank badge (numeric circle) ─────────────────────────────────── */
 
-function movementColor(change: unknown): string {
-  const n = Number(change)
-  if (!Number.isFinite(n) || n === 0) return 'text-slate-500'
-  return n > 0 ? 'text-emerald-400' : 'text-red-400'
-}
-
-function RankBadge({ rank }: { rank: unknown }) {
+function RankCircle({ rank }: { rank: unknown }) {
   const n = Number(rank)
   if (!Number.isFinite(n)) return null
   return (
@@ -104,6 +113,8 @@ function RankBadge({ rank }: { rank: unknown }) {
     </span>
   )
 }
+
+/* ── ranking card ────────────────────────────────────────────────── */
 
 function RankingCard({
   row,
@@ -117,7 +128,8 @@ function RankingCard({
   const [open, setOpen] = useState(false)
   const pills = rankPillEntries(row)
 
-  const explanation = (content?.ranking_explanations ?? []).find(
+  const explanations = (content?.ranking_explanations ?? []) as { team: string; text: string }[]
+  const explanation = explanations.find(
     (item) => normTeam(item.team) === normTeam(row.team),
   )
 
@@ -126,15 +138,16 @@ function RankingCard({
     : '—'
 
   const team = String(row.team ?? '')
+  const rankChange = Number(row.rank_change) || 0
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60">
+    <Card variant="default">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-4 p-4 text-left"
       >
-        <RankBadge rank={row.rank} />
+        <RankCircle rank={row.rank} />
         <div className="min-w-0 flex-1">
           <p className="font-bold text-white">{team}</p>
           <p className="text-sm text-slate-400">
@@ -151,9 +164,7 @@ function RankingCard({
           )}
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className={`text-sm font-semibold ${movementColor(row.rank_change)}`}>
-            {movementArrow(row.rank_change)}
-          </span>
+          <MovementBadge change={rankChange} />
         </div>
         {open ? (
           <ChevronUp className="h-5 w-5 flex-shrink-0 text-slate-500" />
@@ -162,21 +173,16 @@ function RankingCard({
         )}
       </button>
       {open && pills.length > 0 && (
-        <div className="border-t border-slate-800 px-4 pb-4">
+        <div className="border-t border-pg-border px-4 pb-4">
           <div className="flex flex-wrap gap-2 pt-3">
             {pills
               .sort((a, b) => a.rank - b.rank)
               .map((p) => (
-                <span
-                  key={p.label}
-                  className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${rankPillClass(p.rank)}`}
-                >
-                  {p.label} #{p.rank}
-                </span>
+                <RankPill key={p.label} label={p.label} rank={p.rank} />
               ))}
           </div>
         </div>
       )}
-    </div>
+    </Card>
   )
 }
