@@ -43,7 +43,7 @@ control. Both now archived read-only; the consolidated code lives in this repo.
 | Draft Monte Carlo + targets (`monte_carlo_targets.py`, `utils.py`) | Simulates thousands of drafts to derive category targets; 75%-win constraint math | **Keep · fold in** |
 | Punt-strategy analysis (`get_correlations.py`) | Category correlation study for choosing punts | **Keep as notebook** |
 | Historical league data (~120 CSV/XLS) | Every weekly scoreboard, roster, transaction log — a real backtesting dataset | **Archive** |
-| Flask draft UI (`app.py`, `templates/`) | Early optimizer web UI, superseded by v2 React app | **Retire** |
+| Flask draft UI (`app.py`, `templates/`) | Early optimizer web UI, superseded by v2 React app | **Retired (P-1, 2026-07-16).** `templates/` already absent; `app.py` deleted (tag `legacy-streamlit`). |
 | Stray files (`venv/`, `Roblox.dmg`, dup configs) | 1.1 GB venv committed with code; Roblox installer; `ProjectionConfig` defined twice | **Delete** |
 
 ### The Product Shell — `PatriotGames` (v2, where work left off)

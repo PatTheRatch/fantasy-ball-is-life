@@ -217,7 +217,7 @@ def get_cached_my_league(league_id: int, year: int) -> Any:
     before constructing a new ``MyLeague`` (4 ESPN requests). A per-key lock
     collapses concurrent misses (e.g. readiness and generate arriving close
     together) into a single ESPN fetch. Returns the uncached result when no
-    request cache is active (CLI / Streamlit) — the TTL cache still applies.
+    request cache is active (CLI / tests) — the TTL cache still applies.
 
     Lives in the league layer (not ``api.deps``) so the Draft optimizer can
     import it without an upward dependency.
