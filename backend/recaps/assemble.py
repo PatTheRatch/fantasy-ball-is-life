@@ -356,6 +356,18 @@ def assemble_weekly_snapshot(
 
     if not force_fresh:
         # ── P-3b: read from stored snapshots ──────────────────────────────
+        #
+        # NOTE: get_all_phases returns the freshest row per phase (ordered by
+        # fetched_at DESC). P-3b serves the current week's snapshot for ALL
+        # recap requests — a historical-week recap will read whatever week the
+        # worker last stored. Per-week scoping is deferred to P-4 (multi-league
+        # + per-week phase storage).
+        #
+        # NOTE: single_week_all_play is set to [] in the snapshot path because
+        # the stored scoreboard phase covers one week and the computation
+        # requires all prior weeks' matchups. Team-of-the-Week (FIX-A) is
+        # degraded in the snapshot path until the worker stores per-week
+        # scoreboards (P-4).
         store = RecapStore()
         phases = store.get_all_phases(league_id=league["id"], season=season)
 
