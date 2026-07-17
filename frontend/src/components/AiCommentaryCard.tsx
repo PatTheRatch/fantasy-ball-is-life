@@ -4,47 +4,47 @@ import type { Components } from 'react-markdown'
 
 const ESPN_RED = '#e03131'
 const markdownComponents: Components = {
-  h1: ({ node: _n, ...props }) => (
+  h1: (props) => (
     <h1
       className="mb-2 text-xl font-bold text-white"
       {...props}
     />
   ),
-  h2: ({ node: _n, ...props }) => (
+  h2: (props) => (
     <h2
       className="mb-2 text-lg font-bold text-white"
       {...props}
     />
   ),
-  h3: ({ node: _n, ...props }) => (
+  h3: (props) => (
     <h3
       className="mb-1.5 text-base font-bold text-white"
       {...props}
     />
   ),
-  p: ({ node: _n, ...props }) => (
+  p: (props) => (
     <p className="leading-normal text-[#8b949e]" {...props} />
   ),
-  strong: ({ node: _n, ...props }) => (
+  strong: (props) => (
     <strong
       className="font-semibold"
       style={{ color: ESPN_RED }}
       {...props}
     />
   ),
-  em: ({ node: _n, ...props }) => (
+  em: (props) => (
     <em className="italic text-slate-400" {...props} />
   ),
-  ul: ({ node: _n, ...props }) => (
+  ul: (props) => (
     <ul
       className="my-2 list-disc pl-5 text-[#8b949e] marker:text-[#e03131]"
       {...props}
     />
   ),
-  ol: ({ node: _n, ...props }) => (
+  ol: (props) => (
     <ol className="my-2 list-decimal pl-5 text-[#8b949e]" {...props} />
   ),
-  li: ({ node: _n, ...props }) => (
+  li: (props) => (
     <li className="text-[#8b949e]" {...props} />
   ),
 }
