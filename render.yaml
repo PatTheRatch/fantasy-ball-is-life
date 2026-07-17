@@ -23,6 +23,17 @@ services:
         sync: false
       - key: PYTHON_VERSION
         value: 3.12
+      - key: WORKER_SECRET
+        sync: false
+      - key: CRED_ENCRYPTION_KEY
+        sync: false
+
+  - type: cron
+    name: fantasy-ball-is-life-snapshot-refresh
+    env: python
+    schedule: "*/15 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.worker.cron_entrypoint
 
   - type: static
     name: fantasy-ball-is-life-site

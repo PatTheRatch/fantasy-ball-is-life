@@ -16,6 +16,7 @@ a 500 on reads).
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -61,6 +62,8 @@ def upsert_phase(
     )
 
 
+_CONFIG_PATCH_LOCK = threading.Lock()
+
 @contextmanager
 def _patched_espn_config(
     league_id: int,
@@ -70,9 +73,19 @@ def _patched_espn_config(
 ) -> Generator[None, None, None]:
     """Temporarily swap ESPN credentials in the module-level config.
 
-    The league API functions read ``config.LEAGUE_ID`` etc. at import time;
-    we patch both the config source AND the modules that imported them so
-    all call paths see this league's credentials. Restored on exit.
+    **Temporary single-league bridge.** Swapping ``config.LEAGUE_ID`` /
+    ``SWID`` / ``ESPN_S2`` as process-global state is safe only while there
+    is one league and cron isn't firing.  It becomes a cross-tenant bug the
+    moment a second league exists (a concurrent user read of ``/league/*``
+    during a refresh would see the other league's patched creds) or two
+    refreshes overlap — it's the exact global coupling P-4 will delete.
+
+    **P-4 replaces this** with explicit ``(league_id, season, creds)``
+    params threaded through ``connect()`` / the league API.  **Do NOT add a
+    second league while this is the mechanism.**
+
+    Refreshes are serialised via a module-level ``threading.Lock`` to
+    prevent concurrent runs from interleaving their patches.
     """
     import backend.config as config
     import backend.league.data_feed as df
@@ -147,13 +160,14 @@ def refresh_league(
     store = RecapStore()
     results: dict[str, str] = {}
 
-    with _patched_espn_config(
-        league_id=espn_league_id,
-        season=espn_season,
-        swid=swid,
-        espn_s2=espn_s2,
-    ):
-        from backend.api.routers import league as league_api
+    with _CONFIG_PATCH_LOCK:
+        with _patched_espn_config(
+            league_id=espn_league_id,
+            season=espn_season,
+            swid=swid,
+            espn_s2=espn_s2,
+        ):
+            from backend.api.routers import league as league_api
 
         # Resolve current week FIRST (needed for most phases)
         try:
