@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: fantasy-ball-is-life-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ESPN_LEAGUE_ID
+        sync: false
+      - key: ESPN_SEASON
+        sync: false
+      - key: ESPN_SWID
+        sync: false
+      - key: ESPN_S2
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.12
+
+  - type: static
+    name: fantasy-ball-is-life-site
+    rootDir: frontend/dist
+    buildCommand: cd frontend && npm ci && npm run build
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

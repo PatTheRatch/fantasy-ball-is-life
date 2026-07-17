@@ -89,6 +89,7 @@ def health() -> dict[str, str]:
 
 
 from backend.api.routers import (  # noqa: E402
+    admin,
     commentary,
     draft,
     league,
@@ -103,3 +104,4 @@ app.include_router(commentary.router)
 app.include_router(projections.router)
 app.include_router(optimizer.router)
 app.include_router(recaps.router)
+app.include_router(admin.router)
