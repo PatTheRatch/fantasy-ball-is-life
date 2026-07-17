@@ -9,14 +9,19 @@ from backend.recaps import assemble
 
 def _make_phases(**overrides):
     default = {
+        "standings": {
+            "payload_json": [
+                {"team_name": "Alpha", "wins": 10, "losses": 5, "ties": 0, "win_pct": 66.7}
+            ],
+            "fetched_at": "2026-01-01T00:00:00Z",
+        },
         "power_rankings": {
-            "payload_json": [{"Team": "Alpha", "wins": 10, "losses": 5, "ties": 0}],
+            "payload_json": [{"Team": "Alpha", "wins": 10, "losses": 5, "ties": 0, "Rank": 1, "Score": 0.85}],
             "fetched_at": "2026-01-01T00:00:00Z",
         },
         "scoreboard": {"payload_json": [], "fetched_at": "2026-01-01T00:00:00Z"},
         "transactions": {"payload_json": [], "fetched_at": "2026-01-01T00:00:00Z"},
         "season_stats": {"payload_json": [], "fetched_at": "2026-01-01T00:00:00Z"},
-        "settings": {"payload_json": {}, "fetched_at": "2026-01-01T00:00:00Z"},
     }
     default.update(overrides)
     return default
@@ -33,34 +38,22 @@ class TestSnapshotRead:
         mock_store = Mock()
         mock_store.get_all_phases.return_value = _make_phases()
 
-        # _build_playoff_context must return a dict (PlayoffContext-parseable)
-        playoff_ctx = {"round_label": None, "playoffs_active": False, "round_index": 0, "total_rounds": 1, "is_championship": False}
-
         with patch.object(assemble, "RecapStore", return_value=mock_store):
-            with patch.object(
-                assemble, "_build_playoff_context", return_value=playoff_ctx
-            ):
-                # select_awards is imported inside the function — patch it
-                # in the module's namespace before calling
-                with patch(
-                    "backend.recaps.awards.select_awards", return_value=[]
-                ):
-                    result = assemble.assemble_weekly_snapshot(
-                        league=league,
-                        season=2026,
-                        week=12,
-                        week_start="2026-03-01",
-                        week_end="2026-03-07",
-                        force_fresh=False,
-                    )
+            with patch("backend.recaps.awards.select_awards", return_value=[]):
+                result = assemble.assemble_weekly_snapshot(
+                    league=league,
+                    season=2026,
+                    week=12,
+                    week_start="2026-03-01",
+                    week_end="2026-03-07",
+                    force_fresh=False,
+                )
 
         assert mock_store.get_all_phases.called
         assert result is not None
 
     def test_force_fresh_calls_league_api(self, league):
         """force_fresh=True → pulls live ESPN."""
-        playoff_ctx = {"round_label": None, "playoffs_active": False, "round_index": 0, "total_rounds": 1, "is_championship": False}
-
         with patch.object(assemble, "league_api") as mock_api:
             mock_api.power_rankings.return_value = [{"Team": "A"}]
             mock_api.scoreboard_current.return_value = []
@@ -73,20 +66,15 @@ class TestSnapshotRead:
                 with patch.object(
                     assemble, "_build_single_week_ap", return_value=[]
                 ):
-                    with patch.object(
-                        assemble, "_build_playoff_context", return_value=playoff_ctx
-                    ):
-                        with patch.object(
-                            assemble, "select_awards", return_value=[]
-                        ):
-                            result = assemble.assemble_weekly_snapshot(
-                                league=league,
-                                season=2026,
-                                week=12,
-                                week_start="2026-03-01",
-                                week_end="2026-03-07",
-                                force_fresh=True,
-                            )
+                    with patch("backend.recaps.awards.select_awards", return_value=[]):
+                        result = assemble.assemble_weekly_snapshot(
+                            league=league,
+                            season=2026,
+                            week=12,
+                            week_start="2026-03-01",
+                            week_end="2026-03-07",
+                            force_fresh=True,
+                        )
 
         assert mock_api.power_rankings.called
 
@@ -94,21 +82,17 @@ class TestSnapshotRead:
         """No snapshots → empty/degraded, not a 500."""
         mock_store = Mock()
         mock_store.get_all_phases.return_value = {}
-        playoff_ctx = {"round_label": None, "playoffs_active": False, "round_index": 0, "total_rounds": 1, "is_championship": False}
 
         with patch.object(assemble, "RecapStore", return_value=mock_store):
-            with patch.object(
-                assemble, "_build_playoff_context", return_value=playoff_ctx
-            ):
-                with patch("backend.recaps.awards.select_awards", return_value=[]):
-                    result = assemble.assemble_weekly_snapshot(
-                        league=league,
-                        season=2026,
-                        week=12,
-                        week_start="2026-03-01",
-                        week_end="2026-03-07",
-                        force_fresh=False,
-                    )
+            with patch("backend.recaps.awards.select_awards", return_value=[]):
+                result = assemble.assemble_weekly_snapshot(
+                    league=league,
+                    season=2026,
+                    week=12,
+                    week_start="2026-03-01",
+                    week_end="2026-03-07",
+                    force_fresh=False,
+                )
 
         assert result is not None
         assert not result.data_quality.ready

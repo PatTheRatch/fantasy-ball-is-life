@@ -1,10 +1,8 @@
 """Build a canonical, evidence-addressable weekly fact snapshot.
 
-E3 snapshot cache: the recap readiness and generation endpoints are separate
-HTTP requests, but both call ``assemble_weekly_snapshot()`` with the same
-parameters. A short-TTL app-level cache (60 s, max 3 entries, FIFO eviction)
-avoids redoing the full ESPN assembly when the two requests arrive within
-seconds of each other.
+P-3b: reads from league_state_snapshots (stored by the P-3a worker)
+instead of calling ESPN live. force_fresh=True keeps the admin
+live-pull path.
 """
 from __future__ import annotations
 
@@ -25,13 +23,6 @@ from backend.recaps import playoffs
 from backend.recaps.store import RecapStore
 
 STAT_ORDER = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
-
-def _clear_snapshot_cache() -> None:
-    _CACHE.clear()
-
-
-# --- helpers ------------------------------------------------------------------
-
 
 def _slug(value: Any) -> str:
     text = re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")
@@ -227,6 +218,122 @@ def _capture(
         )
 
 
+
+def _live_power_rankings(weeks_csv: str, recent_weeks: int = 3):
+    """Compute power rankings from live ESPN (force_fresh path)."""
+    import pandas as pd
+    from backend.api.deps import _my_league, _scoreboard
+
+    board = _scoreboard()
+    all_weeks = sorted(set(int(w.strip()) for w in weeks_csv.split(",") if w.strip()))
+    if not all_weeks:
+        return []
+
+    rw = max(1, recent_weeks)
+    recent_list = all_weeks[-rw:]
+
+    df_full = board.all_play(weeks=all_weeks)
+    df_recent = board.all_play(weeks=recent_list)
+
+    if df_full is None or df_full.empty or "Team" not in df_full.columns:
+        return []
+
+    for col in ["Total Win %", "Actual Win %"]:
+        if col in df_full.columns:
+            df_full[col] = pd.to_numeric(df_full[col], errors="coerce")
+    if "Total Win %" in df_recent.columns:
+        df_recent["Total Win %"] = pd.to_numeric(df_recent["Total Win %"], errors="coerce")
+
+    stat_cols = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
+    stat_cols_avail = [c for c in stat_cols if c in df_full.columns]
+    stats = df_full[["Team"] + stat_cols_avail].copy()
+    for c in stat_cols_avail:
+        stats[c] = pd.to_numeric(stats[c], errors="coerce")
+
+    ranks = {}
+    for c in stat_cols:
+        if c not in stats.columns:
+            continue
+        ranks[c] = stats[c].rank(method="min", ascending=False).astype("Int64")
+
+    rank_df = pd.DataFrame({"Team": stats["Team"]})
+    for c, sr in ranks.items():
+        rank_df[f"{c.lower().replace('%', '_pct')}_rank"] = sr
+
+    top3 = pd.Series(0, index=rank_df.index, dtype="int")
+    denom = 0
+    for c in stat_cols:
+        key = f"{c.lower().replace('%', '_pct')}_rank"
+        if key in rank_df.columns:
+            denom += 1
+            top3 += (pd.to_numeric(rank_df[key], errors="coerce").fillna(999) <= 3).astype(int)
+    dominance = (top3 / float(denom or 9)).astype(float)
+
+    base = df_full[["Team", "Total Win %", "Actual Win %"]].copy()
+    base = base.rename(columns={"Total Win %": "allplay_win_pct", "Actual Win %": "actual_win_pct"})
+    recent = df_recent[["Team", "Total Win %"]].copy().rename(columns={"Total Win %": "recent_allplay_win_pct"})
+
+    out = base.merge(recent, on="Team", how="left").merge(rank_df, on="Team", how="left")
+    out["category_dominance_score"] = dominance.values
+
+    out["composite_score"] = (
+        0.35 * (pd.to_numeric(out["allplay_win_pct"], errors="coerce").fillna(0) / 100.0)
+        + 0.35 * (pd.to_numeric(out["recent_allplay_win_pct"], errors="coerce").fillna(0) / 100.0)
+        + 0.20 * (pd.to_numeric(out["actual_win_pct"], errors="coerce").fillna(0) / 100.0)
+        + 0.10 * (pd.to_numeric(out["category_dominance_score"], errors="coerce").fillna(0))
+    )
+
+    out = out.sort_values("composite_score", ascending=False).reset_index(drop=True)
+    out["Rank"] = out.index + 1
+
+    ml = _my_league()
+    records = {}
+    for t in ml.teams:
+        tn = str(getattr(t, "team_name", getattr(t, "team_id", "")))
+        records[tn] = {
+            "wins": getattr(t, "wins", 0),
+            "losses": getattr(t, "losses", 0),
+            "ties": getattr(t, "ties", 0),
+        }
+
+    result = []
+    for _, row in out.iterrows():
+        team = str(row["Team"])
+        rec = records.get(team, {"wins": 0, "losses": 0, "ties": 0})
+        entry = {
+            "Team": team,
+            "Rank": int(row["Rank"]),
+            "Score": round(float(row["composite_score"]), 4),
+            "RecentScore": round(float(row.get("recent_allplay_win_pct", 0) or 0), 2),
+            "wins": rec["wins"],
+            "losses": rec["losses"],
+            "ties": rec["ties"],
+        }
+        for c in stat_cols:
+            key = f"{c.lower().replace('%', '_pct')}_rank"
+            if key in row.index:
+                entry[f"{c}_rank"] = int(row[key]) if pd.notna(row[key]) else None
+        result.append(entry)
+
+    if len(all_weeks) >= 2:
+        prev_weeks = all_weeks[:-1]
+        df_prev = board.all_play(weeks=prev_weeks)
+        if df_prev is not None and not df_prev.empty and "Team" in df_prev.columns:
+            df_prev["composite"] = pd.to_numeric(
+                df_prev.get("Total Win %", 0), errors="coerce"
+            ).fillna(0)
+            df_prev = df_prev.sort_values("composite", ascending=False).reset_index(drop=True)
+            df_prev["PriorRank"] = df_prev.index + 1
+            prior_map = dict(zip(df_prev["Team"].astype(str), df_prev["PriorRank"]))
+            for entry in result:
+                cur = entry["Rank"]
+                prev = prior_map.get(entry["Team"])
+                entry["PriorRank"] = prev
+                entry["Movement"] = int(prev) - int(cur) if prev is not None else 0
+
+    return result
+
+
 def assemble_weekly_snapshot(
     *,
     league: dict[str, Any],
@@ -243,6 +350,7 @@ def assemble_weekly_snapshot(
     first — the one user allowed to wait.
     """
     assembly_started = time.perf_counter()
+
     warnings: list[str] = []
 
     if not force_fresh:
@@ -250,55 +358,44 @@ def assemble_weekly_snapshot(
         store = RecapStore()
         phases = store.get_all_phases(league_id=league["id"], season=season)
 
-        # standings: build from power_rankings payload (has wins/losses/ties)
-        pr = phases.get("power_rankings", {}).get("payload_json", [])
+        stored_standings = phases.get("standings", {}).get("payload_json", [])
         standings: list[dict[str, Any]] = []
-        standings_ok = bool(pr)
+        standings_ok = bool(stored_standings)
         if standings_ok:
-            for row in pr:
+            for row in stored_standings:
                 standings.append({
-                    "team_name": row.get("Team", ""),
-                    "team_id": _slug(row.get("team") or row.get("Team")),
+                    "team_name": row.get("team_name", row.get("Team", "")),
+                    "team_id": row.get("team_id", _slug(row.get("team_name", row.get("Team", "")))),
                     "wins": row.get("wins", 0),
                     "losses": row.get("losses", 0),
                     "ties": row.get("ties", 0),
-                    "win_pct": 0.0,  # filled below
+                    "win_pct": row.get("win_pct", row.get("win%", 0.0)),
                 })
-            for s in standings:
-                total = s["wins"] + s["losses"] + s["ties"]
-                s["win_pct"] = round(s["wins"] / total * 100, 1) if total else 0.0
-            standings.sort(key=lambda r: (-r["win_pct"], -r["wins"]))
-            for i, s in enumerate(standings):
-                s["standing"] = i + 1
+            standings.sort(key=lambda r: (-float(r.get("win_pct", 0) or 0), -int(r.get("wins", 0))))
+            for i_s, s in enumerate(standings):
+                s["standing"] = i_s + 1
 
-        # power_rankings: direct from stored payload
-        rankings = pr or []
+        rankings = phases.get("power_rankings", {}).get("payload_json", []) or []
         rankings_ok = bool(rankings)
 
-        # scoreboard
+        single_week_all_play: list[dict[str, Any]] = []
+
         scoreboard = phases.get("scoreboard", {}).get("payload_json", []) or []
         scoreboard_ok = bool(scoreboard)
 
-        # transactions
         transactions = phases.get("transactions", {}).get("payload_json", []) or []
         transactions_ok = bool(transactions)
 
-        # season_stats
         season_stats = phases.get("season_stats", {}).get("payload_json", []) or []
         season_stats_ok = bool(season_stats)
 
-        # single_week_all_play (cheap side-effect computation)
-        single_week_all_play: list[dict[str, Any]] = []
-
-        # fetched_at: use the newest phase timestamp
         fetched_ats = [p.get("fetched_at") for p in phases.values()]
-        fetched_at = max(f for f in fetched_ats if f) if any(fetched_ats) else None
-
         logging.info(
-            "recap assembly: snapshot read for league=%s season=%s week=%s "
-            "(fetched_at=%s)",
-            league["id"], season, week, fetched_at,
+            "recap assembly: snapshot read for %s (fetched_at=%s)",
+            league["id"], max(f for f in fetched_ats if f) if any(fetched_ats) else None,
         )
+
+        del phases, store
     else:
         # ── force_fresh: pull live ESPN (admin flow, slow) ─────────────────
         weeks_csv = ",".join(str(v) for v in range(1, week + 1))
@@ -306,7 +403,7 @@ def assemble_weekly_snapshot(
         standings, standings_ok = _build_scoped_standings(league_api, week, warnings)
         rankings, rankings_ok = _capture(
             "Power rankings",
-            lambda: league_api.power_rankings(weeks=weeks_csv, recent_weeks=3),
+            lambda: _live_power_rankings(weeks_csv, recent_weeks=3),
             warnings,
         )
         single_week_all_play = _build_single_week_ap(league_api, week)
@@ -326,7 +423,6 @@ def assemble_weekly_snapshot(
             warnings,
         )
 
-    # ── Cheap transforms (unchanged — run on stored OR fresh data) ────────
     matchups = canonical_matchups(scoreboard, week)
     complete_categories = bool(matchups) and all(
         len(matchup["categories"]) == len(STAT_ORDER)
@@ -367,7 +463,11 @@ def assemble_weekly_snapshot(
     for row in ranking_facts:
         row["team_id"] = _slug(row.get("team") or row.get("Team"))
 
+    playoff_started = time.perf_counter()
     playoff_context = _build_playoff_context(week, matchups, standings, warnings)
+    logging.info(
+        "recap assembly: playoff_context took %.2fs", time.perf_counter() - playoff_started
+    )
 
     # F2-6: annotate standings with in_playoffs flag.
     _annotate_standings_playoffs(standings)
@@ -397,15 +497,22 @@ def assemble_weekly_snapshot(
         playoff_context=playoff_context,
     )
 
-    # F2-5: compute deterministic awards from the assembled snapshot.
+    # F2-5: compute deterministic awards from the assembled snapshot so
+    # award_candidates is always populated (even pre-generation).  The AI
+    # explanation line stays gated on a published recap.
     from backend.recaps.awards import select_awards
 
+    # FIX-A: single-week all-play for Team of the Week.
+    # WeeklyFactSnapshot is a Pydantic model — use object.__setattr__
+    # for fields not declared in the model.
     object.__setattr__(snapshot, "single_week_all_play", single_week_all_play)
     snapshot.award_candidates = select_awards(snapshot)
 
+    # Cache the result so the follow-up generate request reuses this assembly.
+    # Only cache when the data is actually ready — a degraded snapshot from a
+    # transient ESPN blip should not block recovery for the full TTL.
     logging.info(
-        "recap assembly: total %.2fs for league=%s season=%s week=%s force_fresh=%s",
-        time.perf_counter() - assembly_started, league["id"], season, week, force_fresh,
+        "recap assembly: total %.2fs for %s", time.perf_counter() - assembly_started, ck
     )
     return snapshot
 

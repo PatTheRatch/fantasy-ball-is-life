@@ -342,7 +342,11 @@ class RecapStore:
         season: int,
         phase: str,
     ) -> dict[str, Any] | None:
-        """Return {payload_json, fetched_at} for one phase or None if missing."""
+        """Return {payload_json, fetched_at} for one phase or None if missing.
+
+        Ordered by fetched_at DESC so the freshest snapshot wins when
+        multiple rows exist per (league_id, season, phase).
+        """
         rows = self._request(
             "GET",
             "league_state_snapshots",
@@ -351,6 +355,8 @@ class RecapStore:
                 "season": f"eq.{season}",
                 "phase": f"eq.{phase}",
                 "select": "payload_json,fetched_at",
+                "order": "fetched_at.desc",
+                "limit": "1",
             },
         )
         return rows[0] if rows else None
@@ -363,7 +369,8 @@ class RecapStore:
     ) -> dict[str, dict[str, Any]]:
         """Return {phase: {payload_json, fetched_at, week}} for all phases.
 
-        One row per phase; returns empty dict if nothing stored yet."""
+        One row per phase; returns empty dict if nothing stored yet.
+        When multiple rows exist per phase, the freshest wins."""
         rows = self._request(
             "GET",
             "league_state_snapshots",
@@ -371,6 +378,15 @@ class RecapStore:
                 "league_id": f"eq.{league_id}",
                 "season": f"eq.{season}",
                 "select": "phase,payload_json,fetched_at,week",
+                "order": "fetched_at.desc",
             },
         )
-        return {r["phase"]: r for r in rows}
+        # Deduplicate: keep first (freshest) per phase
+        seen: set[str] = set()
+        result: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            p = r["phase"]
+            if p not in seen:
+                seen.add(p)
+                result[p] = r
+        return result

@@ -253,7 +253,7 @@ def league_standings() -> dict[str, Any]:
 def league_settings() -> dict[str, Any]:
     """Read stored league settings from the snapshot worker (P-3b)."""
     payload, fetched_at = _snapshot_read("settings")
-    return {"settings": payload or {}, "fetched_at": fetched_at}
+    return {"data": payload or {}, "fetched_at": fetched_at}
 
 
 @router.get("/season-stats")
