@@ -13,31 +13,56 @@ import pandas as pd
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 
-from backend.config import LEAGUE_ID, SEASON
 from backend.league import data_feed as feed
+from backend.league.credentials import (
+    LeagueContext,
+    _require_context,
+    get_league_context,
+    resolve_league_context,
+)
 from backend.league.fantasy import MyLeague
 from backend.league.gateway import espn_error_status_code
 
+# ── Lazy-resolved league context (P-4: per-request in P-4b) ───────────────────
+
+_CTX: LeagueContext | None = None
+
+
+def _resolve_ctx() -> LeagueContext:
+    """Resolve the single league's credentials from the DB.
+
+    Checks the ContextVar first (tests can push a stub), then falls back
+    to ``resolve_league_context()`` which hits the DB.
+    Cached for the process lifetime after first resolution.
+    P-4b replaces this with request-scoped resolution from the URL slug.
+    """
+    global _CTX
+    if _CTX is None:
+        _CTX = get_league_context() or resolve_league_context()
+        if _CTX is None:
+            raise RuntimeError(
+                "No league found in the database. "
+                "Run `python -m backend.scripts.seed_league` to seed."
+            )
+    return _CTX
+
 
 def _my_league(year: Optional[int] = None) -> MyLeague:
-    """``MyLeague`` for in-season endpoints; uses ``SEASON`` from config when year is omitted.
-
-    Delegates to ``backend.league.cache.get_cached_my_league`` (PR F).
-    """
+    """``MyLeague`` from DB-sourced credentials (P-4)."""
     from backend.league.cache import get_cached_my_league
 
-    y = SEASON if year is None else year
-    return get_cached_my_league(LEAGUE_ID, y)
+    ctx = _resolve_ctx()
+    y = ctx.espn_season if year is None else year
+    return get_cached_my_league(ctx.espn_league_id, y)
 
 
 def _scoreboard(year: Optional[int] = None):
-    """``WeeklyScoreboard`` for the all-play endpoints (power rankings, season
-    stats). Uses the narrow single-call ESPN fetch + TTL cache, avoiding the
-    full ``MyLeague`` construction those endpoints don't need."""
+    """``WeeklyScoreboard`` from DB-sourced credentials (P-4)."""
     from backend.league.cache import get_cached_scoreboard
 
-    y = SEASON if year is None else year
-    return get_cached_scoreboard(LEAGUE_ID, y)
+    ctx = _resolve_ctx()
+    y = ctx.espn_season if year is None else year
+    return get_cached_scoreboard(ctx.espn_league_id, y)
 
 
 def _strip_numpy(obj: Any) -> Any:

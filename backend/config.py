@@ -21,11 +21,10 @@ try:
 except ImportError:
     pass
 
-# --- ESPN fantasy league ---
-LEAGUE_ID: int = int(os.getenv("ESPN_LEAGUE_ID", "3853870"))
-SEASON: int = int(os.getenv("ESPN_SEASON", "2026"))
-SWID = os.getenv("ESPN_SWID", None)
-ESPN_S2 = os.getenv("ESPN_S2", None)
+# --- ESPN fantasy league credentials (P-4: moved to the leagues table) ---
+# These are resolved per-request from the DB via get_league_context().
+# The constants LEAGUE_ID, SEASON, SWID, ESPN_S2 no longer exist —
+# any code that reads them should import get_league_context() instead.
 
 # --- Supabase recap persistence / auth ---
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")

@@ -73,11 +73,7 @@ install_espn_timeout_patch()
 
 from backend.config import (
     BBM_PROJECTIONS_PATH,
-    ESPN_S2,
-    LEAGUE_ID,
     PLAYER_RANKINGS_DIR,
-    SEASON,
-    SWID,
     WEEKLY_PROJECTIONS_DEFAULT_PATH,
 )
 
@@ -123,8 +119,8 @@ MATCHUP_WEEKS_2025_26 = _MATCHUP_WEEK_CALENDARS[2026]
 
 
 def get_matchup_weeks(season_year=None):
-    from backend.config import SEASON
-    yr = int(SEASON) if season_year is None else int(season_year)
+    from backend.league.credentials import _require_context
+    yr = _require_context().espn_season if season_year is None else int(season_year)
     return _MATCHUP_WEEK_CALENDARS.get(yr, _MATCHUP_WEEK_CALENDARS[2026])
 
 
@@ -230,32 +226,54 @@ def _date_range(start: date, end: date) -> List[date]:
 
 # --------------------------- DATA LAYER -------------------------------------
 
-def connect() -> ESPNHandles:
-    """Return (possibly cached) league handles for the configured league.
+def connect(
+    *,
+    league_id: int | None = None,
+    season: int | None = None,
+    swid: str | None = None,
+    espn_s2: str | None = None,
+) -> ESPNHandles:
+    """Return (possibly cached) league handles.
 
-    When running inside an HTTP request with the request-scoped cache middleware
-    active (``ESPNRequestCacheMiddleware``), only the first call constructs a
-    new ``League`` (4 ESPN requests); subsequent ``connect()`` calls inside the
-    same request reuse the cached handles.
+    When running inside an HTTP request with the request-scoped cache
+    middleware active (``ESPNRequestCacheMiddleware``), only the first
+    call constructs a new ``League`` (4 ESPN requests); subsequent
+    ``connect()`` calls inside the same request reuse the cached handles.
+
+    P-4: All params are keyword-only. When omitted, they are resolved
+    from the DB (``get_league_context()``) instead of the old global
+    ``config.LEAGUE_ID/SWID/ESPN_S2/SEASON`` constants.
     """
     from backend.league.cache import get_request_cache
+    from backend.league.credentials import _require_context, resolve_league_context
+
+    # Resolve from DB if not explicitly provided
+    if league_id is None or season is None or swid is None or espn_s2 is None:
+        resolve_league_context()
+        ctx = _require_context()
+        league_id = league_id or ctx.espn_league_id
+        season = season or ctx.espn_season
+        swid = swid or ctx.swid
+        espn_s2 = espn_s2 or ctx.espn_s2
+
+    assert league_id is not None and season is not None
 
     cache = get_request_cache()
     if cache is not None:
-        existing = cache.get(LEAGUE_ID, SEASON)
+        existing = cache.get(league_id, season)
         if existing is not None:
             return existing
 
     league = League(
-        league_id=LEAGUE_ID,
-        year=SEASON,
-        espn_s2=ESPN_S2,
-        swid=SWID,
+        league_id=league_id,
+        year=season,
+        espn_s2=espn_s2,
+        swid=swid,
     )
     handles = ESPNHandles(league=league)
 
     if cache is not None:
-        cache.put(LEAGUE_ID, SEASON, handles)
+        cache.put(league_id, season, handles)
 
     return handles
 
@@ -1402,9 +1420,9 @@ def resolve_roster_week_window(
 
 
 def _season_year() -> int:
-    """P-9: derive the stats-key year from config instead of hardcoding 2026."""
-    from backend.config import SEASON
-    return int(SEASON)
+    """P-9: derive the stats-key year from the DB instead of hardcoding 2026."""
+    from backend.league.credentials import _require_context
+    return _require_context().espn_season
 
 
 def get_current_rosters(

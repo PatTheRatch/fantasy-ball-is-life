@@ -1,53 +1,49 @@
-"""Snapshot worker: patch ESPN config → call league API → store computed output.
+"""Snapshot worker: pull ESPN → write league_state_snapshots.
 
-Shadow mode (P-3a): writes snapshots but NOTHING reads from them yet.
-Read-path flip is P-3b.
+P-4: Credentials are sourced from the ``leagues`` table (encrypted at
+rest) instead of monkeypatching module-level ``config.LEAGUE_ID`` /
+``SWID`` / ``ESPN_S2`` globals. ``connect()`` accepts explicit
+``(league_id, season, swid, espn_s2)`` kwargs.
 
-Per P-3's architecture: the worker calls the EXACT existing endpoint-level
-functions (league_api.power_rankings, league_api.season_stats, etc.) so
-the heavy compute (get_universe_wins) runs OFF the request path. P-3b's
-read endpoints become SELECT payload → return.
-
-Each phase is independently wrapped — one failure does not block the
-others. A failed refresh keeps the previous snapshot (staleness, never
-a 500 on reads).
+P-3a (shadow mode): writes snapshots but NOTHING reads from them yet.
+P-3b (read-path flip): /league/* endpoints and assemble_weekly_snapshot()
+read from stored snapshots instead of calling ESPN live.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 import time
-from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Generator
 
+from backend.league.credentials import resolve_league_context
 from backend.recaps.store import RecapStore
 
 logger = logging.getLogger(__name__)
 
 PHASES = [
+    "settings",
     "standings",
-    "power_rankings",
     "scoreboard",
     "transactions",
+    "power_rankings",
     "season_stats",
-    "settings",
 ]
 
 
-def upsert_phase(
-    *,
+def _upsert_phase(
     store: RecapStore,
     league_id: str,
     season: int,
     week: int,
     phase: str,
-    payload: dict[str, Any] | list[dict[str, Any]],
-    fetched_at: str,
-) -> dict[str, Any]:
-    """Write one phase row. Unique constraint makes this a natural upsert."""
-    return store._request(
+    payload: object,
+) -> None:
+    """UPSERT one phase row with a per-phase ``fetched_at`` timestamp."""
+    import json
+
+    now = datetime.now(timezone.utc).isoformat()
+    store._request(
         "POST",
         "league_state_snapshots",
         json={
@@ -56,185 +52,128 @@ def upsert_phase(
             "week": week,
             "phase": phase,
             "payload_json": payload,
-            "fetched_at": fetched_at,
+            "fetched_at": now,
         },
         prefer="resolution=merge-duplicates",
     )
 
 
-_CONFIG_PATCH_LOCK = threading.Lock()
+def refresh_league(*, slug: str | None = None) -> dict[str, str]:
+    """Refresh all phases for one league from live ESPN.
 
-@contextmanager
-def _patched_espn_config(
-    league_id: int,
-    season: int,
-    swid: str,
-    espn_s2: str,
-) -> Generator[None, None, None]:
-    """Temporarily swap ESPN credentials in the module-level config.
+    Credentials are resolved from the DB (``get_league_context()``).
+    ``connect()`` receives explicit ``(league_id, season, swid, espn_s2)``
+    — no more monkeypatching of module-level globals.
 
-    **Temporary single-league bridge.** Swapping ``config.LEAGUE_ID`` /
-    ``SWID`` / ``ESPN_S2`` as process-global state is safe only while there
-    is one league and cron isn't firing.  It becomes a cross-tenant bug the
-    moment a second league exists (a concurrent user read of ``/league/*``
-    during a refresh would see the other league's patched creds) or two
-    refreshes overlap — it's the exact global coupling P-4 will delete.
-
-    **P-4 replaces this** with explicit ``(league_id, season, creds)``
-    params threaded through ``connect()`` / the league API.  **Do NOT add a
-    second league while this is the mechanism.**
-
-    Refreshes are serialised via a module-level ``threading.Lock`` to
-    prevent concurrent runs from interleaving their patches.
+    Each phase is independently wrapped — one failure does not block the
+    others. Returns a dict of ``{phase: "ok" | "error: ..."}``.
     """
-    import backend.config as config
-    import backend.league.data_feed as df
-    import backend.api.deps as deps
+    ctx = resolve_league_context(slug=slug)
+    if ctx is None:
+        raise RuntimeError(
+            f"No league found{' for slug ' + slug if slug else ''} in the database. "
+            "Run `python -m backend.scripts.seed_league` to seed."
+        )
 
-    # Save originals across all modules that bind these names
-    originals = {
-        "config": {
-            "LEAGUE_ID": config.LEAGUE_ID,
-            "SEASON": config.SEASON,
-            "SWID": config.SWID,
-            "ESPN_S2": config.ESPN_S2,
-        },
-        "df": {
-            "LEAGUE_ID": df.LEAGUE_ID,
-            "SEASON": df.SEASON,
-            "SWID": df.SWID,
-            "ESPN_S2": df.ESPN_S2,
-        },
-        "deps": {
-            "LEAGUE_ID": deps.LEAGUE_ID,
-            "SEASON": deps.SEASON,
-        },
-    }
+    league_id = ctx.league_id
+    season = ctx.espn_season
+    espn_league_id = ctx.espn_league_id
+    swid = ctx.swid
+    espn_s2 = ctx.espn_s2
 
-    try:
-        # config module
-        config.LEAGUE_ID = league_id
-        config.SEASON = season
-        config.SWID = swid
-        config.ESPN_S2 = espn_s2
+    # Determine current ESPN week
+    from backend.league.data_feed import connect
+    from espn_api.basketball import League
 
-        # data_feed module (imported from config at module top)
-        df.LEAGUE_ID = league_id
-        df.SEASON = season
-        df.SWID = swid
-        df.ESPN_S2 = espn_s2
+    logger.info("Refreshing league %s (slug=%s, season=%s)…", league_id, ctx.slug, season)
 
-        # deps module (imported from config at module top)
-        deps.LEAGUE_ID = league_id
-        deps.SEASON = season
+    handles = connect(
+        league_id=espn_league_id,
+        season=season,
+        swid=swid,
+        espn_s2=espn_s2,
+    )
+    week = handles.league.currentMatchupPeriod
 
-        yield
-    finally:
-        config.LEAGUE_ID = originals["config"]["LEAGUE_ID"]
-        config.SEASON = originals["config"]["SEASON"]
-        config.SWID = originals["config"]["SWID"]
-        config.ESPN_S2 = originals["config"]["ESPN_S2"]
-
-        df.LEAGUE_ID = originals["df"]["LEAGUE_ID"]
-        df.SEASON = originals["df"]["SEASON"]
-        df.SWID = originals["df"]["SWID"]
-        df.ESPN_S2 = originals["df"]["ESPN_S2"]
-
-        deps.LEAGUE_ID = originals["deps"]["LEAGUE_ID"]
-        deps.SEASON = originals["deps"]["SEASON"]
-
-
-def refresh_league(
-    *,
-    league_id: str,
-    espn_league_id: int,
-    espn_season: int,
-    espn_s2: str,
-    swid: str,
-) -> dict[str, str]:
-    """Patch ESPN config → call league API → write all 6 computed phases.
-
-    Returns {phase: status_string} for logging.
-    Each phase is independently wrapped — one failure never blocks the rest.
-    """
     store = RecapStore()
     results: dict[str, str] = {}
 
-    with _CONFIG_PATCH_LOCK:
-        with _patched_espn_config(
-            league_id=espn_league_id,
-            season=espn_season,
-            swid=swid,
-            espn_s2=espn_s2,
-        ):
-            from backend.api.routers import league as league_api
+    from backend.api.routers import league as league_api
 
-        # Resolve current week FIRST (needed for most phases)
-        try:
-            handles = league_api._handles()
-            current_week = int(getattr(handles.league, "current_week", 1) or 1)
-        except Exception as exc:
-            logger.error("refresh_league(%s): connect failed — %s", league_id, exc)
-            return {"connect": f"error: {exc}"}
+    # ── settings ───────────────────────────────────────────────────────────
+    phase = "settings"
+    try:
+        raw = league_api.league_settings()
+        # strip the P-3b envelope if present
+        payload = raw.get("data", raw.get("settings", raw))
+        _upsert_phase(store, league_id, season, week, phase, payload)
+        results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
 
-        weeks_csv = ",".join(str(w) for w in range(1, current_week + 1))
+    # ── standings ──────────────────────────────────────────────────────────
+    phase = "standings"
+    try:
+        raw = league_api.league_standings()
+        payload = raw.get("data", raw)
+        _upsert_phase(store, league_id, season, week, phase, payload)
+        results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
 
-        for phase in PHASES:
-            started = time.monotonic()
-            fetched_at = datetime.now(timezone.utc).isoformat()
-            try:
-                payload = _load_phase(phase, league_api, current_week, weeks_csv)
-                upsert_phase(
-                    store=store,
-                    league_id=league_id,
-                    season=espn_season,
-                    week=current_week,
-                    phase=phase,
-                    payload=payload,
-                    fetched_at=fetched_at,
-                )
-                elapsed = time.monotonic() - started
-                logger.info(
-                    "refresh_league(%s): %s ok (%.1fs)", league_id, phase, elapsed
-                )
-                results[phase] = f"ok ({elapsed:.1f}s)"
-            except Exception as exc:
-                elapsed = time.monotonic() - started
-                logger.warning(
-                    "refresh_league(%s): %s FAILED (%.1fs) — %s",
-                    league_id, phase, elapsed, exc,
-                )
-                results[phase] = f"error: {exc}"
+    # ── scoreboard ─────────────────────────────────────────────────────────
+    phase = "scoreboard"
+    try:
+        raw = league_api.scoreboard_current(scoring_period=week)
+        payload = raw.get("data", raw)
+        _upsert_phase(store, league_id, season, week, phase, payload)
+        results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
 
+    # ── transactions ───────────────────────────────────────────────────────
+    phase = "transactions"
+    try:
+        raw = league_api.transactions_week(scoring_period=week)
+        payload = raw.get("data", raw)
+        _upsert_phase(store, league_id, season, week, phase, payload)
+        results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
+
+    # ── power_rankings ─────────────────────────────────────────────────────
+    phase = "power_rankings"
+    try:
+        weeks_csv = ",".join(str(v) for v in range(1, week + 1))
+        raw = league_api.power_rankings(weeks=weeks_csv, recent_weeks=3)
+        payload = raw.get("data", raw)
+        _upsert_phase(store, league_id, season, week, phase, payload)
+        results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
+
+    # ── season_stats ───────────────────────────────────────────────────────
+    phase = "season_stats"
+    try:
+        weeks_csv = ",".join(str(v) for v in range(1, week + 1))
+        raw = league_api.season_stats(weeks=weeks_csv)
+        payload = raw.get("data", raw)
+        _upsert_phase(store, league_id, season, week, phase, payload)
+        results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
+
+    elapsed = time.perf_counter()
+    logger.info(
+        "Refresh complete for %s in %.2fs: %s",
+        ctx.slug,
+        elapsed,
+        ", ".join(f"{p}={s}" for p, s in results.items()),
+    )
     return results
-
-
-# ── Phase loaders (call the EXACT existing endpoint-level functions) ───────────
-
-
-def _load_phase(
-    phase: str,
-    league_api,
-    week: int,
-    weeks_csv: str,
-) -> list[dict[str, Any]] | dict[str, Any]:
-    """Dispatch to the exact existing league API function. Zero new logic."""
-    if phase == "standings":
-        return league_api.league_standings()
-
-    if phase == "power_rankings":
-        return league_api.power_rankings(weeks=weeks_csv, recent_weeks=3)
-
-    if phase == "scoreboard":
-        return league_api.scoreboard_current(scoring_period=week)
-
-    if phase == "transactions":
-        return league_api.transactions_week(scoring_period=week)
-
-    if phase == "season_stats":
-        return league_api.season_stats(weeks=weeks_csv)
-
-    if phase == "settings":
-        return league_api.league_settings()
-
-    raise ValueError(f"Unknown phase: {phase}")
