@@ -1,5 +1,7 @@
 import axios, { type AxiosInstance } from 'axios'
 
+import { recapLeagueSlug } from './lib/supabase'
+
 function resolveApiBase(): string {
   const raw = import.meta.env.VITE_API_BASE
   if (raw != null && String(raw).trim() !== '') {
@@ -12,6 +14,11 @@ function resolveApiBase(): string {
 
 /** Base URL: `/api` (proxied in dev) or full URL from `VITE_API_BASE`. */
 export const API_BASE = resolveApiBase()
+
+/** P-4b: prefix a league-scoped path with `/leagues/{slug}`. */
+function leaguePath(path: string): string {
+  return `/leagues/${recapLeagueSlug}${path}`
+}
 
 const client: AxiosInstance = axios.create({
   baseURL: API_BASE,
@@ -219,7 +226,7 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 export async function getLeagueMeta(): Promise<JsonRecord> {
-  const { data } = await client.get<JsonRecord>('/league/meta')
+  const { data } = await client.get<JsonRecord>(leaguePath('/league/meta'))
   return data
 }
 
@@ -246,7 +253,7 @@ export async function getPowerRankings(
   weeks: string,
   recentWeeks = 3,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>('/power-rankings', {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/power-rankings'), {
     params: { weeks, recent_weeks: recentWeeks },
   })
   return data.data ?? []
@@ -257,7 +264,7 @@ export async function getConfidence(params: {
   stat: string
   player_avg: number
 }): Promise<JsonRecord> {
-  const { data } = await client.get<JsonRecord>('/confidence', { params })
+  const { data } = await client.get<JsonRecord>(leaguePath('/confidence'), { params })
   return data
 }
 
@@ -267,7 +274,7 @@ export async function getMatchupConfidence(params: {
   games_played?: number
   total_games?: number
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/matchup-confidence', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/matchup-confidence'), {
     params,
   })
   return data
@@ -291,22 +298,22 @@ export async function postLeagueRecap(
 }
 
 export async function getLeagueTeams(): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/league/teams')
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/league/teams'))
   return data
 }
 
 export async function getLeagueStandings(): Promise<JsonRecord[]> {
-  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>('/league/standings')
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/league/standings'))
   return data.data ?? []
 }
 
 export async function getLeagueSettings(): Promise<LeagueSettings> {
-  const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>('/league/settings')
+  const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>(leaguePath('/league/settings'))
   return data.data
 }
 
 export async function getSeasonStats(weeks: string): Promise<JsonRecord[]> {
-  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>('/season-stats', {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/season-stats'), {
     params: { weeks },
   })
   return data.data ?? []
@@ -333,7 +340,7 @@ export async function getTransactions(
   start: string,
   end: string,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/transactions', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/transactions'), {
     params: { start, end },
   })
   return data
@@ -342,7 +349,7 @@ export async function getTransactions(
 export async function getMatchups(
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/matchups', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/matchups'), {
     params:
       scoringPeriod != null ? { scoring_period: scoringPeriod } : undefined,
   })
@@ -352,7 +359,7 @@ export async function getMatchups(
 export async function getScoreboardCurrent(
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/scoreboard/current', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/scoreboard/current'), {
     params:
       scoringPeriod != null ? { scoring_period: scoringPeriod } : undefined,
   })
@@ -366,7 +373,7 @@ export async function getRostersCurrent(params?: {
   current_matchup_period?: number
   projections?: string
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/rosters/current', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/rosters/current'), {
     params,
   })
   return data
@@ -375,7 +382,7 @@ export async function getRostersCurrent(params?: {
 export async function postRostersCurrent(
   formData: FormData,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.post<JsonRecord[]>('/rosters/current', formData)
+  const { data } = await client.post<JsonRecord[]>(leaguePath('/rosters/current'), formData)
   return data
 }
 
@@ -710,7 +717,7 @@ export async function getProjectedScoreboard(params?: {
   current_matchup_period?: number
   projections?: string
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/projected-scoreboard', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/projected-scoreboard'), {
     params,
   })
   return data
@@ -730,7 +737,7 @@ export async function postProjectedScoreboard(
   if (bbmFile) {
     fd.append('bbm_file', bbmFile)
   }
-  const { data } = await client.post<JsonRecord[]>('/projected-scoreboard', fd)
+  const { data } = await client.post<JsonRecord[]>(leaguePath('/projected-scoreboard'), fd)
   return data
 }
 

@@ -142,16 +142,17 @@ def _snapshot_read(
     Returns (payload_json, fetched_at) or (None, None) when no snapshot
     exists yet.
     """
-    from backend.config import LEAGUE_ID, SEASON
+    ctx = _resolve_ctx()
+    y = ctx.espn_season if season is None else season
 
-    league_uuid = _resolve_league_uuid(LEAGUE_ID)
+    league_uuid = _resolve_league_uuid(ctx.espn_league_id)
     if not league_uuid:
         return None, None
 
     from backend.recaps.store import RecapStore
 
     store = RecapStore()
-    s = season or SEASON
+    s = season or y
 
     snap = store.get_phase_snapshot(league_id=league_uuid, season=s, phase=phase)
     if not snap:

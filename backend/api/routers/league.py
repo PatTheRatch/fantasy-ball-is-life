@@ -19,9 +19,10 @@ from backend.api.deps import (
     _scoreboard,
     _snapshot_read,
 )
+from backend.api.deps_slug import LeagueSlugDep
 from backend.league import data_feed as feed
 
-router = APIRouter(tags=["league"])
+router = APIRouter(prefix="/leagues/{slug}", tags=["league"], dependencies=[LeagueSlugDep])
 
 
 def _validate_week_range(week_start_date: Optional[str], week_end_date: Optional[str]) -> None:
@@ -46,7 +47,7 @@ def _validate_week_range(week_start_date: Optional[str], week_end_date: Optional
             detail=f"week_start_date ({week_start_date}) must be on or before week_end_date ({week_end_date}).",
         )
 
-@router.get("/league/meta")
+@router.get("/meta")
 def league_meta() -> dict[str, Any]:
     try:
         h = _handles()
@@ -55,7 +56,7 @@ def league_meta() -> dict[str, Any]:
         raise _espn_http_exception(e) from e
 
 
-@router.get("/league/my-league/schedule")
+@router.get("/schedule")
 def my_league_schedule(
     year: Optional[int] = Query(None, description="ESPN season year; defaults to config SEASON"),
 ) -> List[dict[str, Any]]:
@@ -66,7 +67,7 @@ def my_league_schedule(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/league/my-league/current-week-matchups")
+@router.get("/matchups/current-week")
 def my_league_current_week_matchups(
     year: Optional[int] = Query(None, description="ESPN season year; defaults to config SEASON"),
 ) -> List[dict[str, Any]]:
@@ -231,7 +232,7 @@ def matchup_confidence(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/league/teams")
+@router.get("/teams")
 def league_teams() -> List[dict[str, Any]]:
     try:
         h = _handles()
@@ -240,7 +241,7 @@ def league_teams() -> List[dict[str, Any]]:
         raise _espn_http_exception(e) from e
 
 
-@router.get("/league/standings")
+@router.get("/standings")
 def league_standings() -> dict[str, Any]:
     """Read computed standings from the snapshot worker (P-3b)."""
     payload, fetched_at = _snapshot_read("standings")
@@ -249,7 +250,7 @@ def league_standings() -> dict[str, Any]:
     return {"data": payload, "fetched_at": fetched_at}
 
 
-@router.get("/league/settings")
+@router.get("/settings")
 def league_settings() -> dict[str, Any]:
     """Read stored league settings from the snapshot worker (P-3b)."""
     payload, fetched_at = _snapshot_read("settings")

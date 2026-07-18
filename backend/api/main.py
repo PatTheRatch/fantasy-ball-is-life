@@ -93,12 +93,14 @@ from backend.api.routers import (  # noqa: E402
     commentary,
     draft,
     league,
+    legacy_redirects,
     optimizer,
     projections,
     recaps,
 )
 
 app.include_router(league.router)
+app.include_router(legacy_redirects.router)  # P-4b: old flat paths → 307 redirects
 app.include_router(draft.router)
 app.include_router(commentary.router)
 app.include_router(projections.router)
