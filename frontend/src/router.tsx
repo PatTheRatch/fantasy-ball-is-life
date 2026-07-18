@@ -1,8 +1,11 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { createBrowserRouter } from 'react-router-dom'
 import { AppLayout } from './layouts/AppLayout'
 import { RequireAuth } from './lib/RequireAuth'
 import { DraftPage } from './pages/DraftPage'
+import { DraftRedirect } from './pages/DraftRedirect'
+import { HomeResolver } from './pages/HomeResolver'
 import { InSeason } from './pages/InSeason'
+import { LeagueHome } from './pages/LeagueHome'
 import { Login } from './pages/Login'
 import { NewsroomLayout } from './pages/NewsroomLayout'
 import { NewsroomRedirect } from './pages/NewsroomRedirect'
@@ -24,8 +27,15 @@ export const router = createBrowserRouter([
     path: '/',
     element: <AppLayout />,
     children: [
-      { index: true, element: <Navigate to="/draft" replace /> },
-      { path: 'draft', element: <DraftPage /> },
+      // P-6b: `/` resolves by membership (1 league → its Home; many → picker;
+      // logged out → the single-league default).
+      { index: true, element: <HomeResolver /> },
+      // League Home — the new default league surface (P-6b).
+      { path: 'leagues/:slug', element: <LeagueHome /> },
+      { path: 'leagues/:slug/draft', element: <DraftPage /> },
+      // Flat legacy paths → league-scoped equivalents (§5). `/in-season` and
+      // `/season` keep flat until P-7 gives them scoped destinations.
+      { path: 'draft', element: <DraftRedirect /> },
       { path: 'in-season', element: <InSeason /> },
       { path: 'recap', element: <Recap /> },
       // Newsroom (P-6a: renamed from /recaps/; old path redirects below).
