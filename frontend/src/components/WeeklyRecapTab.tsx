@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Session } from '@supabase/supabase-js'
-import { Copy, LockKeyhole, RefreshCw, Send } from 'lucide-react'
+import { Copy, RefreshCw, Send } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import {
   formatApiError,
   generateRecapDraft,
@@ -14,8 +14,8 @@ import {
   type RecapEdition,
   type RecapGeneratedContent,
 } from '../api'
+import { useAuth } from '../lib/authContext'
 import { MATCHUP_WEEKS_2025_26 } from '../lib/matchupWeeks'
-import { supabase } from '../lib/supabase'
 
 function CopyButton({
   label,
@@ -67,67 +67,6 @@ function Narrative({ content }: { content: RecapGeneratedContent }) {
   )
 }
 
-function AdminSignIn({
-  onSession,
-}: {
-  onSession: (session: Session | null) => void
-}) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  const signIn = async () => {
-    if (!supabase) {
-      setError('Supabase browser settings are not configured.')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    const result = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
-    if (result.error) {
-      setError(result.error.message)
-      return
-    }
-    onSession(result.data.session)
-  }
-
-  return (
-    <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-4">
-      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-200">
-        <LockKeyhole className="h-4 w-4" />
-        Admin sign in
-      </div>
-      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-        <input
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="Email"
-          className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-white"
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="Password"
-          className="min-h-11 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-white"
-        />
-        <button
-          type="button"
-          disabled={loading || !email || !password}
-          onClick={() => void signIn()}
-          className="min-h-11 rounded-lg bg-amber-600 px-4 text-sm font-bold text-white disabled:opacity-50"
-        >
-          {loading ? 'Signing in…' : 'Sign in'}
-        </button>
-      </div>
-      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
-    </div>
-  )
-}
-
 export function WeeklyRecapTab({
   slug,
   season,
@@ -140,20 +79,12 @@ export function WeeklyRecapTab({
   adminMode: boolean
 }) {
   const queryClient = useQueryClient()
-  const [session, setSession] = useState<Session | null>(null)
+  const location = useLocation()
+  const { session, signOut } = useAuth()
   const [draft, setDraft] = useState<RecapEdition | null>(null)
   const [confirmIncomplete, setConfirmIncomplete] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [working, setWorking] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!supabase) return
-    void supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession)
-    })
-    return () => data.subscription.unsubscribe()
-  }, [])
 
   useEffect(() => {
     setDraft(null)
@@ -244,7 +175,23 @@ export function WeeklyRecapTab({
 
   return (
     <div className="space-y-5 pb-8">
-      {adminMode && !session && <AdminSignIn onSession={setSession} />}
+      {adminMode && !session && (
+        <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-4">
+          <p className="mb-1 font-semibold text-amber-200">
+            Admin sign-in required
+          </p>
+          <p className="mb-3 text-sm text-amber-100/80">
+            Sign in to access the publishing desk.
+          </p>
+          <Link
+            to="/login"
+            state={{ from: location.pathname + location.search }}
+            className="inline-flex min-h-11 items-center rounded-lg bg-amber-600 px-4 text-sm font-bold text-white"
+          >
+            Go to sign in
+          </Link>
+        </div>
+      )}
 
       {adminMode && session && (
         <section className="space-y-4 rounded-2xl border border-amber-700/40 bg-amber-950/10 p-4 md:p-5">
@@ -255,7 +202,7 @@ export function WeeklyRecapTab({
             </div>
             <button
               type="button"
-              onClick={() => void supabase?.auth.signOut()}
+              onClick={() => void signOut()}
               className="text-xs font-semibold text-slate-400 hover:text-white"
             >
               Sign out

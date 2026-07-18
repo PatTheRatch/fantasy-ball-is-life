@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { ClipboardList, LayoutDashboard, Newspaper, Trophy } from 'lucide-react'
+import { ProfileMenu } from './ProfileMenu'
 
 const tabs = [
   { to: '/draft', label: 'Draft', Icon: ClipboardList },
@@ -43,6 +44,7 @@ export function TopNav() {
             </NavLink>
           ))}
         </nav>
+        <ProfileMenu />
       </div>
     </header>
   )
