@@ -51,9 +51,14 @@ except Exception:
     pass
 
 from backend import config
+from backend.api.middleware_slug import LeagueSlugMiddleware
 from backend.league.cache import ESPNRequestCacheMiddleware
 
 app = FastAPI(title="PatriotGames Fantasy API", version="0.1.0")
+
+# P-4b: resolve slug → LeagueContext BEFORE any handler runs.
+# Must come before ESPNRequestCacheMiddleware (ESPN handles need the context).
+app.add_middleware(LeagueSlugMiddleware)
 
 # ESPN request cache: reuses one League construction per request. The recap's
 # assemble_weekly_snapshot() calls connect() 4 separate times; this deduplicates

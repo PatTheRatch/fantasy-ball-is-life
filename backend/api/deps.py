@@ -23,28 +23,27 @@ from backend.league.credentials import (
 from backend.league.fantasy import MyLeague
 from backend.league.gateway import espn_error_status_code
 
-# ── Lazy-resolved league context (P-4: per-request in P-4b) ───────────────────
-
-_CTX: LeagueContext | None = None
+# ── League context resolution (P-4b: per-request via ASGI middleware) ──────────
+#
+# The LeagueSlugMiddleware sets _LEAGUE_CTX per request. _resolve_ctx()
+# reads from it; falls back to resolve_league_context() for interstitial
+# callers (P-3a worker, CLI, scripts) that run outside a request context.
 
 
 def _resolve_ctx() -> LeagueContext:
-    """Resolve the single league's credentials from the DB.
+    """Return the current request's LeagueContext or resolve one.
 
-    Checks the ContextVar first (tests can push a stub), then falls back
-    to ``resolve_league_context()`` which hits the DB.
-    Cached for the process lifetime after first resolution.
-    P-4b replaces this with request-scoped resolution from the URL slug.
+    In an HTTP request, the LeagueSlugMiddleware has already set the
+    ContextVar. For interstitial callers (worker, CLI), this resolves
+    lazily from the DB (single-league interim).
     """
-    global _CTX
-    if _CTX is None:
-        _CTX = get_league_context() or resolve_league_context()
-        if _CTX is None:
-            raise RuntimeError(
-                "No league found in the database. "
-                "Run `python -m backend.scripts.seed_league` to seed."
-            )
-    return _CTX
+    ctx = get_league_context() or resolve_league_context()
+    if ctx is None:
+        raise RuntimeError(
+            "No league found in the database. "
+            "Run `python -m backend.scripts.seed_league` to seed."
+        )
+    return ctx
 
 
 def _my_league(year: Optional[int] = None) -> MyLeague:

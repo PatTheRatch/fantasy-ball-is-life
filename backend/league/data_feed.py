@@ -245,12 +245,15 @@ def connect(
     ``config.LEAGUE_ID/SWID/ESPN_S2/SEASON`` constants.
     """
     from backend.league.cache import get_request_cache
-    from backend.league.credentials import _require_context, resolve_league_context
+    from backend.league.credentials import get_league_context, resolve_league_context
 
     # Resolve from DB if not explicitly provided
     if league_id is None or season is None or swid is None or espn_s2 is None:
-        resolve_league_context()
-        ctx = _require_context()
+        ctx = get_league_context() or resolve_league_context()
+        if ctx is None:
+            raise RuntimeError(
+                "No league found in the database. Run `python -m backend.scripts.seed_league` to seed."
+            )
         league_id = league_id or ctx.espn_league_id
         season = season or ctx.espn_season
         swid = swid or ctx.swid
