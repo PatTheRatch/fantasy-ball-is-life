@@ -16,6 +16,8 @@ export function Login() {
   const navigate = useNavigate()
   const location = useLocation()
   const { session, loading, configured } = useAuth()
+  // Default to '/' (not a hardcoded page) so "home" stays defined in one place
+  // — the router's index redirect. RequireAuth supplies an explicit `from`.
   const from = (location.state as LocationState | null)?.from ?? '/'
 
   const [email, setEmail] = useState('')
