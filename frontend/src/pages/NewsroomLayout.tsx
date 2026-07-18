@@ -78,12 +78,12 @@ export function NewsroomLayout() {
   }, [effectiveSlug, season, week])
 
   const handleWeekChange = (newWeek: number) => {
-    navigate(`/leagues/${effectiveSlug}/recaps/${season}/${newWeek}`)
+    navigate(`/leagues/${effectiveSlug}/newsroom/${season}/${newWeek}`)
   }
 
   const handleSeasonChange = (newSeason: number) => {
     // Navigate to first available week in that season, or week 1
-    navigate(`/leagues/${effectiveSlug}/recaps/${newSeason}/1`)
+    navigate(`/leagues/${effectiveSlug}/newsroom/${newSeason}/1`)
   }
 
   return (

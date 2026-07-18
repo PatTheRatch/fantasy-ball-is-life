@@ -40,6 +40,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx tsc --noEmit
+      - run: npm run test
       # Lint everything EXCEPT the two files carrying pre-existing errors
       # (14 errors, mostly react-hooks/set-state-in-effect) that predate this
       # gate. Fixing them means refactoring in-season effect logic — tracked

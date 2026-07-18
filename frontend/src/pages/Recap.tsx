@@ -8,7 +8,7 @@ const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 /**
  * Legacy /recap redirect.
  *
- * - /recap?week=N → /leagues/{slug}/recaps/{season}/{N}
+ * - /recap?week=N → /leagues/{slug}/newsroom/{season}/{N}
  * - /recap (bare) → latest published week, or week 1 if none published
  */
 export function Recap() {
@@ -27,7 +27,7 @@ export function Recap() {
       const season = RECAP_SEASON
 
       if (requestedWeek && !isNaN(requestedWeek)) {
-        navigate(`/leagues/${slug}/recaps/${season}/${requestedWeek}`, {
+        navigate(`/leagues/${slug}/newsroom/${season}/${requestedWeek}`, {
           replace: true,
         })
         return
@@ -38,7 +38,7 @@ export function Recap() {
         const archive = await getPublishedArchive(slug, season)
         if (archive.length > 0) {
           const latest = archive[archive.length - 1].week
-          navigate(`/leagues/${slug}/recaps/${season}/${latest}`, {
+          navigate(`/leagues/${slug}/newsroom/${season}/${latest}`, {
             replace: true,
           })
           return
@@ -47,7 +47,7 @@ export function Recap() {
         // Fall through to week 1
       }
 
-      navigate(`/leagues/${slug}/recaps/${season}/1`, { replace: true })
+      navigate(`/leagues/${slug}/newsroom/${season}/1`, { replace: true })
     }
 
     void redirect()
