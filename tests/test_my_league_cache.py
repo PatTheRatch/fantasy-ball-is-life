@@ -110,7 +110,7 @@ def test_my_league_reuses_cached_instance(monkeypatch):
 
 
 def test_my_league_works_without_cache_outside_request(monkeypatch):
-    """CLI / Streamlit contexts have no middleware → _my_league() must still work."""
+    """CLI / test contexts have no middleware → _my_league() must still work."""
     from backend.league.cache import set_request_cache
     from backend.league import cache
 

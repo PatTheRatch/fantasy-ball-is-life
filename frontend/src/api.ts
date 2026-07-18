@@ -1,5 +1,7 @@
 import axios, { type AxiosInstance } from 'axios'
 
+import { recapLeagueSlug } from './lib/supabase'
+
 function resolveApiBase(): string {
   const raw = import.meta.env.VITE_API_BASE
   if (raw != null && String(raw).trim() !== '') {
@@ -12,6 +14,11 @@ function resolveApiBase(): string {
 
 /** Base URL: `/api` (proxied in dev) or full URL from `VITE_API_BASE`. */
 export const API_BASE = resolveApiBase()
+
+/** P-4b: prefix a league-scoped path with `/leagues/{slug}`. */
+function leaguePath(path: string): string {
+  return `/leagues/${recapLeagueSlug}${path}`
+}
 
 const client: AxiosInstance = axios.create({
   baseURL: API_BASE,
@@ -43,12 +50,12 @@ const directClient: AxiosInstance = axios.create({
   timeout: 120_000,
 })
 
-/** Prefer FastAPI `detail` when present (e.g. validation errors). */
+/** Prefer FastAPI `detail` when present (e.g. validation errors).
+ *  P-2: splits user-facing copy (production) from dev detail (local). */
 export function formatApiError(err: unknown): string {
+  const isDev = import.meta.env.DEV
+
   if (axios.isAxiosError(err)) {
-    // The base actually used for this request (client or directClient) is more
-    // accurate than the module-level API_BASE when both are in play.
-    const usedBase = err.config?.baseURL ?? API_BASE
     if (err.response == null) {
       const code = err.code
       if (
@@ -56,12 +63,19 @@ export function formatApiError(err: unknown): string {
         code === 'ECONNREFUSED' ||
         (err.message && /network/i.test(err.message))
       ) {
-        return `Cannot reach the API (${usedBase}). Start the backend (e.g. uvicorn backend.api.main:app --reload --port 8000) and reload the page.`
+        if (isDev) {
+          const usedBase = err.config?.baseURL ?? API_BASE
+          return `Cannot reach the API (${usedBase}). Start the backend (e.g. uvicorn backend.api.main:app --reload --port 8000) and reload the page.`
+        }
+        return 'Cannot reach the server. Please check your connection and try again.'
       }
     }
     const st = err.response?.status
     if (st === 502 || st === 503) {
-      return `Bad gateway (${st}): the dev server could not reach FastAPI on port 8000, or the request timed out. Start the API (uvicorn backend.api.main:app --reload --port 8000) and try again. If the API is running, try setting VITE_API_BASE=http://127.0.0.1:8000 in frontend/.env to bypass the Vite proxy.`
+      if (isDev) {
+        return `Bad gateway (${st}): the dev server could not reach FastAPI on port 8000, or the request timed out. Try setting VITE_API_BASE=http://127.0.0.1:8000 in frontend/.env to bypass the Vite proxy.`
+      }
+      return 'The server is temporarily unavailable. Please try again in a moment.'
     }
     const d = err.response?.data as { detail?: unknown } | undefined
     if (d && typeof d === 'object' && d.detail !== undefined) {
@@ -212,7 +226,7 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 export async function getLeagueMeta(): Promise<JsonRecord> {
-  const { data } = await client.get<JsonRecord>('/league/meta')
+  const { data } = await client.get<JsonRecord>(leaguePath('/league/meta'))
   return data
 }
 
@@ -239,10 +253,10 @@ export async function getPowerRankings(
   weeks: string,
   recentWeeks = 3,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/power-rankings', {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/power-rankings'), {
     params: { weeks, recent_weeks: recentWeeks },
   })
-  return data
+  return data.data ?? []
 }
 
 export async function getConfidence(params: {
@@ -250,7 +264,7 @@ export async function getConfidence(params: {
   stat: string
   player_avg: number
 }): Promise<JsonRecord> {
-  const { data } = await client.get<JsonRecord>('/confidence', { params })
+  const { data } = await client.get<JsonRecord>(leaguePath('/confidence'), { params })
   return data
 }
 
@@ -260,7 +274,7 @@ export async function getMatchupConfidence(params: {
   games_played?: number
   total_games?: number
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/matchup-confidence', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/matchup-confidence'), {
     params,
   })
   return data
@@ -284,25 +298,25 @@ export async function postLeagueRecap(
 }
 
 export async function getLeagueTeams(): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/league/teams')
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/league/teams'))
   return data
 }
 
 export async function getLeagueStandings(): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/league/standings')
-  return data
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/league/standings'))
+  return data.data ?? []
 }
 
 export async function getLeagueSettings(): Promise<LeagueSettings> {
-  const { data } = await client.get<LeagueSettings>('/league/settings')
-  return data
+  const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>(leaguePath('/league/settings'))
+  return data.data
 }
 
 export async function getSeasonStats(weeks: string): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/season-stats', {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/season-stats'), {
     params: { weeks },
   })
-  return data
+  return data.data ?? []
 }
 
 export async function postSeasonCommentary(
@@ -326,7 +340,7 @@ export async function getTransactions(
   start: string,
   end: string,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/transactions', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/transactions'), {
     params: { start, end },
   })
   return data
@@ -335,7 +349,7 @@ export async function getTransactions(
 export async function getMatchups(
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/matchups', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/matchups'), {
     params:
       scoringPeriod != null ? { scoring_period: scoringPeriod } : undefined,
   })
@@ -345,7 +359,7 @@ export async function getMatchups(
 export async function getScoreboardCurrent(
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/scoreboard/current', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/scoreboard/current'), {
     params:
       scoringPeriod != null ? { scoring_period: scoringPeriod } : undefined,
   })
@@ -359,7 +373,7 @@ export async function getRostersCurrent(params?: {
   current_matchup_period?: number
   projections?: string
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/rosters/current', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/rosters/current'), {
     params,
   })
   return data
@@ -368,7 +382,7 @@ export async function getRostersCurrent(params?: {
 export async function postRostersCurrent(
   formData: FormData,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.post<JsonRecord[]>('/rosters/current', formData)
+  const { data } = await client.post<JsonRecord[]>(leaguePath('/rosters/current'), formData)
   return data
 }
 
@@ -703,7 +717,7 @@ export async function getProjectedScoreboard(params?: {
   current_matchup_period?: number
   projections?: string
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>('/projected-scoreboard', {
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/projected-scoreboard'), {
     params,
   })
   return data
@@ -723,7 +737,7 @@ export async function postProjectedScoreboard(
   if (bbmFile) {
     fd.append('bbm_file', bbmFile)
   }
-  const { data } = await client.post<JsonRecord[]>('/projected-scoreboard', fd)
+  const { data } = await client.post<JsonRecord[]>(leaguePath('/projected-scoreboard'), fd)
   return data
 }
 

@@ -35,7 +35,6 @@ Backend lives under `backend/`, grouped by concern
 | `backend/analytics/consistency.py` | Player consistency metrics (feeds the confidence endpoints) |
 | `backend/config.py` | Central config — ESPN credentials, league-owner draft-pool knobs, tunable constants |
 | `backend/projections/` | Reserved for the projection-source framework (`docs/specs/PROJECTION_SOURCE_FRAMEWORK.md`, pending review); empty for now |
-| `app.py` | Streamlit dashboard (internal tool), imports `backend.*` |
 | `frontend/` | React 19 + Vite + Tailwind web app (the product UI) |
 | `docs/` | Operating manual, project dossier, ESPN access handoff, feature specs |
 | `player_rankings/`, `data/` | Local data drop zones — gitignored |
@@ -51,9 +50,6 @@ uvicorn backend.api.main:app --reload
 
 # Frontend
 cd frontend && npm install && npm run dev
-
-# Streamlit (internal dashboard)
-streamlit run app.py
 ```
 
 Phase 1 weekly recap drafts default to DeepSeek's lower-cost

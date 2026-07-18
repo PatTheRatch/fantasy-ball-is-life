@@ -8,7 +8,7 @@ it 11+ times per portfolio. This middleware-backed cache reuses one
 These tests verify:
 - cache deduplication within a single request
 - isolation across requests (no leakage)
-- back-compat when cache is absent (e.g. CLI / Streamlit)
+- back-compat when cache is absent (e.g. CLI / tests)
 """
 
 from unittest.mock import Mock, patch
@@ -147,7 +147,7 @@ def test_connect_reuses_cached_handles(monkeypatch):
         call_count += 1
         from espn_api.basketball import League as _League
         league = Mock(spec=_League)
-        league.league_id = df.LEAGUE_ID
+        league.league_id = 123456
         return league
 
     monkeypatch.setattr(df, "League", _counting_league)
@@ -165,7 +165,7 @@ def test_connect_reuses_cached_handles(monkeypatch):
 
 
 def test_connect_works_without_cache_outside_request(monkeypatch):
-    """CLI / Streamlit contexts have no middleware → connect() must still work."""
+    """CLI / test contexts have no middleware → connect() must still work."""
     from backend.league import data_feed as df
 
     # Simulate: no cache ContextVar set.
@@ -192,7 +192,7 @@ def test_connect_refresh_after_middleware_lifecycle(monkeypatch):
         call_count += 1
         from espn_api.basketball import League as _League
         league = Mock(spec=_League)
-        league.league_id = df.LEAGUE_ID
+        league.league_id = 123456
         return league
 
     monkeypatch.setattr(df, "League", _counting_league)

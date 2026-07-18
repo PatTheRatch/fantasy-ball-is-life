@@ -51,9 +51,15 @@ except Exception:
     pass
 
 from backend import config
+from backend.api.middleware_slug import LeagueSlugMiddleware
 from backend.league.cache import ESPNRequestCacheMiddleware
 
 app = FastAPI(title="PatriotGames Fantasy API", version="0.1.0")
+
+# P-4b: resolve slug → LeagueContext BEFORE any handler runs.
+# Starlette add_middleware is LIFO — this runs as the innermost layer (after
+# ESPN cache, CORS, etc.), setting _LEAGUE_CTX before the handler executes.
+app.add_middleware(LeagueSlugMiddleware)
 
 # ESPN request cache: reuses one League construction per request. The recap's
 # assemble_weekly_snapshot() calls connect() 4 separate times; this deduplicates
@@ -89,17 +95,21 @@ def health() -> dict[str, str]:
 
 
 from backend.api.routers import (  # noqa: E402
+    admin,
     commentary,
     draft,
     league,
+    legacy_redirects,
     optimizer,
     projections,
     recaps,
 )
 
 app.include_router(league.router)
+app.include_router(legacy_redirects.router)  # P-4b: old flat paths → 307 redirects
 app.include_router(draft.router)
 app.include_router(commentary.router)
 app.include_router(projections.router)
 app.include_router(optimizer.router)
 app.include_router(recaps.router)
+app.include_router(admin.router)

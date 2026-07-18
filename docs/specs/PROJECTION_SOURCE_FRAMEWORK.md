@@ -114,7 +114,7 @@ raw BBM column names to `PlayerProjection` fields.
   valid roster out from both.
 - **Validation tests:** truncated file, missing required columns, empty file →
   4xx with a named-column error; manifest/state unchanged.
-- **Regression:** current BBM flow (Streamlit + React) produces the same
+- **Regression:** current BBM flow (React) produces the same
   optimizer results before and after the refactor on the same input file.
 
 ## 6. Rollback / failure considerations
