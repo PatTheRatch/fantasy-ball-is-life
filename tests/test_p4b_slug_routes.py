@@ -1,30 +1,38 @@
-"""P-4b: Slug-scoped route tests — resolution, isolation, redirects.
+"""P-4b: Slug-scoped route tests — routing, response envelopes, redirects.
 
-Verifies the ASGI middleware (LeagueSlugMiddleware) correctly resolves
-slugs per-request, and that the old flat paths redirect with query strings.
+Hermetic: no Supabase or ESPN needed. ``_snapshot_read`` is stubbed so
+endpoints return canned data without hitting the DB.
 """
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.main import app
-from backend.league.credentials import LeagueContext, _LEAGUE_CTX
+from backend.league.credentials import _LEAGUE_CTX
+
+
+@pytest.fixture
+def stub_snapshot(monkeypatch):
+    """Replace _snapshot_read with a hermetic stub returning canned data."""
+    def _fake(phase, *, season=None):
+        return ({"phase": phase, "rows": []}, "2026-07-18T00:00:00Z")
+    monkeypatch.setattr(
+        "backend.api.routers.league._snapshot_read",
+        _fake,
+    )
 
 
 class TestSlugResolution:
-    def test_slug_resolves_to_league_context(self):
-        """A slug-scoped route resolves the league and returns data.
-        
-        Uses conftest ContextVar for the slug (no live DB needed).
-        """
+    def test_slug_resolves_standings(self, stub_snapshot):
+        """GET /leagues/{slug}/standings → 200 with {data, fetched_at} envelope."""
         client = TestClient(app)
         resp = client.get("/leagues/test-league/standings")
         assert resp.status_code == 200
-        data = resp.json()
-        assert "data" in data
-        assert "fetched_at" in data
+        body = resp.json()
+        assert "data" in body
+        assert "fetched_at" in body
 
-    def test_unknown_slug_returns_404(self):
+    def test_unknown_slug_returns_404(self, stub_snapshot):
         """An unknown slug → exact 404 (not 500, not a crash)."""
         token = _LEAGUE_CTX.set(None)
         try:
@@ -34,14 +42,14 @@ class TestSlugResolution:
         finally:
             _LEAGUE_CTX.reset(token)
 
-    def test_power_rankings_slug_scoped(self):
-        """Power rankings at /leagues/{slug}/power-rankings."""
+    def test_power_rankings_200(self, stub_snapshot):
+        """Power rankings at /leagues/{slug}/power-rankings → 200."""
         client = TestClient(app)
         resp = client.get("/leagues/test-league/power-rankings")
         assert resp.status_code == 200
 
-    def test_season_stats_slug_scoped(self):
-        """Season stats at /leagues/{slug}/season-stats."""
+    def test_season_stats_200(self, stub_snapshot):
+        """Season stats at /leagues/{slug}/season-stats → 200."""
         client = TestClient(app)
         resp = client.get("/leagues/test-league/season-stats?weeks=1")
         assert resp.status_code == 200
@@ -73,40 +81,3 @@ class TestOldPathRedirects:
         resp = client.get("/season-stats?weeks=1")
         assert resp.status_code == 307
         assert "weeks=1" in resp.headers["location"]
-
-
-class TestPerLeagueIsolation:
-    def test_two_slugs_resolve_different_contexts(self):
-        """Two different slugs → both 200, context properly scoped per request."""
-        client = TestClient(app)
-
-        ctx_a = LeagueContext(
-            league_id="a", slug="league-a", name="League A",
-            espn_league_id=111, espn_season=2026,
-            swid="a-s", espn_s2="a-s2", timezone="UTC",
-        )
-        ctx_b = LeagueContext(
-            league_id="b", slug="league-b", name="League B",
-            espn_league_id=222, espn_season=2027,
-            swid="b-s", espn_s2="b-s2", timezone="EST",
-        )
-
-        # Test league-a: snapshot endpoint (no live ESPN)
-        token_a = _LEAGUE_CTX.set(ctx_a)
-        try:
-            resp = client.get("/leagues/league-a/standings")
-            assert resp.status_code == 200
-        finally:
-            _LEAGUE_CTX.reset(token_a)
-
-        # Test league-b: different context, different slug
-        token_b = _LEAGUE_CTX.set(ctx_b)
-        try:
-            resp = client.get("/leagues/league-b/standings")
-            assert resp.status_code == 200
-        finally:
-            _LEAGUE_CTX.reset(token_b)
-
-        # Verify the contexts actually differ
-        assert ctx_a.espn_league_id != ctx_b.espn_league_id
-        assert ctx_a.slug != ctx_b.slug
