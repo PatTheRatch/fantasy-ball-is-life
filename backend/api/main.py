@@ -57,7 +57,8 @@ from backend.league.cache import ESPNRequestCacheMiddleware
 app = FastAPI(title="PatriotGames Fantasy API", version="0.1.0")
 
 # P-4b: resolve slug → LeagueContext BEFORE any handler runs.
-# Must come before ESPNRequestCacheMiddleware (ESPN handles need the context).
+# Starlette add_middleware is LIFO — this runs as the innermost layer (after
+# ESPN cache, CORS, etc.), setting _LEAGUE_CTX before the handler executes.
 app.add_middleware(LeagueSlugMiddleware)
 
 # ESPN request cache: reuses one League construction per request. The recap's

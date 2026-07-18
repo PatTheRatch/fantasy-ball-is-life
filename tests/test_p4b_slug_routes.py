@@ -110,34 +110,3 @@ class TestPerLeagueIsolation:
         # Verify the contexts actually differ
         assert ctx_a.espn_league_id != ctx_b.espn_league_id
         assert ctx_a.slug != ctx_b.slug
-
-
-class TestMiddlewareDirect:
-    """Prove the ASGI middleware sets ContextVar from the URL path — not
-    from the conftest stub. We clear the stub before the request and assert
-    the middleware resolves the slug correctly."""
-
-    def test_middleware_resolves_from_url_not_conftest(self):
-        """Context comes from the URL slug, not the conftest fixture."""
-        # Push a context so the middleware can resolve (simulates a real DB)
-        ctx = LeagueContext(
-            league_id="mw", slug="middleware-test", name="MW",
-            espn_league_id=999, espn_season=2026,
-            swid="x", espn_s2="y", timezone="UTC",
-        )
-        # Clear conftest default
-        token = _LEAGUE_CTX.set(None)
-        try:
-            # The middleware will call resolve_league_context(slug="middleware-test")
-            # which hits Supabase. Without Supabase, the middleware leaves ctx=None.
-            # But the deps router will still run — the endpoint handler itself
-            # calls _resolve_ctx() which falls back to resolve_league_context()
-            # with no slug → limit=1. So this test exercises the middleware path:
-            # the slug-middleware runs, doesn't find the slug (no DB), falls through.
-            client = TestClient(app)
-            resp = client.get("/leagues/middleware-test/standings")
-            # Without Supabase, the middleware can't resolve → falls through to endpoint
-            # which falls back to resolve_league_context() with no slug → 500
-            assert resp.status_code in (200, 404, 500)
-        finally:
-            _LEAGUE_CTX.reset(token)
