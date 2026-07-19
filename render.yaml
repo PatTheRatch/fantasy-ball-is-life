@@ -1,15 +1,32 @@
 services:
+  # ── Backend API ────────────────────────────────────────────────────
   - type: web
-    name: fantasy-ball-is-life-api
-    env: python
+    name: fullcourtpress-api
+    runtime: python
+    region: ohio
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn backend.api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: SUPABASE_URL
         sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: CRED_ENCRYPTION_KEY
+        sync: false
+      - key: WORKER_SECRET
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RECAP_LLM_PROVIDER
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
         sync: false
       - key: ESPN_LEAGUE_ID
         sync: false
@@ -19,27 +36,27 @@ services:
         sync: false
       - key: ESPN_S2
         sync: false
-      - key: PUBLIC_APP_URL
-        sync: false
-      - key: PYTHON_VERSION
-        value: 3.12
-      - key: WORKER_SECRET
-        sync: false
-      - key: CRED_ENCRYPTION_KEY
+      - key: DRAFT_LEAGUE_YEAR
         sync: false
 
-  - type: cron
-    name: fantasy-ball-is-life-snapshot-refresh
-    env: python
-    schedule: "*/15 * * * *"
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m backend.worker.cron_entrypoint
-
-  - type: static
-    name: fantasy-ball-is-life-site
-    rootDir: frontend/dist
-    buildCommand: cd frontend && npm ci && npm run build
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+  # ── Frontend Static Site ───────────────────────────────────────────
+  - type: web
+    name: fullcourtpress
+    runtime: static
+    region: ohio
+    plan: free
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_API_BASE
+        sync: false
+      - key: VITE_RECAP_LEAGUE_SLUG
+        sync: false
+      - key: VITE_RECAP_SEASON
+        sync: false
+      - key: VITE_SIGNUP_OPEN
+        sync: false
