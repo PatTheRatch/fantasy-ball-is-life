@@ -1,0 +1,12 @@
+# /etc/systemd/system/fcp-snapshot-refresh.timer
+
+[Unit]
+Description=Full Court Press — snapshot refresh timer
+Requires=fcp-snapshot-refresh.service
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

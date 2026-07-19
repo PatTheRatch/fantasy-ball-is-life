@@ -92,7 +92,7 @@ export function NewsroomLayout() {
       <header className="flex flex-col gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-400">
-            {leagueName || 'Patriot Games'}
+            {leagueName || 'Full Court Press'}
           </p>
           <h1 className="mt-1 text-3xl font-black tracking-tight text-white">Newsroom</h1>
         </div>

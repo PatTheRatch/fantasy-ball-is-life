@@ -1,0 +1,16 @@
+# /etc/systemd/system/fcp-snapshot-refresh.service
+# Owned by root, runs curl as fcp-svc pulling WORKER_SECRET from env file.
+
+[Unit]
+Description=Full Court Press — snapshot refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fcp-svc
+EnvironmentFile=/srv/fullcourtpress/.env
+ExecStart=/usr/bin/curl -sS -X POST \
+  -H "X-Worker-Secret: ${WORKER_SECRET}" \
+  -H "Content-Type: application/json" \
+  https://fcp.patrickmcdowell.dev/api/admin/refresh/patriot-games

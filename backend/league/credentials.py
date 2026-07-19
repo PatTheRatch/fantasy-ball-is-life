@@ -82,7 +82,18 @@ def _decrypt(value: str | None, *, store: RecapStore) -> str:
         "rpc/pgp_sym_decrypt",
         json={"data": value, "pwd": key},
     )
-    return rows.get("pgp_sym_decrypt", "") if isinstance(rows, dict) else (rows[0].get("pgp_sym_decrypt", "") if rows else "")
+    # RPC returns the decrypted value as a bare string.
+    if isinstance(rows, str):
+        return rows
+    if isinstance(rows, dict):
+        return rows.get("pgp_sym_decrypt", "")
+    if isinstance(rows, list) and rows:
+        first = rows[0]
+        if isinstance(first, str):
+            return first
+        if isinstance(first, dict):
+            return first.get("pgp_sym_decrypt", "")
+    return ""
 
 
 def resolve_league_context(

@@ -47,7 +47,7 @@ function Narrative({ content }: { content: RecapGeneratedContent }) {
     <article className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/65">
       <div className="border-b border-slate-800 bg-gradient-to-br from-red-950/50 to-slate-950 px-5 py-8 md:px-8">
         <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-red-400">
-          Patriot Games Newsroom
+          Full Court Press Newsroom
         </p>
         <h2 className="max-w-4xl text-3xl font-black leading-tight text-white md:text-5xl">
           {content.headline}
