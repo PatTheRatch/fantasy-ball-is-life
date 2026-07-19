@@ -1,13 +1,14 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowRight, ChevronDown, ChevronUp, Newspaper, Star } from 'lucide-react'
 import { useState } from 'react'
 import { getPublishedArchive, getSnapshot } from '../api'
 import { useAuth } from '../lib/authContext'
 import { getMyLeagues } from '../lib/memberships'
-import { recapLeagueSlug } from '../lib/supabase'
+import { recapLeagueSlug, supabase } from '../lib/supabase'
 import { formatStatValue, STAT_ORDER } from '../lib/inSeasonUtils'
 import { MovementBadge } from '../ui'
+import { JoinLeague } from '../components/JoinLeague'
 
 const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 
@@ -325,6 +326,7 @@ export function LeagueHome() {
   const effectiveSlug = slug || recapLeagueSlug
   const season = RECAP_SEASON
   const { session, user } = useAuth()
+  const queryClient = useQueryClient()
 
   const archiveQuery = useQuery({
     queryKey: ['standings-page', 'archive', effectiveSlug, season],
@@ -349,6 +351,21 @@ export function LeagueHome() {
     retry: false,
   })
 
+  // N-2b: fetch league visibility for non-member join prompt
+  const visibilityQuery = useQuery({
+    queryKey: ['league-visibility', effectiveSlug],
+    queryFn: async () => {
+      if (!supabase) return null
+      const { data } = await supabase
+        .from('leagues')
+        .select('visibility')
+        .eq('slug', effectiveSlug)
+        .maybeSingle()
+      return (data as { visibility: string } | null)?.visibility ?? null
+    },
+    retry: false,
+  })
+
   if (archiveQuery.isLoading || snapshotQuery.isLoading) {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
@@ -364,8 +381,16 @@ export function LeagueHome() {
   const standings = (Array.isArray(snapshot.standings) ? snapshot.standings : []) as Row[]
   const roundLabel = (snapshot.playoff_context as Row | undefined)?.round_label
 
-  const myTeam =
-    membershipsQuery.data?.find((l) => l.slug === effectiveSlug)?.teamName ?? null
+  const myLeague = membershipsQuery.data?.find((l) => l.slug === effectiveSlug) ?? null
+  const myTeam = myLeague?.teamName ?? null
+  const isMember = Boolean(session && membershipsQuery.data && myLeague)
+  const leagueId = (snapshot as Record<string, unknown>).league_id as string | undefined
+  const isPublic = visibilityQuery.data === 'public'
+
+  const teamNames: string[] = standings
+    .map((s) => String(s.team_name ?? ''))
+    .filter(Boolean)
+
   const myMatchup = myTeam
     ? matchups.find(
         (m) => m.home_team === myTeam || m.away_team === myTeam,
@@ -395,12 +420,28 @@ export function LeagueHome() {
           myTeam={myTeam}
           matchupsPath={matchupsPath}
           mine={myMatchup !== null}
-          claimHint={Boolean(session) && myMatchup === null}
+          claimHint={Boolean(session) && isMember && myTeam === null}
         />
       ) : (
         <section className="rounded-pg-lg border border-pg-border bg-pg-card p-5">
           <p className="text-sm text-slate-500">
             No matchup data yet — check back once the week is underway.
+          </p>
+        </section>
+      )}
+
+      {/* N-2b: non-member → Join prompt; member-no-team → claim hint */}
+      {Boolean(session) && !isMember && isPublic && leagueId && (
+        <JoinLeague
+          leagueId={leagueId}
+          teams={teamNames}
+          onJoined={() => queryClient.invalidateQueries({ queryKey: ['my-leagues'] })}
+        />
+      )}
+      {Boolean(session) && !isMember && !isPublic && (
+        <section className="rounded-pg-lg border border-pg-border bg-pg-card p-5 text-center">
+          <p className="text-sm text-slate-500">
+            This league is private — ask an admin for an invite.
           </p>
         </section>
       )}

@@ -20,12 +20,16 @@ import { StandingsPage } from './pages/StandingsPage'
 import { Signup } from './pages/Signup'
 import { UpdatePassword } from './pages/UpdatePassword'
 
+import { JoinPage } from './pages/JoinPage'
+
 export const router = createBrowserRouter([
   // Standalone auth surfaces (P-5) — rendered without the app chrome.
   { path: '/login', element: <Login /> },
   { path: '/signup', element: <Signup /> },
   { path: '/reset-password', element: <ResetPassword /> },
   { path: '/update-password', element: <UpdatePassword /> },
+  // N-2b: invite redeem — standalone, no chrome needed
+  { path: '/join', element: <JoinPage /> },
   {
     path: '/',
     element: <AppLayout />,

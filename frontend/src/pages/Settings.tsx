@@ -4,6 +4,7 @@ import { getPublishedArchive, getSnapshot } from '../api'
 import { useAuth } from '../lib/authContext'
 import { claimTeam, getMyLeagues, type MyLeague } from '../lib/memberships'
 import { supabase } from '../lib/supabase'
+import { InviteAdmin } from '../components/InviteAdmin'
 
 const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 
@@ -100,6 +101,26 @@ function TeamClaim({ league, userId }: { league: MyLeague; userId: string }) {
   )
 }
 
+function InviteAdminSection() {
+  const { user } = useAuth()
+  const membershipsQuery = useQuery({
+    queryKey: ['my-leagues', user?.id],
+    queryFn: () => getMyLeagues(user!.id),
+    enabled: Boolean(user),
+    retry: false,
+  })
+
+  if (membershipsQuery.isLoading || !membershipsQuery.data) return null
+
+  return (
+    <>
+      {membershipsQuery.data.map((m) => (
+        <InviteAdmin key={m.leagueId} leagueId={m.leagueId} />
+      ))}
+    </>
+  )
+}
+
 function MyTeamSection() {
   const { user } = useAuth()
   const membershipsQuery = useQuery({
@@ -172,6 +193,8 @@ export function Settings() {
       </section>
 
       <MyTeamSection />
+
+      <InviteAdminSection />
 
       <section className="rounded-pg-lg border border-pg-border bg-pg-card p-5">
         <h2 className="mb-4 font-semibold text-white">Change password</h2>

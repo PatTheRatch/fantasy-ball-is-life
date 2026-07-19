@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/authContext'
 import { supabase } from '../lib/supabase'
 import {
@@ -15,10 +16,12 @@ interface LocationState {
 export function Login() {
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const { session, loading, configured } = useAuth()
   // Default to '/' (not a hardcoded page) so "home" stays defined in one place
   // — the router's index redirect. RequireAuth supplies an explicit `from`.
-  const from = (location.state as LocationState | null)?.from ?? '/'
+  // N-2b: /join?invite= redirects here with ?next= — honor it.
+  const from = searchParams.get('next') ?? (location.state as LocationState | null)?.from ?? '/'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
