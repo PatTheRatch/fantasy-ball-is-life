@@ -74,14 +74,17 @@ function MatchupCard({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className="flex w-full items-center gap-4 text-left"
       >
         {side(home, homeWins, homeGp)}
         <span className="text-sm font-bold text-slate-600">vs</span>
         {side(away, awayWins, awayGp)}
-        <span className="ml-auto flex-shrink-0 text-slate-500">
-          {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </span>
+        {categories.length > 0 && (
+          <span className="ml-auto flex-shrink-0 text-slate-500">
+            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </span>
+        )}
       </button>
       {open && categories.length > 0 && (
         <div className="mt-4 overflow-x-auto border-t border-pg-border pt-4">
@@ -225,7 +228,7 @@ function RecapCard({
 
 function TransactionTicker({ transactions }: { transactions: Row[] }) {
   const recent = [...transactions]
-    .filter((t) => String(t.action_type ?? '') === 'ADD')
+    .filter((t) => String(t.action_type ?? '').toUpperCase() === 'ADD')
     .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')))
     .slice(0, 5)
   return (
@@ -286,7 +289,7 @@ function StandingsCard({
         <ul className="space-y-1.5">
           {top5.map((r) => (
             <li
-              key={String(r.team_name ?? r.standing)}
+              key={`${r.standing ?? ''}-${r.team_name ?? ''}`}
               className="flex items-center gap-2 text-sm"
             >
               <span className="w-5 text-right tabular-nums text-slate-500">
