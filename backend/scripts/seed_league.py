@@ -35,7 +35,18 @@ def _encrypt(plaintext: str | None) -> str:
         "rpc/pgp_sym_encrypt",
         json={"data": plaintext, "pwd": key},
     )
-    return rows.get("pgp_sym_encrypt", "") if isinstance(rows, dict) else (rows[0].get("pgp_sym_encrypt", "") if rows else "")
+    # RPC returns the encrypted value as a bare string — not {pgp_sym_encrypt: "…"}.
+    if isinstance(rows, str):
+        return rows
+    if isinstance(rows, dict):
+        return rows.get("pgp_sym_encrypt", "")
+    if isinstance(rows, list) and rows:
+        first = rows[0]
+        if isinstance(first, str):
+            return first
+        if isinstance(first, dict):
+            return first.get("pgp_sym_encrypt", "")
+    return ""
 
 
 def main() -> None:
