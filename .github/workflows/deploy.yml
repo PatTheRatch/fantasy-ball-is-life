@@ -89,10 +89,17 @@ jobs:
             sudo git fetch origin main
             sudo git reset --hard origin/main
             # Swap in the CI-built frontend (no npm build on the box anymore).
-            sudo rm -rf frontend/dist
+            # IMPORTANT: empty the dir IN PLACE — do NOT `rm -rf frontend/dist`.
+            # Caddy bind-mounts this directory; deleting + recreating it gives a
+            # new inode that the running Caddy container can't see (it stays on
+            # the old, deleted inode → serves 404 until recreated). Emptying the
+            # contents preserves the inode so the live mount keeps working.
             sudo mkdir -p frontend/dist
+            sudo find frontend/dist -mindepth 1 -delete
             sudo tar -C frontend/dist -xzf /tmp/dist.tgz
             sudo chown -R fcp-svc:fcp-svc frontend/dist
             rm -f /tmp/dist.tgz
-            sudo docker compose up -d --build --remove-orphans
+            # --force-recreate ensures Caddy re-reads the mount even on the first
+            # deploy where the dir was created fresh.
+            sudo docker compose up -d --build --force-recreate --remove-orphans
             sudo docker compose ps
