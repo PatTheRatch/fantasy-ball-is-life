@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowRight, Newspaper } from 'lucide-react'
+import { ArrowRight, ChevronDown, ChevronUp, Newspaper, Star } from 'lucide-react'
+import { useState } from 'react'
 import { getPublishedArchive, getSnapshot } from '../api'
 import { useAuth } from '../lib/authContext'
 import { getMyLeagues } from '../lib/memberships'
 import { recapLeagueSlug } from '../lib/supabase'
+import { formatStatValue, STAT_ORDER } from '../lib/inSeasonUtils'
 import { MovementBadge } from '../ui'
 
 const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
@@ -26,12 +28,14 @@ function MatchupCard({
   mine: boolean
   claimHint: boolean
 }) {
+  const [open, setOpen] = useState(false)
   const home = String(matchup.home_team ?? '')
   const away = String(matchup.away_team ?? '')
   const homeWins = Number(matchup.home_category_wins ?? 0)
   const awayWins = Number(matchup.away_category_wins ?? 0)
   const homeGp = matchup.home_games_played
   const awayGp = matchup.away_games_played
+  const categories = (Array.isArray(matchup.categories) ? matchup.categories : []) as Row[]
 
   const side = (team: string, wins: number, gp: unknown) => (
     <div className="flex-1">
@@ -67,11 +71,82 @@ function MatchupCard({
           All matchups <ArrowRight className="h-3 w-3" aria-hidden />
         </Link>
       </div>
-      <div className="flex items-center gap-4">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-4 text-left"
+      >
         {side(home, homeWins, homeGp)}
         <span className="text-sm font-bold text-slate-600">vs</span>
         {side(away, awayWins, awayGp)}
-      </div>
+        <span className="ml-auto flex-shrink-0 text-slate-500">
+          {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </span>
+      </button>
+      {open && categories.length > 0 && (
+        <div className="mt-4 overflow-x-auto border-t border-pg-border pt-4">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-700 text-slate-500">
+                <th className="pb-1 font-medium">Category</th>
+                <th className="pb-1 pr-2 text-right font-medium">Home</th>
+                <th className="pb-1 text-right font-medium">Away</th>
+                <th className="pb-1 text-center font-medium">Edge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {STAT_ORDER.map((stat) => {
+                const r = categories.find((c) => String(c.stat) === stat)
+                if (!r) {
+                  return (
+                    <tr key={stat} className="border-b border-slate-800/50">
+                      <td className="py-1.5 text-slate-400">{stat}</td>
+                      <td className="py-1.5 pr-2 text-right text-slate-600">—</td>
+                      <td className="py-1.5 text-right text-slate-600">—</td>
+                      <td className="py-1.5 text-center text-slate-600">—</td>
+                    </tr>
+                  )
+                }
+                const hVal = formatStatValue(stat, r.home_value)
+                const aVal = formatStatValue(stat, r.away_value)
+                const w = String(r.winner ?? '')
+                const complete = r.complete !== false && w !== 'unavailable'
+                return (
+                  <tr
+                    key={stat}
+                    className={`border-b border-slate-800/50 ${!complete ? 'opacity-40' : ''}`}
+                  >
+                    <td className="py-1.5 font-medium text-slate-300">{stat}</td>
+                    <td
+                      className={`py-1.5 pr-2 text-right tabular-nums ${
+                        w === 'home' ? 'font-bold text-emerald-400' : 'text-slate-400'
+                      }`}
+                    >
+                      {complete ? hVal : '—'}
+                    </td>
+                    <td
+                      className={`py-1.5 text-right tabular-nums ${
+                        w === 'away' ? 'font-bold text-emerald-400' : 'text-slate-400'
+                      }`}
+                    >
+                      {complete ? aVal : '—'}
+                    </td>
+                    <td className="py-1.5 text-center">
+                      {w === 'home' ? (
+                        <span className="text-emerald-500">H</span>
+                      ) : w === 'away' ? (
+                        <span className="text-emerald-500">A</span>
+                      ) : w === 'tie' ? (
+                        <span className="text-slate-500">T</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       {claimHint && (
         <p className="mt-3 border-t border-pg-border pt-3 text-sm text-slate-400">
           <Link to="/settings" className="font-semibold text-pg-accent">
@@ -84,7 +159,7 @@ function MatchupCard({
   )
 }
 
-/* ── Below the fold: movers · recap · transactions ──────────────────────── */
+/* ── Below the fold: movers · recap · transactions · standings ──────────── */
 
 function Movers({ rankings }: { rankings: Row[] }) {
   const movers = rankings
@@ -150,6 +225,7 @@ function RecapCard({
 
 function TransactionTicker({ transactions }: { transactions: Row[] }) {
   const recent = [...transactions]
+    .filter((t) => String(t.action_type ?? '') === 'ADD')
     .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')))
     .slice(0, 5)
   return (
@@ -165,9 +241,66 @@ function TransactionTicker({ transactions }: { transactions: Row[] }) {
             <li key={i} className="text-sm text-slate-300">
               <span className="font-medium text-white">
                 {String(t.team_name ?? '')}
+              </span>{' '}
+              added{' '}
+              <span className="font-medium text-pg-accent">
+                {String(t.player ?? '')}
               </span>
               <span className="ml-2 text-xs text-slate-500">
                 {String(t.date ?? '').slice(0, 10)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function StandingsCard({
+  standings,
+  standingsPath,
+}: {
+  standings: Row[]
+  standingsPath: string
+}) {
+  const top5 = [...standings]
+    .sort((a, b) => Number(a.standing ?? 99) - Number(b.standing ?? 99))
+    .slice(0, 5)
+  return (
+    <section className="rounded-pg-lg border border-pg-border bg-pg-card p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+          Standings
+        </h2>
+        <Link
+          to={standingsPath}
+          className="flex items-center gap-1 text-xs font-semibold text-pg-accent hover:underline"
+        >
+          Full standings <ArrowRight className="h-3 w-3" aria-hidden />
+        </Link>
+      </div>
+      {top5.length === 0 ? (
+        <p className="text-sm text-slate-500">No standings data yet.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {top5.map((r) => (
+            <li
+              key={String(r.team_name ?? r.standing)}
+              className="flex items-center gap-2 text-sm"
+            >
+              <span className="w-5 text-right tabular-nums text-slate-500">
+                {String(r.standing ?? '—')}
+              </span>
+              <span className="truncate text-slate-200">
+                {String(r.team_name ?? '')}
+                {r.in_playoffs === true && (
+                  <Star className="ml-1 inline-block h-3 w-3 text-amber-400" aria-label="playoffs" />
+                )}
+              </span>
+              <span className="ml-auto flex-shrink-0 tabular-nums text-slate-400">
+                {String(r.wins ?? 0)}–{String(r.losses ?? 0)}
+                {r.ties ? `–${r.ties}` : ''}
               </span>
             </li>
           ))}
@@ -225,6 +358,7 @@ export function LeagueHome() {
   const matchups = (Array.isArray(snapshot.matchups) ? snapshot.matchups : []) as Row[]
   const rankings = (Array.isArray(snapshot.power_rankings) ? snapshot.power_rankings : []) as Row[]
   const transactions = (Array.isArray(snapshot.transactions) ? snapshot.transactions : []) as Row[]
+  const standings = (Array.isArray(snapshot.standings) ? snapshot.standings : []) as Row[]
   const roundLabel = (snapshot.playoff_context as Row | undefined)?.round_label
 
   const myTeam =
@@ -238,6 +372,7 @@ export function LeagueHome() {
 
   const newsroomPath = `/leagues/${effectiveSlug}/newsroom/${season}/${week}`
   const matchupsPath = `/leagues/${effectiveSlug}/matchups/${week}`
+  const standingsPath = `/leagues/${effectiveSlug}/standings`
 
   return (
     <div className="space-y-4 pb-8">
@@ -267,10 +402,11 @@ export function LeagueHome() {
         </section>
       )}
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Movers rankings={rankings} />
         <RecapCard headline={latest?.headline ?? null} newsroomPath={newsroomPath} />
         <TransactionTicker transactions={transactions} />
+        <StandingsCard standings={standings} standingsPath={standingsPath} />
       </div>
     </div>
   )
