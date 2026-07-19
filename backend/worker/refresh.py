@@ -105,6 +105,7 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     # snapshots, so it must call data_feed directly to avoid a circular
     # read-from-empty cycle.
     from backend.league import data_feed as feed
+    from backend.league.data_feed import get_current_scoreboard
     import pandas as pd
 
     # ── settings ───────────────────────────────────────────────────────────
@@ -174,7 +175,6 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     # ── scoreboard ─────────────────────────────────────────────────────────
     phase = "scoreboard"
     try:
-        from backend.league.data_feed import get_current_scoreboard
         import math
         df = get_current_scoreboard(handles, scoring_period=week)
         scoreboard_rows: list[dict[str, Any]] = []
@@ -197,7 +197,12 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     # ── transactions ───────────────────────────────────────────────────────
     phase = "transactions"
     try:
-        txn_rows = feed.week_transactions(handles, scoring_period=week)
+        # `week` is the fantasy matchup period (league.currentMatchupPeriod),
+        # NOT an ESPN daily scoring period. week_transactions() takes a single
+        # daily scoring_period; passing the fantasy week here fetches one wrong
+        # day. week_transactions_for_week() resolves the week's real scoring-
+        # period window and fetches all transactions within it.
+        txn_rows = feed.week_transactions_for_week(handles, week=week)
         _upsert_phase(store, league_id, season, week, phase, txn_rows or [])
         results[phase] = "ok"
     except Exception as exc:
