@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { JoinLeague } from './JoinLeague'
 import { useAuth } from '../lib/authContext'
 
@@ -45,13 +46,13 @@ describe('JoinLeague', () => {
 
   it('shows log-in prompt when not authenticated', async () => {
     const { onJoined } = setup(null)
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={onJoined} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={onJoined} /></MemoryRouter>)
     expect(await screen.findByText(/Log in/i)).toBeInTheDocument()
   })
 
   it('shows join button and transitions to team picker', async () => {
     setup()
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} /></MemoryRouter>)
     expect(await screen.findByText('Join this league')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Join this league'))
     expect(screen.getByText('Claim your team')).toBeInTheDocument()
@@ -60,7 +61,7 @@ describe('JoinLeague', () => {
   it('hides already-claimed teams', async () => {
     setup()
     vi.mocked(mockSupabase.rpc).mockResolvedValue({ data: ['Through The Wire'], error: null } as never)
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('Join this league'))
     // Through The Wire should NOT appear (claimed), the other 3 should
     expect(screen.queryByText('Through The Wire')).not.toBeInTheDocument()
@@ -72,7 +73,7 @@ describe('JoinLeague', () => {
   it('shows "all claimed" when no teams available', async () => {
     setup()
     vi.mocked(mockSupabase.rpc).mockResolvedValue({ data: TEAMS, error: null } as never)
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('Join this league'))
     expect(screen.getByText('All teams are claimed.')).toBeInTheDocument()
   })
@@ -82,7 +83,7 @@ describe('JoinLeague', () => {
     const insertMock = vi.fn().mockResolvedValue({ error: null })
     vi.mocked(mockSupabase.from).mockReturnValue({ insert: insertMock } as never)
 
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={onJoined} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={onJoined} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('Join this league'))
     fireEvent.click(screen.getByText('Brighton Bears'))
     fireEvent.click(screen.getByText('Claim as Brighton Bears'))
@@ -105,7 +106,7 @@ describe('JoinLeague', () => {
     })
     vi.mocked(mockSupabase.from).mockReturnValue({ insert: insertMock } as never)
 
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('Join this league'))
     fireEvent.click(screen.getByText('Brighton Bears'))
     fireEvent.click(screen.getByText('Claim as Brighton Bears'))
@@ -122,7 +123,7 @@ describe('JoinLeague', () => {
     })
     vi.mocked(mockSupabase.from).mockReturnValue({ insert: insertMock } as never)
 
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('Join this league'))
     fireEvent.click(screen.getByText('Brighton Bears'))
     fireEvent.click(screen.getByText('Claim as Brighton Bears'))
@@ -134,7 +135,7 @@ describe('JoinLeague', () => {
 
   it('disables claim button until a team is selected', async () => {
     setup()
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('Join this league'))
     const btn = screen.getByText(/Claim as/)
     expect(btn).toBeDisabled()
@@ -145,7 +146,7 @@ describe('JoinLeague', () => {
   it('handles claimed_team_names RPC failure gracefully', async () => {
     setup()
     vi.mocked(mockSupabase.rpc).mockRejectedValue(new Error('down'))
-    render(<JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} />)
+    render(<MemoryRouter><JoinLeague leagueId="l1" teams={TEAMS} onJoined={vi.fn()} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('Join this league'))
     // Falls back to empty claimed list — all teams show
     for (const t of TEAMS) {
