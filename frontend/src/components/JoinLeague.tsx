@@ -37,7 +37,7 @@ export function JoinLeague({
     fetchClaimed()
   }, [leagueId])
 
-  const unclaimed = teams.filter((t) => !claimed.includes(t))
+  const unclaimed = teams.filter((t) => !claimed.some((c) => c.toLowerCase() === t.toLowerCase()))
 
   async function claim() {
     if (!selected || !user) return
