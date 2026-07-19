@@ -41,12 +41,9 @@ jobs:
       - run: npm run build
       - run: npx tsc --noEmit
       - run: npm run test
-      # Lint everything EXCEPT the two files carrying pre-existing errors
-      # (14 errors, mostly react-hooks/set-state-in-effect) that predate this
-      # gate. Fixing them means refactoring in-season effect logic — tracked
-      # as its own change, not snuck into CI setup. Do NOT add new files to
-      # this ignore list; shrink it.
+      # Lint everything EXCEPT AiCommentaryCard if it still carries legacy
+      # react-hooks debt. InSeason monolith was retired in P-7 — do not grow
+      # this ignore list.
       - run: >
           npx eslint .
-          --ignore-pattern src/pages/InSeason.tsx
           --ignore-pattern src/components/AiCommentaryCard.tsx

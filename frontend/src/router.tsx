@@ -1,17 +1,20 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppLayout } from './layouts/AppLayout'
+import {
+  DraftPageRoute,
+  MatchupWeekPageRoute,
+  SeasonRoute,
+} from './lazyPages'
 import { RequireAuth } from './lib/RequireAuth'
-import { DraftPage } from './pages/DraftPage'
 import { DraftRedirect } from './pages/DraftRedirect'
 import { HomeResolver } from './pages/HomeResolver'
-import { InSeason } from './pages/InSeason'
+import { InSeasonRedirect } from './pages/InSeasonRedirect'
 import { LeagueHome } from './pages/LeagueHome'
 import { Login } from './pages/Login'
 import { NewsroomLayout } from './pages/NewsroomLayout'
 import { NewsroomRedirect } from './pages/NewsroomRedirect'
 import { Recap } from './pages/Recap'
 import { ResetPassword } from './pages/ResetPassword'
-import { Season } from './pages/Season'
 import { Settings } from './pages/Settings'
 import { StandingsPage } from './pages/StandingsPage'
 import { Signup } from './pages/Signup'
@@ -32,18 +35,19 @@ export const router = createBrowserRouter([
       { index: true, element: <HomeResolver /> },
       // League Home — the new default league surface (P-6b).
       { path: 'leagues/:slug', element: <LeagueHome /> },
-      { path: 'leagues/:slug/draft', element: <DraftPage /> },
-      // Flat legacy paths → league-scoped equivalents (§5). `/in-season` and
-      // `/season` keep flat until P-7 gives them scoped destinations.
+      { path: 'leagues/:slug/draft', element: <DraftPageRoute /> },
+      // P-7: matchup detail route (snapshot + live/projected tools).
+      { path: 'leagues/:slug/matchups/:week', element: <MatchupWeekPageRoute /> },
+      // Flat legacy paths → league-scoped equivalents (§5).
       { path: 'draft', element: <DraftRedirect /> },
-      { path: 'in-season', element: <InSeason /> },
+      { path: 'in-season', element: <InSeasonRedirect /> },
       { path: 'recap', element: <Recap /> },
       // Newsroom (P-6a: renamed from /recaps/; old path redirects below).
       { path: 'leagues/:slug/newsroom/:season/:week', element: <NewsroomLayout /> },
       { path: 'leagues/:slug/recaps/:season/:week', element: <NewsroomRedirect /> },
       // Standings promoted to its own route (P-6a).
       { path: 'leagues/:slug/standings', element: <StandingsPage /> },
-      { path: 'season', element: <Season /> },
+      { path: 'season', element: <SeasonRoute /> },
       {
         path: 'settings',
         element: (
