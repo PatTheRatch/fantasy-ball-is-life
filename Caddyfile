@@ -1,7 +1,8 @@
 fcp.patrickmcdowell.dev {
   # ── API reverse proxy ────────────────────────────────────────────
+  # root_path=/api is set on uvicorn — FastAPI strips it internally
+  # for routing and emits correct /api-prefixed redirects.
   handle /api/* {
-    uri strip_prefix /api
     reverse_proxy backend:8000
   }
 

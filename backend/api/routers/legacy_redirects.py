@@ -21,11 +21,12 @@ router = APIRouter(tags=["legacy-redirects"])
 
 
 def _redirect(request: Request, path: str) -> RedirectResponse:
-    """307 redirect to the slug-scoped path, preserving query string."""
+    """307 redirect to the slug-scoped path, preserving query string and root_path."""
     ctx = get_league_context() or resolve_league_context()
     slug = ctx.slug if ctx else "patriot-games"
+    root = request.scope.get("root_path", "")
     qs = request.url.query
-    url = f"/leagues/{slug}{path}"
+    url = f"{root}/leagues/{slug}{path}"
     if qs:
         url = f"{url}?{qs}"
     return RedirectResponse(url=url, status_code=307)
