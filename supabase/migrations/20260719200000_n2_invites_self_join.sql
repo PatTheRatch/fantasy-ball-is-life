@@ -115,18 +115,7 @@ $$;
 revoke all on function public.redeem_league_invite(text) from public;
 grant execute on function public.redeem_league_invite(text) to authenticated;
 
--- ── Ensure team_name column exists ────────────────────────────────────
--- Added in 20260718070000_membership_team_name migration.
--- If that migration hasn't run yet, add it here conditionally:
-do $$
-begin
-  if not exists (
-    select 1 from information_schema.columns
-    where table_schema = 'public'
-      and table_name = 'league_memberships'
-      and column_name = 'team_name'
-  ) then
-    alter table public.league_memberships
-      add column team_name text;
-  end if;
-end $$;
+-- ── Ensure INSERT is granted ──────────────────────────────────────────
+-- The membership migration may have narrowed privileges. Restore INSERT
+-- so the self-join policy can actually insert rows.
+grant insert (league_id, user_id, role, team_name) on public.league_memberships to authenticated;
