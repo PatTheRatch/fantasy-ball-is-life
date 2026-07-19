@@ -31,37 +31,32 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm ci
-          VITE_API_BASE=${{ secrets.VITE_API_BASE }} \
-          VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }} \
-          VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }} \
-          VITE_RECAP_LEAGUE_SLUG=patriot-games \
-          VITE_RECAP_SEASON=${{ secrets.VITE_RECAP_SEASON }} \
-          npm run build
-      - name: Deploy to VPS
-        uses: appleboy/scp-action@v0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: deploy
-          key: ${{ secrets.VPS_DEPLOY_KEY }}
-          source: "frontend/dist/*,backend/**,requirements.txt,Dockerfile,docker-compose.yml,Caddyfile,.dockerignore"
-          target: /srv/fullcourtpress/
-          strip_components: 0
-          rm: false
-      - name: Restart stack
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: deploy
           key: ${{ secrets.VPS_DEPLOY_KEY }}
           script: |
+            set -e
             cd /srv/fullcourtpress
+
+            # Pull latest and build frontend in one shot
+            sudo git fetch origin main
+            sudo git reset --hard origin/main
+            sudo chown -R fcp-svc:fcp-svc .
+
+            # Build frontend with prod env
+            cd frontend
+            export VITE_API_BASE=${{ secrets.VITE_API_BASE }}
+            export VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}
+            export VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}
+            export VITE_RECAP_LEAGUE_SLUG=patriot-games
+            export VITE_RECAP_SEASON=${{ secrets.VITE_RECAP_SEASON }}
+            npm ci
+            npm run build
+            cd ..
+
+            # Rebuild and restart
             sudo docker compose up -d --build --remove-orphans
             sudo docker compose ps
