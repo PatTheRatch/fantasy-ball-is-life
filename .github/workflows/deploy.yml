@@ -15,23 +15,67 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m pytest tests/ -q
 
-  test-frontend:
+  build-and-deploy:
+    needs: [test-backend]
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: cd frontend && npm ci
-      - run: cd frontend && npx tsc --noEmit
-      - run: cd frontend && npm run build
 
-  deploy:
-    needs: [test-backend, test-frontend]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Deploy via SSH
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      # Vite inlines VITE_* at BUILD time. The previous workflow built on the
+      # VPS with none of these set, so the bundle shipped broken (localhost API
+      # base, null Supabase client). Fail loudly if the one secret is missing
+      # rather than shipping another broken build.
+      - name: Guard — Supabase anon key secret is present
+        env:
+          ANON: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          test -n "$ANON" || { echo "::error::VITE_SUPABASE_ANON_KEY secret is not set — refusing to ship a broken build"; exit 1; }
+
+      - name: Build frontend (prod env)
+        working-directory: frontend
+        env:
+          # Public, stable — safe to pin inline (they end up in the client bundle).
+          VITE_API_BASE: https://fcp.patrickmcdowell.dev/api
+          VITE_API_BASE_DIRECT: https://fcp.patrickmcdowell.dev/api
+          VITE_SUPABASE_URL: https://wuzoengojiqotusulwhj.supabase.co
+          VITE_RECAP_LEAGUE_SLUG: patriot-games
+          VITE_RECAP_SEASON: "2026"
+          # Anon key is public but key-shaped; kept as a repo secret.
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: Sanity — assert env baked into the bundle
+        working-directory: frontend
+        run: |
+          grep -rq "fcp.patrickmcdowell.dev/api" dist/assets/*.js || { echo "::error::API base not baked into bundle"; exit 1; }
+          grep -rq "supabase.co"                  dist/assets/*.js || { echo "::error::Supabase URL not baked into bundle"; exit 1; }
+          if grep -rq "localhost:8000" dist/assets/*.js; then echo "::error::localhost:8000 leaked into prod bundle"; exit 1; fi
+
+      - name: Package dist
+        run: tar -C frontend/dist -czf dist.tgz .
+
+      - name: Copy dist to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: deploy
+          key: ${{ secrets.VPS_DEPLOY_KEY }}
+          source: "dist.tgz"
+          target: "/tmp"
+
+      - name: Update backend code, unpack dist, restart stack
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -40,13 +84,15 @@ jobs:
           script: |
             set -e
             cd /srv/fullcourtpress
+            # Backend code, Caddyfile, compose — frontend/dist is gitignored so
+            # reset --hard leaves the shipped build alone.
             sudo git fetch origin main
             sudo git reset --hard origin/main
-            sudo chown -R fcp-svc:fcp-svc .
-            cd frontend
-            sudo rm -rf node_modules
-            sudo npm ci
-            sudo npm run build
-            cd ..
+            # Swap in the CI-built frontend (no npm build on the box anymore).
+            sudo rm -rf frontend/dist
+            sudo mkdir -p frontend/dist
+            sudo tar -C frontend/dist -xzf /tmp/dist.tgz
+            sudo chown -R fcp-svc:fcp-svc frontend/dist
+            rm -f /tmp/dist.tgz
             sudo docker compose up -d --build --remove-orphans
             sudo docker compose ps
