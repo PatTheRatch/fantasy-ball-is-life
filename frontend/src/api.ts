@@ -226,7 +226,7 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 export async function getLeagueMeta(): Promise<JsonRecord> {
-  const { data } = await client.get<JsonRecord>(leaguePath('/league/meta'))
+  const { data } = await client.get<JsonRecord>(leaguePath('/meta'))
   return data
 }
 
@@ -298,17 +298,17 @@ export async function postLeagueRecap(
 }
 
 export async function getLeagueTeams(): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath('/league/teams'))
+  const { data } = await client.get<JsonRecord[]>(leaguePath('/teams'))
   return data
 }
 
 export async function getLeagueStandings(): Promise<JsonRecord[]> {
-  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/league/standings'))
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/standings'))
   return data.data ?? []
 }
 
 export async function getLeagueSettings(): Promise<LeagueSettings> {
-  const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>(leaguePath('/league/settings'))
+  const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>(leaguePath('/settings'))
   return data.data
 }
 
