@@ -1,33 +1,43 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/authContext'
 
-type Team = { id: number; name: string; ownerName: string | null }
-
 /**
  * N-2: Join-a-league flow. Shown on public league pages to signed-in
- * non-members. Picks an unclaimed ESPN team, claims it via the self-join
- * INSERT policy on league_memberships.
+ * non-members. Fetches claimed team names via claimed_team_names() RPC
+ * (security-definer, bypasses RLS so non-members can see who took what).
+ * The self-join INSERT goes through the browser Supabase client → RLS.
  */
 export function JoinLeague({
   leagueId,
-  leagueSlug,
   teams,
   onJoined,
 }: {
   leagueId: string
-  leagueSlug: string
-  teams: Team[]
+  teams: string[]
   onJoined: () => void
 }) {
   const { user } = useAuth()
+  const [claimed, setClaimed] = useState<string[]>([])
   const [picking, setPicking] = useState(false)
-  const [selected, setSelected] = useState<Team | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [joining, setJoining] = useState(false)
 
-  const unclaimed = teams.filter((t) => !t.ownerName)
+  useEffect(() => {
+    async function fetchClaimed() {
+      try {
+        const { data } = await supabase!.rpc('claimed_team_names', { p_league_id: leagueId })
+        setClaimed((data as string[]) ?? [])
+      } catch {
+        setClaimed([])
+      }
+    }
+    fetchClaimed()
+  }, [leagueId])
+
+  const unclaimed = teams.filter((t) => !claimed.includes(t))
 
   async function claim() {
     if (!selected || !user) return
@@ -38,7 +48,7 @@ export function JoinLeague({
       league_id: leagueId,
       user_id: user.id,
       role: 'member',
-      team_name: selected.name,
+      team_name: selected,
     })
 
     if (insertErr) {
@@ -102,17 +112,17 @@ export function JoinLeague({
       ) : (
         <>
           <ul className="max-h-48 space-y-1 overflow-y-auto">
-            {unclaimed.map((t) => (
-              <li key={t.id}>
+            {unclaimed.map((name) => (
+              <li key={name}>
                 <button
-                  onClick={() => { setSelected(t); setError(null) }}
+                  onClick={() => { setSelected(name); setError(null) }}
                   className={`w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                    selected?.id === t.id
+                    selected === name
                       ? 'bg-pg-accent/20 text-white'
                       : 'text-slate-300 hover:bg-pg-card-hover'
                   }`}
                 >
-                  {t.name}
+                  {name}
                 </button>
               </li>
             ))}
@@ -125,7 +135,7 @@ export function JoinLeague({
             disabled={!selected || joining}
             className="mt-4 w-full rounded-lg bg-pg-accent px-4 py-2.5 text-sm font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
           >
-            {joining ? 'Claiming…' : `Claim as ${selected?.name ?? '…'}`}
+            {joining ? 'Claiming…' : `Claim as ${selected ?? '…'}`}
           </button>
         </>
       )}

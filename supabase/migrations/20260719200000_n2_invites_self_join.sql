@@ -119,3 +119,22 @@ grant execute on function public.redeem_league_invite(text) to authenticated;
 -- The membership migration may have narrowed privileges. Restore INSERT
 -- so the self-join policy can actually insert rows.
 grant insert (league_id, user_id, role, team_name) on public.league_memberships to authenticated;
+
+
+-- ── claimed_team_names RPC ─────────────────────────────────────────────
+-- Security-definer so non-members can see which teams are taken (RLS
+-- on league_memberships would block them). Returns array of team names.
+create or replace function public.claimed_team_names(p_league_id uuid)
+returns text[]
+language sql
+security definer
+set search_path = public
+as $$
+  select coalesce(array_agg(team_name), '{}')
+  from public.league_memberships
+  where league_id = p_league_id
+    and team_name is not null;
+$$;
+
+revoke all on function public.claimed_team_names(uuid) from public;
+grant execute on function public.claimed_team_names(uuid) to anon, authenticated;
