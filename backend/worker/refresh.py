@@ -176,7 +176,8 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     try:
         from backend.league.data_feed import get_current_scoreboard
         df = get_current_scoreboard(handles, scoring_period=week)
-        scoreboard_rows = df.to_dict(orient="records") if not df.empty else []
+        # Replace NaN with None for JSON serialization
+        scoreboard_rows = df.where(pd.notna(df), None).to_dict(orient="records") if not df.empty else []
         _upsert_phase(store, league_id, season, week, phase, scoreboard_rows)
         results[phase] = "ok"
     except Exception as exc:
@@ -186,9 +187,8 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     # ── transactions ───────────────────────────────────────────────────────
     phase = "transactions"
     try:
-        txn_df = feed.transactions_week(handles, scoring_period=week)
-        txn_rows = txn_df.to_dict(orient="records") if not txn_df.empty else []
-        _upsert_phase(store, league_id, season, week, phase, txn_rows)
+        txn_rows = feed.week_transactions(handles, scoring_period=week)
+        _upsert_phase(store, league_id, season, week, phase, txn_rows or [])
         results[phase] = "ok"
     except Exception as exc:
         results[phase] = f"error: {exc}"
