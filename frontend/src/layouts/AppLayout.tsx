@@ -8,7 +8,7 @@ export function AppLayout() {
       <TopNav />
       <div className="border-b border-pg-border bg-pg-bg/90 px-4 py-3 backdrop-blur-md md:hidden">
         <p className="text-base font-bold tracking-tight text-white">
-          PatriotGames Fantasy
+          Full Court Press
         </p>
       </div>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8 md:pt-6">

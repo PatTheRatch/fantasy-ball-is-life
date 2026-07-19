@@ -28,7 +28,7 @@ export function AuthShell({
           to="/"
           className="mb-8 block text-center text-lg font-bold tracking-tight text-white"
         >
-          PatriotGames Fantasy
+          Full Court Press
         </Link>
         <div className="rounded-pg-lg border border-pg-border bg-pg-card p-6 shadow-xl">
           <h1 className="text-xl font-bold text-white">{title}</h1>

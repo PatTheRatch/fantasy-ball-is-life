@@ -76,7 +76,7 @@ export function TopNav() {
       <div className="mx-auto flex max-w-6xl items-center gap-8 px-6 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="truncate text-lg font-bold tracking-tight text-white">
-            PatriotGames Fantasy
+            Full Court Press
           </span>
           <span
             className="hidden h-5 w-px bg-pg-border lg:block"
