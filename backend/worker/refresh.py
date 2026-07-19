@@ -105,6 +105,7 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     # snapshots, so it must call data_feed directly to avoid a circular
     # read-from-empty cycle.
     from backend.league import data_feed as feed
+    from backend.league.data_feed import get_current_scoreboard
     import pandas as pd
 
     # ── settings ───────────────────────────────────────────────────────────
@@ -174,7 +175,6 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     # ── scoreboard ─────────────────────────────────────────────────────────
     phase = "scoreboard"
     try:
-        from backend.league.data_feed import get_current_scoreboard
         import math
         df = get_current_scoreboard(handles, scoring_period=week)
         scoreboard_rows: list[dict[str, Any]] = []
