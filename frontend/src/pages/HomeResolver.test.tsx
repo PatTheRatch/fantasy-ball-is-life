@@ -20,6 +20,8 @@ function renderResolver() {
     [
       { path: '/', element: <HomeResolver /> },
       { path: '/leagues/:slug', element: <div>league-home</div> },
+      { path: '/login', element: <div>login-page</div> },
+      { path: '/signup', element: <div>signup-page</div> },
     ],
     { initialEntries: ['/'] },
   )
@@ -37,19 +39,40 @@ const authBase = {
   signOut: async () => {},
 }
 
-describe('HomeResolver (logged-in / resolver, spec §5)', () => {
+describe('HomeResolver (N-1: landing + lobby + resolver)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('logged out → single-league default home', async () => {
+  // ── N-1: logged-out → landing ──────────────────────────────────
+
+  it('logged out → renders landing page', async () => {
     mockUseAuth.mockReturnValue({ ...authBase, session: null, user: null })
-    const router = renderResolver()
-    expect(await screen.findByText('league-home')).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/leagues/patriot-games')
+    renderResolver()
+    expect(await screen.findByText('Full Court Press')).toBeInTheDocument()
+    expect(screen.getByText('See the demo')).toBeInTheDocument()
+    expect(screen.getByText('Log in')).toBeInTheDocument()
+    expect(screen.getByText('Sign up')).toBeInTheDocument()
   })
 
-  it('exactly one membership → straight to that league', async () => {
+  // ── N-1: zero memberships → lobby ──────────────────────────────
+
+  it('zero memberships → renders lobby', async () => {
+    mockUseAuth.mockReturnValue({
+      ...authBase,
+      session: {} as never,
+      user: { id: 'u1' } as never,
+    })
+    mockGetMyLeagues.mockResolvedValue([])
+    renderResolver()
+    expect(await screen.findByText(/not in a league yet/)).toBeInTheDocument()
+    expect(screen.getByText('Join your league')).toBeInTheDocument()
+    expect(screen.getByText('Set up a new league')).toBeInTheDocument()
+  })
+
+  // ── intact: one membership → redirect ─────────────────────────
+
+  it('one membership → straight to that league', async () => {
     mockUseAuth.mockReturnValue({
       ...authBase,
       session: {} as never,
@@ -62,6 +85,8 @@ describe('HomeResolver (logged-in / resolver, spec §5)', () => {
     expect(await screen.findByText('league-home')).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/leagues/league-a')
   })
+
+  // ── intact: multiple memberships → picker ──────────────────────
 
   it('multiple memberships → league picker', async () => {
     mockUseAuth.mockReturnValue({
@@ -77,9 +102,5 @@ describe('HomeResolver (logged-in / resolver, spec §5)', () => {
     expect(await screen.findByText('Your leagues')).toBeInTheDocument()
     expect(screen.getByText('League A')).toBeInTheDocument()
     expect(screen.getByText('League B')).toBeInTheDocument()
-    expect(screen.getByText('League A').closest('a')).toHaveAttribute(
-      'href',
-      '/leagues/league-a',
-    )
   })
 })

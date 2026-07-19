@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
+import { ArrowRight, ChevronRight } from 'lucide-react'
 import { useAuth } from '../lib/authContext'
 import { getMyLeagues, type MyLeague } from '../lib/memberships'
 import { recapLeagueSlug } from '../lib/supabase'
+import { Landing } from './Landing'
 
 function Spinner() {
   return (
@@ -44,10 +45,50 @@ function LeaguePicker({ leagues }: { leagues: MyLeague[] }) {
 }
 
 /**
- * P-6b: logged-in `/` resolver (spec §5). Membership count decides:
- * exactly one league → straight to its League Home; more than one → a
- * minimal league picker. Logged out (or zero/unreadable memberships) →
- * the single-league default slug, until the P-8 landing page exists.
+ * N-1: signed-in, zero-membership lobby.
+ * Explains the join path but actual self-join ships in N-2.
+ */
+function Lobby() {
+  const demoPath = `/leagues/${recapLeagueSlug}`
+  return (
+    <div className="mx-auto max-w-md space-y-4 pt-8">
+      <h1 className="text-2xl font-bold text-white">Welcome to Full Court Press</h1>
+      <p className="text-slate-400">
+        You're signed in, but not in a league yet.
+      </p>
+      <div className="rounded-pg-lg border border-pg-border bg-pg-card p-5">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+          Join your league
+        </h2>
+        <p className="mt-2 text-sm text-slate-300">
+          Get your league's link from a leaguemate, or an invite from your admin.
+          Self-join is coming soon — for now, an admin adds you directly.
+        </p>
+        <Link
+          to={demoPath}
+          className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-pg-accent hover:underline"
+        >
+          Browse the demo league <ArrowRight className="h-3 w-3" aria-hidden />
+        </Link>
+      </div>
+      <div className="rounded-pg-lg border border-pg-border bg-pg-card p-5 opacity-50">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+          Set up a new league
+        </h2>
+        <p className="mt-2 text-sm text-slate-500">
+          Coming soon — you'll be able to create and configure a new league here.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * N-1: Home resolver (spec N-1). Four states:
+ * - logged-out → Landing page
+ * - signed-in, zero memberships → Lobby
+ * - signed-in, 1 league → straight to League Home
+ * - signed-in, >1 league → picker
  */
 export function HomeResolver() {
   const { session, user, loading } = useAuth()
@@ -61,18 +102,25 @@ export function HomeResolver() {
 
   if (loading) return <Spinner />
 
+  // ── Logged out → Landing ──────────────────────────────────────
   if (!session || !user) {
-    return <Navigate to={`/leagues/${recapLeagueSlug}`} replace />
+    return <Landing />
   }
 
   if (membershipsQuery.isLoading) return <Spinner />
 
   const leagues = membershipsQuery.data ?? []
+
+  // ── Zero memberships → Lobby ───────────────────────────────────
+  if (leagues.length === 0) {
+    return <Lobby />
+  }
+
+  // ── One league → straight in ───────────────────────────────────
   if (leagues.length === 1) {
     return <Navigate to={`/leagues/${leagues[0].slug}`} replace />
   }
-  if (leagues.length > 1) {
-    return <LeaguePicker leagues={leagues} />
-  }
-  return <Navigate to={`/leagues/${recapLeagueSlug}`} replace />
+
+  // ── Multiple leagues → picker ──────────────────────────────────
+  return <LeaguePicker leagues={leagues} />
 }
