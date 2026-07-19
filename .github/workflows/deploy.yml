@@ -40,23 +40,13 @@ jobs:
           script: |
             set -e
             cd /srv/fullcourtpress
-
-            # Pull latest and build frontend in one shot
             sudo git fetch origin main
             sudo git reset --hard origin/main
             sudo chown -R fcp-svc:fcp-svc .
-
-            # Build frontend with prod env
             cd frontend
-            export VITE_API_BASE=${{ secrets.VITE_API_BASE }}
-            export VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}
-            export VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}
-            export VITE_RECAP_LEAGUE_SLUG=patriot-games
-            export VITE_RECAP_SEASON=${{ secrets.VITE_RECAP_SEASON }}
-            npm ci
-            npm run build
+            sudo rm -rf node_modules
+            sudo npm ci
+            sudo npm run build
             cd ..
-
-            # Rebuild and restart
             sudo docker compose up -d --build --remove-orphans
             sudo docker compose ps
