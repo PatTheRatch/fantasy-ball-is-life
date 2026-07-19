@@ -1,7 +1,7 @@
 fcp.patrickmcdowell.dev {
   # ── API reverse proxy ────────────────────────────────────────────
-  # FastAPI routes live at / (not /api), so strip the prefix.
   handle /api/* {
+    uri strip_prefix /api
     reverse_proxy backend:8000
   }
 
