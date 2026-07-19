@@ -1,10 +1,11 @@
+import { type ComponentType } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Newspaper, TrendingUp, Swords, Trophy, BarChart3 } from 'lucide-react'
 import { recapLeagueSlug } from '../lib/supabase'
 
 const demoPath = `/leagues/${recapLeagueSlug}`
 
-function Feature({ icon: Icon, title, body }: { icon: React.ComponentType<{ className?: string }>; title: string; body: string }) {
+function Feature({ icon: Icon, title, body }: { icon: ComponentType<{ className?: string }>; title: string; body: string }) {
   return (
     <div className="flex gap-3">
       <Icon className="mt-0.5 h-5 w-5 flex-shrink-0 text-pg-accent" aria-hidden />
