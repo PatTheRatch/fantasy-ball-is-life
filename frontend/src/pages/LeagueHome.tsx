@@ -16,13 +16,13 @@ type Row = Record<string, unknown>
 function MatchupCard({
   matchup,
   myTeam,
-  newsroomPath,
+  matchupsPath,
   mine,
   claimHint,
 }: {
   matchup: Row
   myTeam: string | null
-  newsroomPath: string
+  matchupsPath: string
   mine: boolean
   claimHint: boolean
 }) {
@@ -61,7 +61,7 @@ function MatchupCard({
           {mine ? 'Your matchup' : 'This week'}
         </h2>
         <Link
-          to={newsroomPath}
+          to={matchupsPath}
           className="flex items-center gap-1 text-xs font-semibold text-pg-accent hover:underline"
         >
           All matchups <ArrowRight className="h-3 w-3" aria-hidden />
@@ -237,6 +237,7 @@ export function LeagueHome() {
   const featured = myMatchup ?? matchups[0] ?? null
 
   const newsroomPath = `/leagues/${effectiveSlug}/newsroom/${season}/${week}`
+  const matchupsPath = `/leagues/${effectiveSlug}/matchups/${week}`
 
   return (
     <div className="space-y-4 pb-8">
@@ -254,7 +255,7 @@ export function LeagueHome() {
         <MatchupCard
           matchup={featured}
           myTeam={myTeam}
-          newsroomPath={newsroomPath}
+          matchupsPath={matchupsPath}
           mine={myMatchup !== null}
           claimHint={Boolean(session) && myMatchup === null}
         />

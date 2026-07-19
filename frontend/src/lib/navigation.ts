@@ -10,15 +10,12 @@ import {
 import { recapLeagueSlug } from './supabase'
 
 /**
- * P-6b nav restructure (spec §5): Home · Matchup · Newsroom · Standings · More.
- * Shared between TopNav (desktop) and BottomTabBar (mobile) — previously each
- * kept its own copy of the tab list.
+ * P-6b/P-7 nav: Home · Matchup · Newsroom · Standings · More.
+ * Shared between TopNav (desktop) and BottomTabBar (mobile).
  *
- * Single-league interim: league-scoped links resolve via the configured slug,
- * the same way Recap.tsx resolves its redirect target.
- *
- * "Matchup" points at the In-Season page until P-7 promotes matchup detail to
- * `/leagues/:slug/matchups/:week`.
+ * Single-league interim: league-scoped links resolve via the configured slug.
+ * Matchup → `/in-season`, which InSeasonRedirect resolves to the latest
+ * published week at `/leagues/:slug/matchups/:week` (avoids a stale hardcoded week).
  */
 export interface NavTab {
   to: string
@@ -38,6 +35,7 @@ export const primaryTabs: NavTab[] = [
       (p.startsWith('/leagues/') &&
         !p.includes('/newsroom/') &&
         !p.includes('/recaps/') &&
+        !p.includes('/matchups/') &&
         !p.endsWith('/standings') &&
         !p.endsWith('/draft')),
   },
@@ -45,7 +43,7 @@ export const primaryTabs: NavTab[] = [
     to: '/in-season',
     label: 'Matchup',
     Icon: LayoutDashboard,
-    isActive: (p) => p.startsWith('/in-season'),
+    isActive: (p) => p.includes('/matchups/') || p.startsWith('/in-season'),
   },
   {
     to: '/recap',
