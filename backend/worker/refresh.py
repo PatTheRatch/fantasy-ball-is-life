@@ -175,9 +175,19 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     phase = "scoreboard"
     try:
         from backend.league.data_feed import get_current_scoreboard
+        import math
         df = get_current_scoreboard(handles, scoring_period=week)
-        # Replace NaN with None for JSON serialization
-        scoreboard_rows = df.where(pd.notna(df), None).to_dict(orient="records") if not df.empty else []
+        scoreboard_rows: list[dict[str, Any]] = []
+        for _, row in df.iterrows():
+            clean: dict[str, Any] = {}
+            for k, v in row.items():
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    clean[k] = None
+                elif isinstance(v, float):
+                    clean[k] = round(v, 4)  # sanity: trim float precision
+                else:
+                    clean[k] = v if not pd.isna(v) else None
+            scoreboard_rows.append(clean)
         _upsert_phase(store, league_id, season, week, phase, scoreboard_rows)
         results[phase] = "ok"
     except Exception as exc:
