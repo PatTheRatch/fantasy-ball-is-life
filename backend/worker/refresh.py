@@ -46,6 +46,7 @@ def _upsert_phase(
     store._request(
         "POST",
         "league_state_snapshots",
+        params={"on_conflict": "league_id,season,phase"},
         json={
             "league_id": league_id,
             "season": season,
