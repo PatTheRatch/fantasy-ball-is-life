@@ -1,8 +1,15 @@
 fcp.patrickmcdowell.dev {
   # ── API reverse proxy ────────────────────────────────────────────
-  # root_path=/api is set on uvicorn — FastAPI strips it internally
-  # for routing and emits correct /api-prefixed redirects.
+  # `--root-path /api` on uvicorn (Dockerfile CMD) does NOT strip the
+  # prefix from incoming request routing — it only affects URL
+  # generation (docs, OpenAPI, redirect Location headers). The proxy
+  # still has to strip the prefix itself before forwarding, or every
+  # route 404s (confirmed: hitting the backend directly with an
+  # /api-prefixed path 404s even with --root-path set). So both are
+  # required together: strip here for routing, root_path on uvicorn
+  # so FastAPI knows to re-add /api when generating URLs.
   handle /api/* {
+    uri strip_prefix /api
     reverse_proxy backend:8000
   }
 
