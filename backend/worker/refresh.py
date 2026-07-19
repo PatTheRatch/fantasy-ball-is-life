@@ -140,23 +140,29 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
                 matchups = canonical_matchups(rows, w)
             except Exception:
                 continue
+            # H2H Each-Category scoring: a team's record is the sum of
+            # CATEGORY wins/losses/ties, not matchup wins. Winning 7 cats,
+            # losing 1, tying 1 in a week adds 7-1-1 to the record (not 1-0).
             for m in matchups:
-                winner = m.get("winner", "")
-                for side in ("home", "away"):
-                    team = m.get(f"{side}_team", "")
-                    if not team:
-                        continue
-                    if winner == team:
-                        records[team]["wins"] += 1
-                    elif winner == "Tie" or not winner:
-                        records[team]["ties"] += 1
-                    else:
-                        records[team]["losses"] += 1
+                home = m.get("home_team", "")
+                away = m.get("away_team", "")
+                hcw = int(m.get("home_category_wins", 0) or 0)
+                acw = int(m.get("away_category_wins", 0) or 0)
+                cat_ties = int(m.get("ties", 0) or 0)
+                if home:
+                    records[home]["wins"] += hcw
+                    records[home]["losses"] += acw
+                    records[home]["ties"] += cat_ties
+                if away:
+                    records[away]["wins"] += acw
+                    records[away]["losses"] += hcw
+                    records[away]["ties"] += cat_ties
 
         standings_rows: list[dict[str, Any]] = []
         for team, rec in records.items():
             total = rec["wins"] + rec["losses"] + rec["ties"]
-            wp = (rec["wins"] / total * 100) if total > 0 else 0.0
+            # Win% counts a tie as half a win (standard H2H-category convention).
+            wp = ((rec["wins"] + 0.5 * rec["ties"]) / total * 100) if total > 0 else 0.0
             standings_rows.append({
                 "team_name": team, "wins": rec["wins"],
                 "losses": rec["losses"], "ties": rec["ties"],
