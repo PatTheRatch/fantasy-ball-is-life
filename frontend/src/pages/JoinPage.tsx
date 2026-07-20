@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/authContext'
@@ -14,15 +14,16 @@ export function JoinPage() {
   const navigate = useNavigate()
   const { session, user, loading } = useAuth()
   const [error, setError] = useState<string | null>(null)
-  const [redeeming, setRedeeming] = useState(false)
+  // Re-entrancy guard only — never affects render, so a ref (not state)
+  // keeps it out of the effect's setState path and its dep array.
+  const attemptedRef = useRef(false)
 
   const token = searchParams.get('invite')
 
   useEffect(() => {
-    if (!token) {
-      setError('No invite link found. Ask your league admin for a valid invite.')
-      return
-    }
+    // A missing token is derivable from the URL — render it directly below
+    // rather than writing state here (react-hooks/set-state-in-effect).
+    if (!token) return
     if (loading) return
     if (error) return  // N-2b: don't retry after a failed redeem
 
@@ -32,9 +33,9 @@ export function JoinPage() {
       return
     }
 
-    // Signed in — redeem
-    if (redeeming) return
-    setRedeeming(true)
+    // Signed in — redeem exactly once
+    if (attemptedRef.current) return
+    attemptedRef.current = true
 
     async function redeem() {
       if (!supabase) return
@@ -43,8 +44,9 @@ export function JoinPage() {
       })
 
       if (redeemErr) {
+        // setState here is after an await (not synchronous in the effect
+        // body), and attemptedRef stays true so this never retries.
         setError(redeemErr.message)
-        setRedeeming(false)
         return
       }
 
@@ -53,12 +55,14 @@ export function JoinPage() {
     }
 
     void redeem()
-  }, [token, session, user, loading, navigate, redeeming])
+  }, [token, session, user, loading, navigate, error])
 
   if (!token) {
     return (
       <div className="mx-auto max-w-md pt-16 text-center">
-        <p className="text-lg text-red-400">{error}</p>
+        <p className="text-lg text-red-400">
+          No invite link found. Ask your league admin for a valid invite.
+        </p>
         <Link to="/" className="mt-4 inline-block text-sm font-semibold text-pg-accent hover:underline">
           Back to Full Court Press
         </Link>

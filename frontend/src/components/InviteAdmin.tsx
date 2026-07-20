@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 
 type InviteRow = {
@@ -20,46 +20,65 @@ type MemberRow = {
 
 /**
  * N-2b: Admin invite management + member list section.
- * Gated on is_league_admin(league_id) RPC.
+ * Gated on is_league_admin(league_id) RPC — note the client gate is UX only;
+ * the real boundary is RLS ("Admins manage their league invites" and the
+ * member DELETE policy), so a bypassed gate still can't read or write.
+ *
+ * Data goes through react-query rather than useEffect + setState: setting
+ * state synchronously inside an effect trips react-hooks/set-state-in-effect
+ * and causes cascading renders.
  */
 export function InviteAdmin({ leagueId }: { leagueId: string }) {
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [invites, setInvites] = useState<InviteRow[]>([])
-  const [members, setMembers] = useState<MemberRow[]>([])
-  const [loading, setLoading] = useState(true)
-
+  const queryClient = useQueryClient()
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
-  const fetchAdmin = useCallback(async () => {
-    if (!supabase) return
-    const { data } = await supabase.rpc('is_league_admin', { target_league_id: leagueId })
-    setIsAdmin(Boolean(data))
-    setLoading(false)
-  }, [leagueId])
+  const adminQuery = useQuery({
+    queryKey: ['is-league-admin', leagueId],
+    retry: false,
+    queryFn: async () => {
+      if (!supabase) return false
+      const { data } = await supabase.rpc('is_league_admin', {
+        target_league_id: leagueId,
+      })
+      return Boolean(data)
+    },
+  })
 
-  const fetchInvites = useCallback(async () => {
-    if (!supabase || !isAdmin) return
-    const { data } = await supabase
-      .from('league_invites')
-      .select('id,token,email,role,expires_at,created_at,used_at')
-      .eq('league_id', leagueId)
-      .is('used_at', null)
-      .order('created_at', { ascending: false })
-    setInvites((data as InviteRow[]) ?? [])
-  }, [leagueId, isAdmin])
+  const isAdmin = adminQuery.data === true
 
-  const fetchMembers = useCallback(async () => {
-    if (!supabase || !isAdmin) return
-    const { data } = await supabase
-      .from('league_memberships')
-      .select('user_id,role,team_name,created_at')
-      .eq('league_id', leagueId)
-      .order('created_at', { ascending: true })
-    setMembers((data as MemberRow[]) ?? [])
-  }, [leagueId, isAdmin])
+  const invitesQuery = useQuery({
+    queryKey: ['league-invites', leagueId],
+    enabled: isAdmin,
+    retry: false,
+    queryFn: async () => {
+      if (!supabase) return [] as InviteRow[]
+      const { data } = await supabase
+        .from('league_invites')
+        .select('id,token,email,role,expires_at,created_at,used_at')
+        .eq('league_id', leagueId)
+        .is('used_at', null)
+        .order('created_at', { ascending: false })
+      return (data as InviteRow[]) ?? []
+    },
+  })
 
-  useEffect(() => { fetchAdmin() }, [fetchAdmin])
-  useEffect(() => { if (isAdmin) { fetchInvites(); fetchMembers() } }, [isAdmin, fetchInvites, fetchMembers])
+  const membersQuery = useQuery({
+    queryKey: ['league-members', leagueId],
+    enabled: isAdmin,
+    retry: false,
+    queryFn: async () => {
+      if (!supabase) return [] as MemberRow[]
+      const { data } = await supabase
+        .from('league_memberships')
+        .select('user_id,role,team_name,created_at')
+        .eq('league_id', leagueId)
+        .order('created_at', { ascending: true })
+      return (data as MemberRow[]) ?? []
+    },
+  })
+
+  const invites = invitesQuery.data ?? []
+  const members = membersQuery.data ?? []
 
   async function createInvite(role: string, expiresDays: number) {
     if (!supabase || !isAdmin) return
@@ -73,13 +92,13 @@ export function InviteAdmin({ leagueId }: { leagueId: string }) {
       expires_at: expiresAt,
       created_by: userData.user?.id,
     })
-    fetchInvites()
+    await queryClient.invalidateQueries({ queryKey: ['league-invites', leagueId] })
   }
 
   async function revokeInvite(inviteId: string) {
     if (!supabase) return
     await supabase.from('league_invites').delete().eq('id', inviteId)
-    fetchInvites()
+    await queryClient.invalidateQueries({ queryKey: ['league-invites', leagueId] })
   }
 
   async function removeMember(userId: string) {
@@ -89,10 +108,10 @@ export function InviteAdmin({ leagueId }: { leagueId: string }) {
       .delete()
       .eq('league_id', leagueId)
       .eq('user_id', userId)
-    fetchMembers()
+    await queryClient.invalidateQueries({ queryKey: ['league-members', leagueId] })
   }
 
-  if (loading) return null
+  if (adminQuery.isLoading) return null
   if (!isAdmin) return null
 
   const link = (token: string) => `${origin}/join?invite=${token}`
