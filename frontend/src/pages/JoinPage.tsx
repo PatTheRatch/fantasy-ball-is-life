@@ -24,10 +24,11 @@ export function JoinPage() {
       return
     }
     if (loading) return
+    if (error) return  // N-2b: don't retry after a failed redeem
 
     if (!session || !user) {
       // Not signed in — redirect to login preserving the token
-      navigate(`/login?next=/join?invite=${encodeURIComponent(token)}`, { replace: true })
+      navigate(`/login?next=${encodeURIComponent('/join?invite=' + token)}`, { replace: true })
       return
     }
 
@@ -47,7 +48,7 @@ export function JoinPage() {
         return
       }
 
-      // Redirect to the league home
+      // Navigate to the league we just joined
       navigate('/', { replace: true })
     }
 

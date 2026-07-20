@@ -32,7 +32,7 @@ export function InviteAdmin({ leagueId }: { leagueId: string }) {
 
   const fetchAdmin = useCallback(async () => {
     if (!supabase) return
-    const { data } = await supabase.rpc('is_league_admin', { p_league_id: leagueId })
+    const { data } = await supabase.rpc('is_league_admin', { target_league_id: leagueId })
     setIsAdmin(Boolean(data))
     setLoading(false)
   }, [leagueId])

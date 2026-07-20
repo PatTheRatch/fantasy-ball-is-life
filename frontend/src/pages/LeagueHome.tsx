@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { getPublishedArchive, getSnapshot } from '../api'
 import { useAuth } from '../lib/authContext'
 import { getMyLeagues } from '../lib/memberships'
-import { recapLeagueSlug, supabase } from '../lib/supabase'
+import { recapLeagueSlug } from '../lib/supabase'
 import { formatStatValue, STAT_ORDER } from '../lib/inSeasonUtils'
 import { MovementBadge } from '../ui'
 import { JoinLeague } from '../components/JoinLeague'
@@ -351,21 +351,6 @@ export function LeagueHome() {
     retry: false,
   })
 
-  // N-2b: fetch league visibility for non-member join prompt
-  const visibilityQuery = useQuery({
-    queryKey: ['league-visibility', effectiveSlug],
-    queryFn: async () => {
-      if (!supabase) return null
-      const { data } = await supabase
-        .from('leagues')
-        .select('visibility')
-        .eq('slug', effectiveSlug)
-        .maybeSingle()
-      return (data as { visibility: string } | null)?.visibility ?? null
-    },
-    retry: false,
-  })
-
   if (archiveQuery.isLoading || snapshotQuery.isLoading) {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
@@ -384,8 +369,9 @@ export function LeagueHome() {
   const myLeague = membershipsQuery.data?.find((l) => l.slug === effectiveSlug) ?? null
   const myTeam = myLeague?.teamName ?? null
   const isMember = Boolean(session && membershipsQuery.data && myLeague)
-  const leagueId = (snapshot as Record<string, unknown>).league_id as string | undefined
-  const isPublic = visibilityQuery.data === 'public'
+  const leagueId = (snapshotQuery.data?.league as Record<string, unknown> | undefined)?.id as string | undefined
+  const isPublic = (snapshotQuery.data?.league as Record<string, unknown> | undefined)?.visibility === 'public'
+  const isPrivate = (snapshotQuery.data?.league as Record<string, unknown> | undefined)?.visibility === 'private'
 
   const teamNames: string[] = standings
     .map((s) => String(s.team_name ?? ''))
@@ -431,14 +417,14 @@ export function LeagueHome() {
       )}
 
       {/* N-2b: non-member → Join prompt; member-no-team → claim hint */}
-      {Boolean(session) && !isMember && isPublic && leagueId && (
+      {Boolean(session) && !membershipsQuery.isLoading && !isMember && isPublic && leagueId && (
         <JoinLeague
           leagueId={leagueId}
           teams={teamNames}
           onJoined={() => queryClient.invalidateQueries({ queryKey: ['my-leagues'] })}
         />
       )}
-      {Boolean(session) && !isMember && !isPublic && (
+      {Boolean(session) && !membershipsQuery.isLoading && !isMember && isPrivate && (
         <section className="rounded-pg-lg border border-pg-border bg-pg-card p-5 text-center">
           <p className="text-sm text-slate-500">
             This league is private — ask an admin for an invite.
