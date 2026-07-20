@@ -107,3 +107,53 @@ slug).
 Yahoo/Sleeper adapters (landing says "coming soon"), ownership transfer,
 league deletion/archival, public league directory/search (share-the-link
 only), custom domains per league.
+
+---
+
+## Addendum: signup gate + email delivery (2026-07-20)
+
+Two onboarding blockers found while trying to test the N-2b join flow.
+Neither is a code defect in N-2/N-2b — both are configuration gaps that
+make real onboarding impossible.
+
+### Finding 1 — the "invite only" signup gate is cosmetic
+
+`frontend/src/pages/Signup.tsx` reveals the form when `?invite=` is any
+non-empty string; the value is **never validated** against anything.
+Combined with Supabase `disable_signup: false` (verified live), signup is
+**already open to the public** — anyone appending `?invite=x` can create an
+account. The label is an illusion, which is the worst of both worlds:
+no real protection, but a UX that tells legitimate users they can't join.
+
+**Resolved (Patrick, 2026-07-20): genuinely open signup.** Set
+`VITE_SIGNUP_OPEN=true` so `/signup` is honestly self-serve. This matches
+the N-series plan (public leagues are join-by-team-claim; private leagues
+are protected by real invite tokens at the DB layer, not by hiding the
+signup form). Access control lives in RLS + `league_invites`, never in a
+cosmetic query-param gate.
+
+Rejected alternatives: validating `?invite=` against `league_invites`
+before showing the form (adds friction for public-league self-join, which
+by design needs no invite), and `disable_signup` at Supabase (blocks the
+N-series entirely).
+
+### Finding 2 — transactional email is unconfigured (the real blocker)
+
+Supabase reports `mailer_autoconfirm: false`, so every new user must click
+a confirmation link. The project is still on Supabase's **built-in SMTP**,
+which is rate-limited to a few messages/hour and commonly spam-foldered —
+Supabase documents it as unsuitable for production. Consequence: real
+users cannot complete signup, and password reset (already shipped in P-5)
+is equally affected. This is the single thing standing between "the app
+works" and "a friend can actually join."
+
+**Required:** configure a real SMTP provider (Resend / Postmark /
+SendGrid) in Supabase Auth, with a verified sending domain and SPF/DKIM,
+then verify confirm-signup and reset-password both deliver to a real
+inbox (not spam). See the N-2c task.
+
+### Ordering note
+
+Opening signup (Finding 1) without working email (Finding 2) produces
+accounts that can never confirm. Land the SMTP work first, or at minimum
+land both together.
