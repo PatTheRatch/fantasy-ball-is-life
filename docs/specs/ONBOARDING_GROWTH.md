@@ -84,8 +84,8 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 | **N-2** | ✅ done (#62) | DB layer + public self-join: `league_invites` migration, `redeem_league_invite` + `claimed_team_names` RPCs, self-join INSERT policy, team-claim unique index, member DELETE policy, `JoinLeague` component, 16 authenticated RLS boundary tests running in CI against local Supabase | RLS boundary proven in CI; `JoinLeague` component + migration merged |
 | **N-2b** | ✅ done (#64) | Wire it into the app: `JoinLeague` rendered on League Home (non-member vs member-no-team branching), `InviteAdmin` in Settings (create/list/revoke invites + member list/remove, `is_league_admin`-gated), `/join?invite=` redeem page with login round-trip preserving `next`, copy-link button (#65) | Non-member on public league sees Join card and claims a team; admin mints/revokes links; invite redeem works through sign-in |
 | **N-2c** | ⬜ **blocker** | Transactional email: real SMTP provider (Resend/Postmark/SendGrid) + verified domain (SPF/DKIM) in Supabase Auth; open signup (`VITE_SIGNUP_OPEN=true`) *after* email confirmed. See addendum below. | Confirm-signup + reset-password deliver to a real inbox (not spam) across Gmail + non-Gmail; signup honestly open |
-| **N-3** | ⬜ next | Multi-league de-rooting (see detailed section below) | App works for a second seeded league end-to-end with no rebuild; worker refreshes both |
-| **N-4** | ⬜ | Create-league wizard + backend endpoint: live ESPN validation, cookies-only-if-private branch, encrypted cred storage, cap=2, auto owner/admin + team claim, worker enrollment | A new user creates a working league solo; invalid ID/cookies rejected with clear errors at the validation step |
+| **N-3** | ✅ done (#67) | Multi-league de-rooting (see detailed section below): route-aware nav, per-league season via `/leagues/{slug}/recaps/current`, query-cache isolation, `refresh_all_leagues()` + `POST /admin/refresh-all` | App works for a second seeded league end-to-end with no rebuild; worker refreshes both |
+| **N-4** | ⬜ next | Create-league wizard + backend endpoint (see N-4 detail below) — split into **N-4a** (ESPN validation preview), **N-4b** (create endpoint), **N-4c** (wizard UI). Worker enrollment is free via N-3's `refresh_all_leagues()` | A new user creates a working league solo; invalid ID/cookies rejected with clear errors at the validation step |
 | **N-5** | ⬜ | Credential health: worker writes refresh status, admin reconnect banner + re-entry flow | Expired cookies surface a reconnect prompt within one refresh cycle instead of silent stale data |
 
 Notes on what actually shipped vs. the original N-2 plan: the invite work
@@ -150,6 +150,119 @@ league** loads end-to-end (home, newsroom, standings, matchups, draft) with
 **no rebuild**, the worker refreshes both leagues independently, and the
 existing patriot-games experience is byte-unchanged for its members.
 Verify by seeding a throwaway second league and clicking through both.
+
+## N-4 detail: create-league wizard (broken into 3 shippable PRs)
+
+Lets a signed-in user stand up their own ESPN league solo — no manual
+seed script, no DB access. **Unblocked now that N-3 landed** (a created
+league is useful because the frontend follows the route slug) and worker
+enrollment is **already free**: `refresh_all_leagues()` (N-3) iterates
+every row in `leagues`, so a new league joins the refresh cycle with zero
+extra code.
+
+**User story:** As a fantasy manager with my own ESPN league, I paste my
+league ID, confirm it's the right league, name it, claim my team, and land
+on a working League Home — without anyone provisioning it for me.
+
+**Resolved product decisions (Patrick, do not re-litigate):**
+- **Cap = 2** leagues per owner (`leagues.owner_user_id`), enforced
+  server-side.
+- **Duplicate ESPN league** (same `espn_league_id` + `season` already in
+  `leagues`): **block** with `409 {code:"already_exists", slug}`; the
+  wizard tells the user it exists and links them to join it. Do NOT create
+  a second row for the same ESPN league.
+- **Team claim is required** to finish creation — the creator picks their
+  team from the validated team list before the league is created (so their
+  matchup card works immediately).
+- **Cookies only if private:** public leagues need only ID + season;
+  private leagues additionally require SWID + espn_s2, shown with the
+  "encrypted with pgcrypto — we cannot read them" note.
+
+Build order is a → b → c (c consumes a + b; b reuses a's validator).
+
+### N-4a — Backend: ESPN validation preview (read-only)
+
+- **New endpoint** `POST /leagues/preview`, **login-required**
+  (`require_supabase_user`, as in `backend/api/routers/recaps.py`).
+  **No DB writes, no encryption.**
+- **Input:** `{ espn_league_id, season, swid?, espn_s2? }`.
+- **Behavior:** call the existing `connect(league_id, season, swid,
+  espn_s2)` + `pull_league_meta()` (`backend/league/data_feed.py:229,286`
+  — they already return `league_name` and `teams` count). Return
+  `{ name, teams, scoring_type, season, team_names: [...] }` (team_names
+  drives the claim dropdown in N-4c).
+- **Error branches → distinct codes** (so N-4c can react):
+  - private league, no/blank cookies → `422 {code:"private_league"}`
+  - cookies present but rejected by ESPN → `422 {code:"bad_cookies"}`
+  - unknown/invalid league ID → `404 {code:"not_found"}`
+- **Factor the ESPN-fetch + classify logic into a helper**
+  (e.g. `backend/league/create.py::validate_espn_league(...)`) that
+  returns a typed result — N-4b calls the same helper.
+- **Tests (hermetic, mock `connect`/`pull_league_meta`):** public league
+  OK; missing cookies on a private league → `private_league`; bad cookies
+  → `bad_cookies`; unknown ID → `not_found`; unauthenticated → 401.
+
+### N-4b — Backend: create-league (writes)
+
+- **New endpoint** `POST /leagues`, **login-required**.
+- **Input:** `{ espn_league_id, season, swid?, espn_s2?, name, slug,
+  accent_color, visibility, team_name }`.
+- **Steps, in order:**
+  1. **Cap:** count `leagues` where `owner_user_id = auth uid`; `>= 2` →
+     `403 {code:"cap_reached"}`.
+  2. **Duplicate:** if a league with this `espn_league_id` + `season`
+     exists → `409 {code:"already_exists", slug:<existing>}`.
+  3. **Re-validate** via `validate_espn_league(...)` from N-4a (never
+     trust the client's claim that the league is real / that team_name is
+     valid — team_name must be in the returned `team_names`).
+  4. **Encrypt** `swid`/`espn_s2` with the `pgp_sym_encrypt` RPC +
+     `CRED_ENCRYPTION_KEY` (identical to `backend/scripts/seed_league.py`
+     `_encrypt`).
+  5. **Insert `leagues`** row: `owner_user_id = admin_user_id = uid`,
+     plus name/slug/accent_color/visibility/espn_league_id/espn_season/
+     encrypted creds/timezone. Slug collision (unique constraint) →
+     `409 {code:"slug_taken"}`.
+  6. **Insert `league_memberships`**: `(league_id, uid, role='owner',
+     team_name)`.
+- **Returns** `{ slug }`. Creation goes through the service role
+  (`RecapStore`) — RLS is bypassed, so this endpoint owns cap + ownership
+  enforcement.
+- **Worker enrollment:** none needed — `refresh_all_leagues()` already
+  covers it. (Optionally trigger one immediate `refresh_league(slug=...)`
+  so Home isn't empty on first load — nice-to-have, not required.)
+- **Tests (hermetic):** cap at 2 → 403; duplicate ESPN league → 409 with
+  existing slug; slug collision → 409; team_name not in league → 422;
+  happy path inserts league + membership and stores creds encrypted (not
+  plaintext); re-validation failure aborts with no partial writes.
+
+### N-4c — Frontend: the wizard
+
+- **Route** `/leagues/new` (login-required); **entry point** the lobby's
+  "Set up a new league" affordance in `HomeResolver.tsx` (currently
+  hidden/disabled per §"The journey").
+- **API helpers** in `frontend/src/api.ts`: `previewLeague(input)` →
+  N-4a, `createLeague(input)` → N-4b.
+- **Steps:**
+  1. **Identify** — league ID + season → **Validate** (calls preview).
+     If `private_league` comes back, reveal SWID + espn_s2 fields with the
+     "encrypted, we can't read them" note and re-validate.
+  2. **Confirm** — "Found *'<name>'* — <teams> teams. Is this yours?"
+  3. **Details** — name / slug / accent prefilled (slug auto-slugified
+     from name, editable) + public/private toggle.
+  4. **Claim your team** — **required** dropdown from `team_names`.
+  5. **Submit** → `createLeague` → redirect to `/leagues/:slug`.
+- **Error-code → inline message mapping:** `not_found`, `bad_cookies`,
+  `already_exists` (with a "join it instead" link to the existing slug),
+  `slug_taken`, `cap_reached`.
+- **Tests (vitest):** step progression; private-branch reveal on
+  `private_league`; each error code renders its message; submit posts the
+  right payload; team-claim step blocks "Create" until a team is picked.
+
+**Series done when:** a brand-new user creates a working public league AND
+a private league (with cookies) solo, invalid IDs/cookies are rejected at
+the validation step with clear messages, the cap blocks a 3rd league, and
+the created league appears in the refresh worker's next run — with the
+existing patriot-games experience unchanged.
 
 ## Security & cost notes
 
