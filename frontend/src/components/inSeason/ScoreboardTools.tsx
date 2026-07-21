@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { useLeagueSlug } from '../../lib/useLeagueSlug'
 import type { ProjectedRosterPlayer } from '../../api'
 import {
   formatApiError,
@@ -54,7 +55,7 @@ function projectionPillLabel(s: ProjectionSource): string {
  * Live + projected scoreboard tools + power rankings (auto-load, D-P6).
  * Extracted from the InSeason monolith for P-7.
  */
-export function ScoreboardTools({ week }: { week: number }) {
+export function ScoreboardTools({ week }: { slug: string; week: number }) {
   const queryClient = useQueryClient()
   const [projectionSource, setProjectionSource] = useState<ProjectionSource>('15')
   const [bbmFile, setBbmFile] = useState<File | null>(null)
@@ -70,6 +71,7 @@ export function ScoreboardTools({ week }: { week: number }) {
     () => (bbmFile ? `${bbmFile.name}:${bbmFile.size}:${bbmFile.lastModified}` : ''),
     [bbmFile],
   )
+  const slug = useLeagueSlug()
   const weeksParam = useMemo(
     () => Array.from({ length: week }, (_, i) => String(i + 1)).join(','),
     [week],
@@ -77,21 +79,21 @@ export function ScoreboardTools({ week }: { week: number }) {
 
   const projectedQuery = useQuery({
     queryKey: inSeasonQueryKeys.projected(week, projParam, bbmFileKey),
-    queryFn: () => fetchProjectedMatchupGroups(week, projectionSource, bbmFile),
+    queryFn: () => fetchProjectedMatchupGroups(slug, week, projectionSource, bbmFile),
     enabled: scoreboardView === 'projected',
     staleTime: 60_000,
   })
 
   const currentQuery = useQuery({
     queryKey: inSeasonQueryKeys.current(week),
-    queryFn: () => fetchCurrentMatchupGroups(week),
+    queryFn: () => fetchCurrentMatchupGroups(slug, week),
     enabled: scoreboardView === 'current',
     staleTime: 60_000,
   })
 
   const powerQuery = useQuery({
     queryKey: inSeasonQueryKeys.power(week),
-    queryFn: () => getPowerRankings(weeksParam, 3),
+    queryFn: () => getPowerRankings(slug, weeksParam, 3),
     staleTime: 60_000,
   })
 
@@ -117,7 +119,7 @@ export function ScoreboardTools({ week }: { week: number }) {
       let homeR: ProjectedRosterPlayer[] = []
       let awayR: ProjectedRosterPlayer[] = []
       try {
-        const rosters = await getRostersCurrent({
+        const rosters = await getRostersCurrent(slug, {
           week_start_date: weekMeta?.start,
           week_end_date: weekMeta?.end,
           current_matchup_period: week,

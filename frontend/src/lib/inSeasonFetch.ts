@@ -24,6 +24,7 @@ export const inSeasonQueryKeys = {
 }
 
 export async function fetchProjectedMatchupGroups(
+  slug: string,
   week: number,
   projectionSource: ProjectionSource,
   bbmFile: File | null,
@@ -34,6 +35,7 @@ export async function fetchProjectedMatchupGroups(
   const useUpload = projectionSource === 'bbm' && bbmFile
   if (useUpload) {
     const rows = await postProjectedScoreboard(
+      slug,
       {
         current_matchup_period: week,
         projections: proj,
@@ -54,13 +56,13 @@ export async function fetchProjectedMatchupGroups(
     )
     try {
       const [totalRows, remRows] = await Promise.all([
-        getRostersCurrent({
+        getRostersCurrent(slug, {
           week_start_date: weekMeta.start,
           week_end_date: weekMeta.end,
           current_matchup_period: week,
           projections: proj,
         }),
-        getRostersCurrent({
+        getRostersCurrent(slug, {
           week_start_date: remStart,
           week_end_date: weekMeta.end,
           current_matchup_period: week,
@@ -77,7 +79,7 @@ export async function fetchProjectedMatchupGroups(
       /* keep defaults */
     }
   }
-  const confRows = await getMatchupConfidence({
+  const confRows = await getMatchupConfidence(slug, {
     current_matchup_period: week,
     projections: proj,
     games_played: gamesPlayed,
@@ -87,9 +89,10 @@ export async function fetchProjectedMatchupGroups(
 }
 
 export async function fetchCurrentMatchupGroups(
+  slug: string,
   week: number,
 ): Promise<MatchupGroup[]> {
-  const raw = await getScoreboardCurrent(week)
+  const raw = await getScoreboardCurrent(slug, week)
   return prepareMatchupGroups(enrichCurrentRows(raw))
 }
 

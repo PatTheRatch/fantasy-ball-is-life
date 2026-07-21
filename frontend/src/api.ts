@@ -1,7 +1,5 @@
 import axios, { type AxiosInstance } from 'axios'
 
-import { recapLeagueSlug } from './lib/supabase'
-
 function resolveApiBase(): string {
   const raw = import.meta.env.VITE_API_BASE
   if (raw != null && String(raw).trim() !== '') {
@@ -16,8 +14,8 @@ function resolveApiBase(): string {
 export const API_BASE = resolveApiBase()
 
 /** P-4b: prefix a league-scoped path with `/leagues/{slug}`. */
-function leaguePath(path: string): string {
-  return `/leagues/${recapLeagueSlug}${path}`
+function leaguePath(slug: string, path: string): string {
+  return `/leagues/${slug}${path}`
 }
 
 const client: AxiosInstance = axios.create({
@@ -225,8 +223,8 @@ export async function getHealth(): Promise<HealthResponse> {
   return data
 }
 
-export async function getLeagueMeta(): Promise<JsonRecord> {
-  const { data } = await client.get<JsonRecord>(leaguePath('/meta'))
+export async function getLeagueMeta(slug: string, ): Promise<JsonRecord> {
+  const { data } = await client.get<JsonRecord>(leaguePath(slug, '/meta'))
   return data
 }
 
@@ -249,32 +247,32 @@ export async function getCurrentWeekMatchups(
   return data
 }
 
-export async function getPowerRankings(
+export async function getPowerRankings(slug: string, 
   weeks: string,
   recentWeeks = 3,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/power-rankings'), {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath(slug, '/power-rankings'), {
     params: { weeks, recent_weeks: recentWeeks },
   })
   return data.data ?? []
 }
 
-export async function getConfidence(params: {
+export async function getConfidence(slug: string, params: {
   projected_value: number
   stat: string
   player_avg: number
 }): Promise<JsonRecord> {
-  const { data } = await client.get<JsonRecord>(leaguePath('/confidence'), { params })
+  const { data } = await client.get<JsonRecord>(leaguePath(slug, '/confidence'), { params })
   return data
 }
 
-export async function getMatchupConfidence(params: {
+export async function getMatchupConfidence(slug: string, params: {
   current_matchup_period: number
   projections?: string
   games_played?: number
   total_games?: number
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath('/matchup-confidence'), {
+  const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/matchup-confidence'), {
     params,
   })
   return data
@@ -297,23 +295,23 @@ export async function postLeagueRecap(
   return data
 }
 
-export async function getLeagueTeams(): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath('/teams'))
+export async function getLeagueTeams(slug: string, ): Promise<JsonRecord[]> {
+  const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/teams'))
   return data
 }
 
-export async function getLeagueStandings(): Promise<JsonRecord[]> {
-  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/standings'))
+export async function getLeagueStandings(slug: string, ): Promise<JsonRecord[]> {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath(slug, '/standings'))
   return data.data ?? []
 }
 
-export async function getLeagueSettings(): Promise<LeagueSettings> {
-  const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>(leaguePath('/settings'))
+export async function getLeagueSettings(slug: string, ): Promise<LeagueSettings> {
+  const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>(leaguePath(slug, '/settings'))
   return data.data
 }
 
-export async function getSeasonStats(weeks: string): Promise<JsonRecord[]> {
-  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath('/season-stats'), {
+export async function getSeasonStats(slug: string, weeks: string): Promise<JsonRecord[]> {
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath(slug, '/season-stats'), {
     params: { weeks },
   })
   return data.data ?? []
@@ -336,53 +334,53 @@ export async function getRostersOnDate(
   return data
 }
 
-export async function getTransactions(
+export async function getTransactions(slug: string, 
   start: string,
   end: string,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath('/transactions'), {
+  const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/transactions'), {
     params: { start, end },
   })
   return data
 }
 
-export async function getMatchups(
+export async function getMatchups(slug: string, 
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath('/matchups'), {
+  const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/matchups'), {
     params:
       scoringPeriod != null ? { scoring_period: scoringPeriod } : undefined,
   })
   return data
 }
 
-export async function getScoreboardCurrent(
+export async function getScoreboardCurrent(slug: string, 
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath('/scoreboard/current'), {
+  const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/scoreboard/current'), {
     params:
       scoringPeriod != null ? { scoring_period: scoringPeriod } : undefined,
   })
   return data
 }
 
-export async function getRostersCurrent(params?: {
+export async function getRostersCurrent(slug: string, params?: {
   week_start_date?: string
   week_end_date?: string
   bbm_path?: string
   current_matchup_period?: number
   projections?: string
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath('/rosters/current'), {
+  const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/rosters/current'), {
     params,
   })
   return data
 }
 
-export async function postRostersCurrent(
+export async function postRostersCurrent(slug: string, 
   formData: FormData,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.post<JsonRecord[]>(leaguePath('/rosters/current'), formData)
+  const { data } = await client.post<JsonRecord[]>(leaguePath(slug, '/rosters/current'), formData)
   return data
 }
 
@@ -712,19 +710,19 @@ export async function getDraftPlayers(q: string): Promise<DraftPlayerResult[]> {
   return data
 }
 
-export async function getProjectedScoreboard(params?: {
+export async function getProjectedScoreboard(slug: string, params?: {
   week_end_date?: string
   current_matchup_period?: number
   projections?: string
 }): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath('/projected-scoreboard'), {
+  const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/projected-scoreboard'), {
     params,
   })
   return data
 }
 
 /** Multipart POST — optional BBM file when projections is BBM. */
-export async function postProjectedScoreboard(
+export async function postProjectedScoreboard(slug: string, 
   payload: {
     current_matchup_period: number
     projections: string
@@ -737,7 +735,7 @@ export async function postProjectedScoreboard(
   if (bbmFile) {
     fd.append('bbm_file', bbmFile)
   }
-  const { data } = await client.post<JsonRecord[]>(leaguePath('/projected-scoreboard'), fd)
+  const { data } = await client.post<JsonRecord[]>(leaguePath(slug, '/projected-scoreboard'), fd)
   return data
 }
 

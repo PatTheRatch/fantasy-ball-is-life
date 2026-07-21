@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
+import { useLeagueSlug } from '../lib/useLeagueSlug'
 import type {
   CustomPlanSpec,
   DraftPickEntry,
@@ -35,6 +36,7 @@ import { loadPresets, loadStored } from '../draft/storage'
 import type { StoredState } from '../draft/types'
 
 export function DraftPage() {
+  const slug = useLeagueSlug()
   const [picks, setPicks] = useState<DraftPickEntry[]>(() => loadStored().picks)
   const [portfolio, setPortfolio] = useState<DraftPortfolioResponse | null>(
     () => loadStored().portfolio,
@@ -74,13 +76,13 @@ export function DraftPage() {
 
   const teamsQuery = useQuery({
     queryKey: ['draft', 'teams'],
-    queryFn: getLeagueTeams,
+    queryFn: () => getLeagueTeams(slug),
     retry: 0,
   })
 
   const leagueSettingsQuery = useQuery({
     queryKey: ['draft', 'league-settings'],
-    queryFn: getLeagueSettings,
+    queryFn: () => getLeagueSettings(slug),
     retry: 0,
   })
 
