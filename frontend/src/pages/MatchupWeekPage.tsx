@@ -4,7 +4,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getPublishedArchive } from '../api'
 import { MatchupsPanel } from '../components/matchup/MatchupsPanel'
-import { useLeagueSlug } from '../lib/useLeagueSlug'
 import { ScoreboardTools } from '../components/inSeason/ScoreboardTools'
 import { WEEK_MAX, WEEK_MIN } from '../lib/matchupWeeks'
 import { recapLeagueSlug } from '../lib/supabase'
@@ -117,7 +116,7 @@ export function MatchupWeekPage() {
       {tab === 'matchups' && (
         <MatchupsPanel slug={effectiveSlug} season={season} week={week} />
       )}
-      {tab === 'tools' && <ScoreboardTools slug={useLeagueSlug()} week={week} />}
+      {tab === 'tools' && <ScoreboardTools slug={effectiveSlug} week={week} />}
     </div>
   )
 }
