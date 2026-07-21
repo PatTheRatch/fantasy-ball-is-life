@@ -74,21 +74,82 @@ own ESPN league. Decisions resolved with Patrick 2026-07-19.
   write-only after save — display "Connected ✓ last verified <date>",
   never echo values.
 
-## Phases
+## Phases & status
 
-| Phase | Scope | Done when |
-|---|---|---|
-| **N-1** | Landing page at `/` for logged-out users (replaces redirect); minimal lobby for zero-membership users; HomeResolver wiring | Logged-out `/` shows landing w/ demo link + ESPN-only note; logged-in no-membership `/` shows lobby; existing members unaffected |
-| **N-2** | Real invites + public self-join: `league_invites` migration, redeem function, self-join INSERT policy + claim-a-team join UI, admin "Invite members" in Settings, remove-member, signup gate opens (`VITE_SIGNUP_OPEN=true`), Supabase email-confirm ON | A stranger with the Patriot Games link signs up, confirms email, claims an unclaimed team, sees League Home as a member — zero manual DB work. Admin can mint/revoke invite links and remove a member |
-| **N-3** | Multi-league de-rooting: remove baked `VITE_RECAP_LEAGUE_SLUG` from nav/API-client/resolver (active league from route/context); per-league season from `leagues.espn_season` (not `VITE_RECAP_SEASON`); worker loops ALL leagues (per-league failure isolation) | App works for a second seeded league end-to-end with no rebuild; worker refreshes both |
-| **N-4** | Create-league wizard + backend endpoint: live ESPN validation, cookies-only-if-private branch, encrypted cred storage, cap=2, auto owner/admin + team claim, worker enrollment | A new user creates a working league solo; invalid ID/cookies rejected with clear errors at the validation step |
-| **N-5** | Credential health: worker writes refresh status, admin reconnect banner + re-entry flow | Expired cookies surface a reconnect prompt within one refresh cycle instead of silent stale data |
+Status legend: ✅ done · 🚧 in progress · ⬜ not started
 
-Sequencing rationale: N-2 before N-3 because it delivers the immediate
-value (Patrick's leaguemates join TODAY on the single hardcoded league);
-de-rooting is the riskiest refactor and shouldn't block that. N-4 depends
-on N-3 (a created league is useless while the frontend is pinned to one
-slug).
+| Phase | Status | Scope | Done when |
+|---|---|---|---|
+| **N-1** | ✅ done | Landing page at `/` for logged-out users (replaces redirect); minimal lobby for zero-membership users; HomeResolver wiring | Logged-out `/` shows landing w/ demo link + ESPN-only note; logged-in no-membership `/` shows lobby; existing members unaffected |
+| **N-2** | ✅ done (#62) | DB layer + public self-join: `league_invites` migration, `redeem_league_invite` + `claimed_team_names` RPCs, self-join INSERT policy, team-claim unique index, member DELETE policy, `JoinLeague` component, 16 authenticated RLS boundary tests running in CI against local Supabase | RLS boundary proven in CI; `JoinLeague` component + migration merged |
+| **N-2b** | ✅ done (#64) | Wire it into the app: `JoinLeague` rendered on League Home (non-member vs member-no-team branching), `InviteAdmin` in Settings (create/list/revoke invites + member list/remove, `is_league_admin`-gated), `/join?invite=` redeem page with login round-trip preserving `next`, copy-link button (#65) | Non-member on public league sees Join card and claims a team; admin mints/revokes links; invite redeem works through sign-in |
+| **N-2c** | ⬜ **blocker** | Transactional email: real SMTP provider (Resend/Postmark/SendGrid) + verified domain (SPF/DKIM) in Supabase Auth; open signup (`VITE_SIGNUP_OPEN=true`) *after* email confirmed. See addendum below. | Confirm-signup + reset-password deliver to a real inbox (not spam) across Gmail + non-Gmail; signup honestly open |
+| **N-3** | ⬜ next | Multi-league de-rooting (see detailed section below) | App works for a second seeded league end-to-end with no rebuild; worker refreshes both |
+| **N-4** | ⬜ | Create-league wizard + backend endpoint: live ESPN validation, cookies-only-if-private branch, encrypted cred storage, cap=2, auto owner/admin + team claim, worker enrollment | A new user creates a working league solo; invalid ID/cookies rejected with clear errors at the validation step |
+| **N-5** | ⬜ | Credential health: worker writes refresh status, admin reconnect banner + re-entry flow | Expired cookies surface a reconnect prompt within one refresh cycle instead of silent stale data |
+
+Notes on what actually shipped vs. the original N-2 plan: the invite work
+was split into **N-2 (DB + component + tests)** and **N-2b (app wiring +
+admin UI + redeem page)**. The "signup gate opens + email-confirm ON" item
+that was originally bundled into N-2 turned out to be a real configuration
+blocker (built-in SMTP won't deliver) and was carved out as **N-2c** — it
+is the current gate on real humans onboarding.
+
+Sequencing rationale: N-2/N-2b before N-3 because they deliver the
+immediate value (leaguemates join on the single hardcoded league);
+de-rooting is the riskiest refactor and shouldn't block that. N-2c gates
+*real* onboarding but not testing (the cosmetic `?invite=` gate + admin
+auto-confirm suffice for that). N-4 depends on N-3 (a created league is
+useless while the frontend is pinned to one slug).
+
+## N-3 detail: multi-league de-rooting (grounded in current code)
+
+The frontend is NOT uniformly hardcoded — it's **split-brain**, which
+narrows the work:
+
+- **Already slug-correct (leave alone):** the recap/newsroom data path.
+  `getSnapshot` / `getPublishedArchive` / `getPublishedRecap` take an
+  explicit `slug` param, and the pages (`LeagueHome`, `NewsroomLayout`,
+  `StandingsPage`, `MatchupWeekPage`) already read `effectiveSlug` from the
+  route (`slug || recapLeagueSlug`).
+- **The actual root:** `api.ts`'s `leaguePath()` hardcodes
+  `/leagues/${recapLeagueSlug}` with **no slug parameter**. **16 API
+  functions** flow through it — `getLeagueMeta/Teams/Standings/Settings`,
+  `getSeasonStats`, `getMatchups`, `getScoreboardCurrent`,
+  `postRostersCurrent`, projected-scoreboard, etc. Every one is silently
+  pinned to patriot-games regardless of which league page the user is on.
+
+**N-3 work items:**
+1. **Parameterize `leaguePath(slug, path)`** and thread the active slug
+   through all 16 callers. Source of the active slug: the route param
+   (`useParams().slug`), falling back to `recapLeagueSlug` only as the
+   single-league default. The cleanest shape is likely a per-league API
+   hook/context that carries the slug, rather than passing it to every call.
+2. **Per-league season.** Replace the baked `VITE_RECAP_SEASON` reads with
+   `leagues.espn_season` for the active league (already a column). Audit:
+   `Settings`, `NewsroomLayout`, `StandingsPage`, `Recap`,
+   `InSeasonRedirect`, `MatchupWeekPage`, `LeagueHome` all read the env var.
+3. **`recapLeagueSlug` becomes default-only, not identity.** Keep it as the
+   redirect fallback for bare routes (`/recap`, `/draft`, `/season`,
+   `Landing` demo link, `HomeResolver`), but nothing on a `/leagues/:slug`
+   route should read it — those must use the route slug.
+4. **Backend worker loops ALL leagues.** `refresh_league(slug=...)` already
+   takes a slug; the scheduler/cron must iterate every row in `leagues`
+   (not just the seeded one), with **per-league failure isolation** (one
+   league's ESPN error doesn't abort the others) and per-league season.
+5. **Nav** (`navigation.ts`) builds `/leagues/${recapLeagueSlug}/...` for
+   Standings/Draft/Home — for a single-league user this is fine, but the
+   multi-league picker (already in `HomeResolver`) should drive nav to the
+   *selected* league. Decide: does the top nav become league-aware, or stay
+   pinned to a "primary" league? (Recommend: nav reflects the league in the
+   current route; the picker at `/` chooses which.)
+
+**Risk / done-when:** this is the highest-risk refactor in the N-series
+because it touches the whole API surface. Done when a **second seeded
+league** loads end-to-end (home, newsroom, standings, matchups, draft) with
+**no rebuild**, the worker refreshes both leagues independently, and the
+existing patriot-games experience is byte-unchanged for its members.
+Verify by seeding a throwaway second league and clicking through both.
 
 ## Security & cost notes
 
