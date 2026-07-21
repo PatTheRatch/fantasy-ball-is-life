@@ -27,6 +27,22 @@ def _verify_secret(header_value: str | None) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
+@router.post("/refresh-all")
+def trigger_refresh_all(
+    x_worker_secret: str | None = Header(None, alias="X-Worker-Secret"),
+) -> dict[str, Any]:
+    """N-3: trigger a snapshot refresh for every league in the DB.
+
+    One league's failure never blocks the rest; the response maps each
+    slug to its per-phase results or an ``"error: ..."`` string.
+    """
+    _verify_secret(x_worker_secret)
+
+    from backend.worker.refresh import refresh_all_leagues
+
+    return refresh_all_leagues()
+
+
 @router.post("/refresh/{league_slug}")
 def trigger_refresh(
     league_slug: str,

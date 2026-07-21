@@ -311,6 +311,39 @@ def get_published_archive(
     return store.list_published(league["id"], season)
 
 
+def get_current_recaps(*, store: RecapStore, slug: str) -> dict[str, Any]:
+    """N-3: league metadata + its configured season + that season's archive.
+
+    The season comes from ``leagues.espn_season`` so a league configured for
+    a different season than the deployment default resolves correctly.
+    Archive is empty (not an error) for non-public leagues, matching how the
+    pages degrade when the archive endpoint is unavailable.
+    """
+    league = _league_or_404(store, slug)
+    raw_season = league.get("espn_season")
+    if raw_season is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"League '{slug}' has no espn_season configured.",
+        )
+    season = int(raw_season)
+    if league.get("visibility") == "public":
+        archive = store.list_published(league["id"], season)
+    else:
+        archive = []
+    return {
+        "league": {
+            "slug": league.get("slug"),
+            "name": league.get("name"),
+            "logo_url": league.get("logo_url"),
+            "accent_color": league.get("accent_color"),
+            "visibility": league.get("visibility"),
+        },
+        "season": season,
+        "archive": archive,
+    }
+
+
 def get_admin_edition(
     *,
     store: RecapStore,

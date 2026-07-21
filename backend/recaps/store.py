@@ -88,12 +88,21 @@ class RecapStore:
                 "slug": f"eq.{slug}",
                 "select": (
                     "id,slug,name,logo_url,accent_color,visibility,recap_voice,"
-                    "owner_user_id,admin_user_id,espn_league_id"
+                    "owner_user_id,admin_user_id,espn_league_id,espn_season"
                 ),
                 "limit": "1",
             },
         )
         return rows[0] if rows else None
+
+    def list_league_slugs(self) -> list[str]:
+        """N-3: every league slug, for the refresh-all worker loop."""
+        rows = self._request(
+            "GET",
+            "leagues",
+            params={"select": "slug", "order": "slug.asc"},
+        )
+        return [str(row["slug"]) for row in (rows or []) if row.get("slug")]
 
     def is_league_admin(self, league: dict[str, Any], user_id: str) -> bool:
         if user_id in {league.get("owner_user_id"), league.get("admin_user_id")}:

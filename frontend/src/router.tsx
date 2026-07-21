@@ -42,7 +42,10 @@ export const router = createBrowserRouter([
       { path: 'leagues/:slug/draft', element: <DraftPageRoute /> },
       // P-7: matchup detail route (snapshot + live/projected tools).
       { path: 'leagues/:slug/matchups/:week', element: <MatchupWeekPageRoute /> },
-      // Flat legacy paths → league-scoped equivalents (§5).
+      // N-3: per-league resolvers — pick the league's season + latest week.
+      { path: 'leagues/:slug/matchups', element: <InSeasonRedirect /> },
+      { path: 'leagues/:slug/newsroom', element: <Recap /> },
+      // Flat legacy paths → default-league equivalents (§5).
       { path: 'draft', element: <DraftRedirect /> },
       { path: 'in-season', element: <InSeasonRedirect /> },
       { path: 'recap', element: <Recap /> },
@@ -52,6 +55,8 @@ export const router = createBrowserRouter([
       // Standings promoted to its own route (P-6a).
       { path: 'leagues/:slug/standings', element: <StandingsPage /> },
       { path: 'season', element: <SeasonRoute /> },
+      // N-3: league-scoped season tools (bare /season keeps the default league).
+      { path: 'leagues/:slug/season', element: <SeasonRoute /> },
       {
         path: 'settings',
         element: (

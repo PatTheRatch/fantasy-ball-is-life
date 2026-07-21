@@ -1,12 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPublishedArchive, getSnapshot } from '../api'
+import { getRecapsCurrent, getSnapshot } from '../api'
 import { useAuth } from '../lib/authContext'
 import { claimTeam, getMyLeagues, type MyLeague } from '../lib/memberships'
 import { supabase } from '../lib/supabase'
 import { InviteAdmin } from '../components/InviteAdmin'
-
-const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 
 /**
  * P-6b: claim "which team is mine" per league (spec §8). League Home uses the
@@ -26,9 +24,9 @@ function TeamClaim({ league, userId }: { league: MyLeague; userId: string }) {
   const teamsQuery = useQuery({
     queryKey: ['settings', 'teams', league.slug],
     queryFn: async () => {
-      const archive = await getPublishedArchive(league.slug, RECAP_SEASON)
+      const { season, archive } = await getRecapsCurrent(league.slug)
       const week = archive.length > 0 ? archive[archive.length - 1].week : 1
-      const { snapshot } = await getSnapshot(league.slug, RECAP_SEASON, week)
+      const { snapshot } = await getSnapshot(league.slug, season, week)
       const standings = (snapshot as Record<string, unknown>).standings
       if (!Array.isArray(standings)) return []
       return [

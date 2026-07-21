@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { LogIn, LogOut, Menu, Settings as SettingsIcon } from 'lucide-react'
 import { useAuth } from '../lib/authContext'
-import { isMoreActive, moreLinks, primaryTabs } from '../lib/navigation'
+import { buildMoreLinks, buildPrimaryTabs, isMoreActive, type NavLink } from '../lib/navigation'
+import { useLeagueSlug } from '../lib/useLeagueSlug'
 
 const tabClass = (active: boolean) =>
   [
@@ -17,7 +18,7 @@ const tabClass = (active: boolean) =>
  * Also the mobile home of the account affordance (the P-5 profile menu is
  * desktop-only).
  */
-function MoreSheet({ onClose }: { onClose: () => void }) {
+function MoreSheet({ onClose, links }: { onClose: () => void; links: NavLink[] }) {
   const { session, user, signOut } = useAuth()
 
   useEffect(() => {
@@ -42,7 +43,7 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
       <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-pg-border bg-pg-card pb-[env(safe-area-inset-bottom)] shadow-2xl">
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-700" aria-hidden />
         <nav className="mt-2 pb-2" aria-label="More">
-          {moreLinks.map(({ to, label, Icon }) => (
+          {links.map(({ to, label, Icon }) => (
             <Link key={to} to={to} onClick={onClose} className={itemClass}>
               <Icon className="h-5 w-5 text-slate-400" aria-hidden />
               {label}
@@ -86,6 +87,9 @@ function MoreSheet({ onClose }: { onClose: () => void }) {
 export function BottomTabBar() {
   const { pathname } = useLocation()
   const [moreOpen, setMoreOpen] = useState(false)
+  const slug = useLeagueSlug()
+  const primaryTabs = buildPrimaryTabs(slug)
+  const moreLinks = buildMoreLinks(slug)
 
   return (
     <>
@@ -116,7 +120,7 @@ export function BottomTabBar() {
           </li>
         </ul>
       </nav>
-      {moreOpen && <MoreSheet onClose={() => setMoreOpen(false)} />}
+      {moreOpen && <MoreSheet onClose={() => setMoreOpen(false)} links={moreLinks} />}
     </>
   )
 }

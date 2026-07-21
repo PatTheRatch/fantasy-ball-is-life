@@ -46,6 +46,17 @@ def _validate_dates(start: date, end: date) -> None:
         )
 
 
+@router.get("/current")
+def current_recaps(
+    slug: str,
+    store: RecapStore = Depends(get_recap_store),
+) -> dict[str, Any]:
+    """League meta + configured ``espn_season`` + that season's published
+    archive (public, no auth). Declared before ``/{season}`` so the literal
+    path is matched first."""
+    return _run(lambda: service.get_current_recaps(store=store, slug=slug))
+
+
 @router.get("/{season}")
 def published_archive(
     slug: str,

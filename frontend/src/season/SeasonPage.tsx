@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JsonRecord } from '../api'
+import { useLeagueSlug } from '../lib/useLeagueSlug'
 import {
   formatApiError,
   getLeagueSettings,
@@ -26,10 +27,11 @@ import {
   type Medal,
 } from './seasonUtils'
 
-export function Season() {
+export function SeasonPage() {
+  const slug = useLeagueSlug()
   const settingsQuery = useQuery({
-    queryKey: ['league', 'settings'],
-    queryFn: getLeagueSettings,
+    queryKey: ['league', 'settings', slug],
+    queryFn: () => getLeagueSettings(slug),
   })
 
   const settings = settingsQuery.data
@@ -177,7 +179,7 @@ export function Season() {
     setStatsLoading(true)
     setStatsFadeOpacity(0)
     try {
-      const data = await getSeasonStats(param)
+      const data = await getSeasonStats(slug, param)
       setSeasonStats(data)
       setStatsError(null)
     } catch (e) {

@@ -1,16 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { ArrowRight, ChevronDown, ChevronUp, Newspaper, Star } from 'lucide-react'
 import { useState } from 'react'
-import { getPublishedArchive, getSnapshot } from '../api'
+import { getRecapsCurrent, getSnapshot } from '../api'
 import { useAuth } from '../lib/authContext'
 import { getMyLeagues } from '../lib/memberships'
-import { recapLeagueSlug } from '../lib/supabase'
+import { useLeagueSlug } from '../lib/useLeagueSlug'
 import { formatStatValue, STAT_ORDER } from '../lib/inSeasonUtils'
 import { MovementBadge } from '../ui'
 import { JoinLeague } from '../components/JoinLeague'
-
-const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 
 type Row = Record<string, unknown>
 
@@ -322,25 +320,24 @@ function StandingsCard({
  * there are no manual "Load" buttons here by design (D-P6).
  */
 export function LeagueHome() {
-  const { slug } = useParams<{ slug: string }>()
-  const effectiveSlug = slug || recapLeagueSlug
-  const season = RECAP_SEASON
+  const effectiveSlug = useLeagueSlug()
   const { session, user } = useAuth()
   const queryClient = useQueryClient()
 
   const archiveQuery = useQuery({
-    queryKey: ['standings-page', 'archive', effectiveSlug, season],
-    queryFn: () => getPublishedArchive(effectiveSlug, season),
+    queryKey: ['recaps-current', effectiveSlug],
+    queryFn: () => getRecapsCurrent(effectiveSlug),
     retry: false,
   })
-  const archive = archiveQuery.data
+  const season = archiveQuery.data?.season
+  const archive = archiveQuery.data?.archive
   const latest = archive && archive.length > 0 ? archive[archive.length - 1] : null
   const week = latest?.week ?? 1
 
   const snapshotQuery = useQuery({
     queryKey: ['recap', 'snapshot', effectiveSlug, season, week],
-    queryFn: () => getSnapshot(effectiveSlug, season, week),
-    enabled: !archiveQuery.isLoading,
+    queryFn: () => getSnapshot(effectiveSlug, season!, week),
+    enabled: !archiveQuery.isLoading && season != null,
     retry: false,
   })
 
@@ -384,7 +381,10 @@ export function LeagueHome() {
     : null
   const featured = myMatchup ?? matchups[0] ?? null
 
-  const newsroomPath = `/leagues/${effectiveSlug}/newsroom/${season}/${week}`
+  const newsroomPath =
+    season != null
+      ? `/leagues/${effectiveSlug}/newsroom/${season}/${week}`
+      : `/leagues/${effectiveSlug}/newsroom`
   const matchupsPath = `/leagues/${effectiveSlug}/matchups/${week}`
   const standingsPath = `/leagues/${effectiveSlug}/standings`
 

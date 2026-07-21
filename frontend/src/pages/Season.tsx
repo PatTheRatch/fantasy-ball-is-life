@@ -1,1 +1,1 @@
-export { Season } from '../season/SeasonPage'
+export { SeasonPage as Season } from '../season/SeasonPage'
