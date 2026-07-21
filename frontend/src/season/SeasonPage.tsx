@@ -30,7 +30,7 @@ import {
 export function SeasonPage() {
   const slug = useLeagueSlug()
   const settingsQuery = useQuery({
-    queryKey: ['league', 'settings'],
+    queryKey: ['league', 'settings', slug],
     queryFn: () => getLeagueSettings(slug),
   })
 

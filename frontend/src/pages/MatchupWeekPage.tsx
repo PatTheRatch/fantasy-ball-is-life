@@ -2,13 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { getPublishedArchive } from '../api'
+import { getRecapsCurrent } from '../api'
 import { MatchupsPanel } from '../components/matchup/MatchupsPanel'
 import { ScoreboardTools } from '../components/inSeason/ScoreboardTools'
 import { WEEK_MAX, WEEK_MIN } from '../lib/matchupWeeks'
-import { recapLeagueSlug } from '../lib/supabase'
-
-const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
+import { useLeagueSlug } from '../lib/useLeagueSlug'
 
 type TabId = 'matchups' | 'tools'
 
@@ -16,25 +14,26 @@ type TabId = 'matchups' | 'tools'
  * P-7: `/leagues/:slug/matchups/:week` — matchup detail route.
  * Tabs: Matchups (snapshot + charts) · Tools (live/projected + commentary + rankings).
  * All reads auto-load (D-P6).
+ * N-3: slug from the route; season from the league's `espn_season`.
  */
 export function MatchupWeekPage() {
-  const { slug, week: weekParam } = useParams<{ slug: string; week: string }>()
+  const { week: weekParam } = useParams<{ slug: string; week: string }>()
   const navigate = useNavigate()
-  const effectiveSlug = slug || recapLeagueSlug
-  const season = RECAP_SEASON
+  const effectiveSlug = useLeagueSlug()
   const [tab, setTab] = useState<TabId>('matchups')
 
-  const archiveQuery = useQuery({
-    queryKey: ['standings-page', 'archive', effectiveSlug, season],
-    queryFn: () => getPublishedArchive(effectiveSlug, season),
+  const currentQuery = useQuery({
+    queryKey: ['recaps-current', effectiveSlug],
+    queryFn: () => getRecapsCurrent(effectiveSlug),
     retry: false,
   })
+  const season = currentQuery.data?.season
 
   const latestWeek = useMemo(() => {
-    const archive = archiveQuery.data
+    const archive = currentQuery.data?.archive
     if (archive && archive.length > 0) return archive[archive.length - 1].week
     return 1
-  }, [archiveQuery.data])
+  }, [currentQuery.data])
 
   const week = useMemo(() => {
     const parsed = Number(weekParam)
@@ -47,6 +46,22 @@ export function MatchupWeekPage() {
   const bumpWeek = (delta: number) => {
     const next = Math.min(WEEK_MAX, Math.max(WEEK_MIN, week + delta))
     navigate(`/leagues/${effectiveSlug}/matchups/${next}`)
+  }
+
+  if (currentQuery.isLoading) {
+    return (
+      <div className="flex min-h-[200px] items-center justify-center">
+        <p className="text-slate-400">Loading matchups…</p>
+      </div>
+    )
+  }
+
+  if (season == null) {
+    return (
+      <div className="flex min-h-[200px] items-center justify-center">
+        <p className="text-slate-400">Couldn’t load this league.</p>
+      </div>
+    )
   }
 
   return (

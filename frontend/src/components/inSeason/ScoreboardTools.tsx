@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { useLeagueSlug } from '../../lib/useLeagueSlug'
 import type { ProjectedRosterPlayer } from '../../api'
 import {
   formatApiError,
@@ -55,7 +54,7 @@ function projectionPillLabel(s: ProjectionSource): string {
  * Live + projected scoreboard tools + power rankings (auto-load, D-P6).
  * Extracted from the InSeason monolith for P-7.
  */
-export function ScoreboardTools({ week }: { slug: string; week: number }) {
+export function ScoreboardTools({ slug, week }: { slug: string; week: number }) {
   const queryClient = useQueryClient()
   const [projectionSource, setProjectionSource] = useState<ProjectionSource>('15')
   const [bbmFile, setBbmFile] = useState<File | null>(null)
@@ -71,28 +70,27 @@ export function ScoreboardTools({ week }: { slug: string; week: number }) {
     () => (bbmFile ? `${bbmFile.name}:${bbmFile.size}:${bbmFile.lastModified}` : ''),
     [bbmFile],
   )
-  const slug = useLeagueSlug()
   const weeksParam = useMemo(
     () => Array.from({ length: week }, (_, i) => String(i + 1)).join(','),
     [week],
   )
 
   const projectedQuery = useQuery({
-    queryKey: inSeasonQueryKeys.projected(week, projParam, bbmFileKey),
+    queryKey: inSeasonQueryKeys.projected(slug, week, projParam, bbmFileKey),
     queryFn: () => fetchProjectedMatchupGroups(slug, week, projectionSource, bbmFile),
     enabled: scoreboardView === 'projected',
     staleTime: 60_000,
   })
 
   const currentQuery = useQuery({
-    queryKey: inSeasonQueryKeys.current(week),
+    queryKey: inSeasonQueryKeys.current(slug, week),
     queryFn: () => fetchCurrentMatchupGroups(slug, week),
     enabled: scoreboardView === 'current',
     staleTime: 60_000,
   })
 
   const powerQuery = useQuery({
-    queryKey: inSeasonQueryKeys.power(week),
+    queryKey: inSeasonQueryKeys.power(slug, week),
     queryFn: () => getPowerRankings(slug, weeksParam, 3),
     staleTime: 60_000,
   })
@@ -270,11 +268,11 @@ export function ScoreboardTools({ week }: { slug: string; week: number }) {
                   <SourcePicker
                     onActivate={async (setId) => {
                       await putProjectionsActive(setId)
-                      void queryClient.invalidateQueries({ queryKey: ['in-season', 'projected'] })
+                      void queryClient.invalidateQueries({ queryKey: ['in-season', 'projected', slug] })
                     }}
                     onClear={async () => {
                       await deleteProjectionsActive('week')
-                      void queryClient.invalidateQueries({ queryKey: ['in-season', 'projected'] })
+                      void queryClient.invalidateQueries({ queryKey: ['in-season', 'projected', slug] })
                     }}
                   />
                 </>
@@ -309,8 +307,8 @@ export function ScoreboardTools({ week }: { slug: string; week: number }) {
               void queryClient.invalidateQueries({
                 queryKey:
                   scoreboardView === 'projected'
-                    ? inSeasonQueryKeys.projected(week, projParam, bbmFileKey)
-                    : inSeasonQueryKeys.current(week),
+                    ? inSeasonQueryKeys.projected(slug, week, projParam, bbmFileKey)
+                    : inSeasonQueryKeys.current(slug, week),
               })
             }
             className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/80 text-slate-200"
@@ -427,7 +425,7 @@ export function ScoreboardTools({ week }: { slug: string; week: number }) {
           <button
             type="button"
             onClick={() =>
-              void queryClient.invalidateQueries({ queryKey: inSeasonQueryKeys.power(week) })
+              void queryClient.invalidateQueries({ queryKey: inSeasonQueryKeys.power(slug, week) })
             }
             className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/80 text-slate-200"
             aria-label="Refresh power rankings"

@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom'
+import { matchPath, useLocation, useParams } from 'react-router-dom'
 import { recapLeagueSlug } from './supabase'
 
 /**
@@ -6,8 +6,15 @@ import { recapLeagueSlug } from './supabase'
  * a `/leagues/:slug/...` route, falling back to the default league for
  * bare/redirect routes (`/recap`, `/draft`, `/season`, etc.) that don't
  * yet know their league.
+ *
+ * Layout chrome (TopNav, BottomTabBar) renders outside the matched child
+ * route, where `useParams` cannot see `:slug` — so we also match the
+ * pathname directly.
  */
 export function useLeagueSlug(): string {
   const { slug } = useParams<{ slug?: string }>()
-  return slug ?? recapLeagueSlug
+  const { pathname } = useLocation()
+  if (slug) return slug
+  const match = matchPath({ path: '/leagues/:slug/*' }, pathname)
+  return match?.params.slug ?? recapLeagueSlug
 }

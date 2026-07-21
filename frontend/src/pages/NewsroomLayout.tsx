@@ -3,15 +3,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ShieldCheck } from 'lucide-react'
 import { getPublishedArchive, getPublishedRecap } from '../api'
-import { recapLeagueSlug } from '../lib/supabase'
+import { useLeagueSlug } from '../lib/useLeagueSlug'
 import { WeeklyRecapTab } from '../components/WeeklyRecapTab'
 import { MatchupsTab } from '../components/MatchupsTab'
 import { PowerRankingsTab } from '../components/PowerRankingsTab'
 import { TransactionsTab } from '../components/TransactionsTab'
 import { AwardsTab } from '../components/AwardsTab'
 import { StandingsTab } from '../components/StandingsTab'
-
-const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 
 interface TabDef {
   id: string
@@ -30,7 +28,7 @@ const TABS: TabDef[] = [
 ]
 
 export function NewsroomLayout() {
-  const { slug, season: seasonStr, week: weekStr } = useParams<{
+  const { season: seasonStr, week: weekStr } = useParams<{
     slug: string
     season: string
     week: string
@@ -41,8 +39,10 @@ export function NewsroomLayout() {
   const [archive, setArchive] = useState<{ week: number; headline?: string }[]>([])
   const [leagueName, setLeagueName] = useState('')
 
-  const effectiveSlug = slug || recapLeagueSlug
-  const season = seasonStr ? Number(seasonStr) : RECAP_SEASON
+  const effectiveSlug = useLeagueSlug()
+  // Route params are required at this mount (`:season/:week`) — N-3: no
+  // build-time season fallback.
+  const season = Number(seasonStr)
   const week = weekStr ? Number(weekStr) : 1
 
   // Load published weeks for archive navigation

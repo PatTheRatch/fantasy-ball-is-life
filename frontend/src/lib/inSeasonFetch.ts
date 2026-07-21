@@ -17,10 +17,12 @@ import {
 import { MATCHUP_WEEKS_2025_26 } from './matchupWeeks'
 
 export const inSeasonQueryKeys = {
-  projected: (week: number, proj: string, fileKey: string) =>
-    ['in-season', 'projected', week, proj, fileKey] as const,
-  current: (week: number) => ['in-season', 'current', week] as const,
-  power: (week: number) => ['in-season', 'power', week] as const,
+  projected: (slug: string, week: number, proj: string, fileKey: string) =>
+    ['in-season', 'projected', slug, week, proj, fileKey] as const,
+  current: (slug: string, week: number) =>
+    ['in-season', 'current', slug, week] as const,
+  power: (slug: string, week: number) =>
+    ['in-season', 'power', slug, week] as const,
 }
 
 export async function fetchProjectedMatchupGroups(

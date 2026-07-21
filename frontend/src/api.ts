@@ -223,7 +223,7 @@ export async function getHealth(): Promise<HealthResponse> {
   return data
 }
 
-export async function getLeagueMeta(slug: string, ): Promise<JsonRecord> {
+export async function getLeagueMeta(slug: string): Promise<JsonRecord> {
   const { data } = await client.get<JsonRecord>(leaguePath(slug, '/meta'))
   return data
 }
@@ -247,7 +247,8 @@ export async function getCurrentWeekMatchups(
   return data
 }
 
-export async function getPowerRankings(slug: string, 
+export async function getPowerRankings(
+  slug: string,
   weeks: string,
   recentWeeks = 3,
 ): Promise<JsonRecord[]> {
@@ -295,17 +296,17 @@ export async function postLeagueRecap(
   return data
 }
 
-export async function getLeagueTeams(slug: string, ): Promise<JsonRecord[]> {
+export async function getLeagueTeams(slug: string): Promise<JsonRecord[]> {
   const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/teams'))
   return data
 }
 
-export async function getLeagueStandings(slug: string, ): Promise<JsonRecord[]> {
+export async function getLeagueStandings(slug: string): Promise<JsonRecord[]> {
   const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath(slug, '/standings'))
   return data.data ?? []
 }
 
-export async function getLeagueSettings(slug: string, ): Promise<LeagueSettings> {
+export async function getLeagueSettings(slug: string): Promise<LeagueSettings> {
   const { data } = await client.get<{ data: LeagueSettings; fetched_at: string | null }>(leaguePath(slug, '/settings'))
   return data.data
 }
@@ -334,7 +335,8 @@ export async function getRostersOnDate(
   return data
 }
 
-export async function getTransactions(slug: string, 
+export async function getTransactions(
+  slug: string,
   start: string,
   end: string,
 ): Promise<JsonRecord[]> {
@@ -344,7 +346,8 @@ export async function getTransactions(slug: string,
   return data
 }
 
-export async function getMatchups(slug: string, 
+export async function getMatchups(
+  slug: string,
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
   const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/matchups'), {
@@ -354,7 +357,8 @@ export async function getMatchups(slug: string,
   return data
 }
 
-export async function getScoreboardCurrent(slug: string, 
+export async function getScoreboardCurrent(
+  slug: string,
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
   const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/scoreboard/current'), {
@@ -377,7 +381,8 @@ export async function getRostersCurrent(slug: string, params?: {
   return data
 }
 
-export async function postRostersCurrent(slug: string, 
+export async function postRostersCurrent(
+  slug: string,
   formData: FormData,
 ): Promise<JsonRecord[]> {
   const { data } = await client.post<JsonRecord[]>(leaguePath(slug, '/rosters/current'), formData)
@@ -722,7 +727,8 @@ export async function getProjectedScoreboard(slug: string, params?: {
 }
 
 /** Multipart POST — optional BBM file when projections is BBM. */
-export async function postProjectedScoreboard(slug: string, 
+export async function postProjectedScoreboard(
+  slug: string,
   payload: {
     current_matchup_period: number
     projections: string
@@ -943,6 +949,18 @@ export async function getPublishedArchive(
   season: number,
 ): Promise<{ week: number; headline?: string; published_at?: string }[]> {
   const { data } = await directClient.get(`/leagues/${slug}/recaps/${season}`)
+  return data
+}
+
+export interface RecapsCurrent {
+  league: JsonRecord
+  season: number
+  archive: { week: number; headline?: string; published_at?: string }[]
+}
+
+/** N-3: league meta + its configured season + that season's archive. */
+export async function getRecapsCurrent(slug: string): Promise<RecapsCurrent> {
+  const { data } = await directClient.get(`/leagues/${slug}/recaps/current`)
   return data
 }
 

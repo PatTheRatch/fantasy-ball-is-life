@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { ChevronDown } from 'lucide-react'
-import { isMoreActive, moreLinks, primaryTabs } from '../lib/navigation'
+import { buildMoreLinks, buildPrimaryTabs, isMoreActive, type NavLink } from '../lib/navigation'
+import { useLeagueSlug } from '../lib/useLeagueSlug'
 import { ProfileMenu } from './ProfileMenu'
 
 const linkClass = (active: boolean) =>
@@ -13,7 +14,7 @@ const linkClass = (active: boolean) =>
   ].join(' ')
 
 /** Desktop "More" dropdown: Draft Room + Season tools (account lives in ProfileMenu). */
-function MoreMenu({ pathname }: { pathname: string }) {
+function MoreMenu({ pathname, links }: { pathname: string; links: NavLink[] }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -51,7 +52,7 @@ function MoreMenu({ pathname }: { pathname: string }) {
           role="menu"
           className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-pg-lg border border-pg-border bg-pg-card shadow-xl"
         >
-          {moreLinks.map(({ to, label, Icon }) => (
+          {links.map(({ to, label, Icon }) => (
             <Link
               key={to}
               to={to}
@@ -71,6 +72,9 @@ function MoreMenu({ pathname }: { pathname: string }) {
 
 export function TopNav() {
   const { pathname } = useLocation()
+  const slug = useLeagueSlug()
+  const primaryTabs = buildPrimaryTabs(slug)
+  const moreLinks = buildMoreLinks(slug)
   return (
     <header className="sticky top-0 z-40 hidden border-b border-pg-border bg-pg-bg/90 backdrop-blur-md md:block">
       <div className="mx-auto flex max-w-6xl items-center gap-8 px-6 py-3">
@@ -93,7 +97,7 @@ export function TopNav() {
               {label}
             </Link>
           ))}
-          <MoreMenu pathname={pathname} />
+          <MoreMenu pathname={pathname} links={moreLinks} />
         </nav>
         <ProfileMenu />
       </div>

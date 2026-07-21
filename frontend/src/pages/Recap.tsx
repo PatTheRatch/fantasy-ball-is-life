@@ -1,19 +1,26 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getPublishedArchive } from '../api'
-import { recapLeagueSlug } from '../lib/supabase'
+import { getRecapsCurrent } from '../api'
+import { useLeagueSlug } from '../lib/useLeagueSlug'
 
-const RECAP_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
+// Redirect-only fallback when the league lookup fails (allowed here — this
+// is bare/default-route redirect code).
+const FALLBACK_SEASON = Number(import.meta.env.VITE_RECAP_SEASON ?? 2026)
 
 /**
- * Legacy /recap redirect.
+ * Newsroom resolver — mounted at `/leagues/:slug/newsroom` (N-3) and the
+ * flat legacy `/recap` (default league via `useLeagueSlug` fallback).
  *
- * - /recap?week=N → /leagues/{slug}/newsroom/{season}/{N}
- * - /recap (bare) → latest published week, or week 1 if none published
+ * - `?week=N` → /leagues/{slug}/newsroom/{season}/{N}
+ * - bare → latest published week, or week 1 if none published
+ *
+ * Season comes from the league's configured `espn_season`, not a
+ * build-time constant.
  */
 export function Recap() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const slug = useLeagueSlug()
   const resolvedRef = useRef(false)
 
   useEffect(() => {
@@ -23,35 +30,26 @@ export function Recap() {
     const requestedWeek = Number(searchParams.get('week'))
 
     async function redirect() {
-      const slug = recapLeagueSlug
-      const season = RECAP_SEASON
-
-      if (requestedWeek && !isNaN(requestedWeek)) {
-        navigate(`/leagues/${slug}/newsroom/${season}/${requestedWeek}`, {
-          replace: true,
-        })
-        return
-      }
-
-      // Bare /recap — find latest published week
+      let season = FALLBACK_SEASON
+      let latestWeek = 1
       try {
-        const archive = await getPublishedArchive(slug, season)
-        if (archive.length > 0) {
-          const latest = archive[archive.length - 1].week
-          navigate(`/leagues/${slug}/newsroom/${season}/${latest}`, {
-            replace: true,
-          })
-          return
+        const current = await getRecapsCurrent(slug)
+        season = current.season
+        if (current.archive.length > 0) {
+          latestWeek = current.archive[current.archive.length - 1].week
         }
       } catch {
-        // Fall through to week 1
+        // League lookup failed — fall through with defaults so the
+        // newsroom route can render its own error state.
       }
 
-      navigate(`/leagues/${slug}/newsroom/${season}/1`, { replace: true })
+      const week =
+        requestedWeek && !isNaN(requestedWeek) ? requestedWeek : latestWeek
+      navigate(`/leagues/${slug}/newsroom/${season}/${week}`, { replace: true })
     }
 
     void redirect()
-  }, [searchParams, navigate])
+  }, [searchParams, navigate, slug])
 
   return (
     <div className="flex min-h-[200px] items-center justify-center">

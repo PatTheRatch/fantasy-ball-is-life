@@ -241,3 +241,22 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
         logger.warning("Phase '%s' failed: %s", phase, exc)
 
     return results
+
+
+def refresh_all_leagues() -> dict[str, dict[str, str] | str]:
+    """N-3: refresh every league in the DB, isolating failures per league.
+
+    A failure anywhere in one league's refresh — credential resolution,
+    ESPN connection, phase setup — never blocks the remaining leagues.
+    Returns ``{slug: phase-results-dict | "error: ..."}`` so callers can
+    distinguish successes from failures per league.
+    """
+    store = RecapStore()
+    results: dict[str, dict[str, str] | str] = {}
+    for slug in store.list_league_slugs():
+        try:
+            results[slug] = refresh_league(slug=slug)
+        except Exception as exc:
+            logger.exception("Refresh failed for league '%s'", slug)
+            results[slug] = f"error: {exc}"
+    return results

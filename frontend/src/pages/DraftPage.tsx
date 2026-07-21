@@ -75,13 +75,13 @@ export function DraftPage() {
   }, [presets])
 
   const teamsQuery = useQuery({
-    queryKey: ['draft', 'teams'],
+    queryKey: ['draft', 'teams', slug],
     queryFn: () => getLeagueTeams(slug),
     retry: 0,
   })
 
   const leagueSettingsQuery = useQuery({
-    queryKey: ['draft', 'league-settings'],
+    queryKey: ['draft', 'league-settings', slug],
     queryFn: () => getLeagueSettings(slug),
     retry: 0,
   })

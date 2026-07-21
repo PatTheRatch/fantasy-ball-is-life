@@ -7,16 +7,17 @@ import {
   Trophy,
   type LucideIcon,
 } from 'lucide-react'
-import { recapLeagueSlug } from './supabase'
 
 /**
  * P-6b/P-7 nav: Home · Matchup · Newsroom · Standings · More.
  * Shared between TopNav (desktop) and BottomTabBar (mobile).
  *
- * N-3: league-scoped links are now dynamic — derive from the current
- * route slug (fallback to recapLeagueSlug at /). Callers should use
- * ``buildPrimaryTabs(slug)`` and ``buildMoreLinks(slug)`` instead of
- * the raw static exports when a route slug is available.
+ * N-3: league-scoped links derive from the active slug — callers pass
+ * `useLeagueSlug()` into `buildPrimaryTabs(slug)` / `buildMoreLinks(slug)`
+ * so every destination stays inside the league being viewed. Matchup and
+ * Newsroom route through per-league resolvers (`/leagues/:slug/matchups`,
+ * `/leagues/:slug/newsroom`) that pick the league's season and latest
+ * published week server-side.
  */
 export interface NavTab {
   to: string
@@ -32,12 +33,6 @@ export interface NavLink {
   Icon: LucideIcon
 }
 
-/** Static fallback (bare routes with no route slug). */
-export const primaryTabs: NavTab[] = buildPrimaryTabs(recapLeagueSlug)
-
-/** Static fallback (bare routes with no route slug). */
-export const moreLinks = buildMoreLinks(recapLeagueSlug)
-
 export function buildPrimaryTabs(slug: string): NavTab[] {
   return [
     {
@@ -47,24 +42,25 @@ export function buildPrimaryTabs(slug: string): NavTab[] {
       isActive: (p) =>
         p === '/' ||
         (p.startsWith('/leagues/') &&
-          !p.includes('/newsroom/') &&
+          !p.includes('/newsroom') &&
           !p.includes('/recaps/') &&
-          !p.includes('/matchups/') &&
+          !p.includes('/matchups') &&
           !p.endsWith('/standings') &&
-          !p.endsWith('/draft')),
+          !p.endsWith('/draft') &&
+          !p.endsWith('/season')),
     },
     {
-      to: '/in-season',
+      to: `/leagues/${slug}/matchups`,
       label: 'Matchup',
       Icon: LayoutDashboard,
-      isActive: (p) => p.includes('/matchups/') || p.startsWith('/in-season'),
+      isActive: (p) => p.includes('/matchups') || p.startsWith('/in-season'),
     },
     {
-      to: '/recap',
+      to: `/leagues/${slug}/newsroom`,
       label: 'Newsroom',
       Icon: Newspaper,
       isActive: (p) =>
-        p.startsWith('/recap') || p.includes('/newsroom/') || p.includes('/recaps/'),
+        p.startsWith('/recap') || p.includes('/newsroom') || p.includes('/recaps/'),
     },
     {
       to: `/leagues/${slug}/standings`,
@@ -79,14 +75,15 @@ export function buildPrimaryTabs(slug: string): NavTab[] {
 export function buildMoreLinks(slug: string): NavLink[] {
   return [
     { to: `/leagues/${slug}/draft`, label: 'Draft Room', Icon: ClipboardList },
-    { to: '/season', label: 'Season tools', Icon: BarChart3 },
+    { to: `/leagues/${slug}/season`, label: 'Season tools', Icon: BarChart3 },
   ]
 }
 
 /** True when any "More" destination (or settings) is the current page. */
 export function isMoreActive(pathname: string): boolean {
   return (
-    moreLinks.some((l) => pathname.startsWith(l.to) || pathname.endsWith('/draft')) ||
+    pathname.endsWith('/draft') ||
+    pathname.endsWith('/season') ||
     pathname.startsWith('/season') ||
     pathname.startsWith('/settings')
   )

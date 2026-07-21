@@ -5,9 +5,11 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { LeagueHome } from './LeagueHome'
 
 vi.mock('../api', () => ({
-  getPublishedArchive: vi
-    .fn()
-    .mockResolvedValue([{ week: 1 }, { week: 6, headline: 'Big Week Six' }]),
+  getRecapsCurrent: vi.fn().mockResolvedValue({
+    league: { slug: 'patriot-games' },
+    season: 2026,
+    archive: [{ week: 1 }, { week: 6, headline: 'Big Week Six' }],
+  }),
   getSnapshot: vi.fn().mockResolvedValue({
     league: {},
     snapshot: {
