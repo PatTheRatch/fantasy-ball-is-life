@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check, Copy } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 type InviteRow = {
@@ -31,6 +33,13 @@ type MemberRow = {
 export function InviteAdmin({ leagueId }: { leagueId: string }) {
   const queryClient = useQueryClient()
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  async function copyLink(inviteId: string, url: string) {
+    await navigator.clipboard.writeText(url)
+    setCopiedId(inviteId)
+    setTimeout(() => setCopiedId((current) => (current === inviteId ? null : current)), 1500)
+  }
 
   const adminQuery = useQuery({
     queryKey: ['is-league-admin', leagueId],
@@ -143,6 +152,20 @@ export function InviteAdmin({ leagueId }: { leagueId: string }) {
                     {inv.expires_at ? ` · expires ${new Date(inv.expires_at).toLocaleDateString()}` : ''}
                   </p>
                 </div>
+                <button
+                  onClick={() => copyLink(inv.id, link(inv.token))}
+                  className="flex flex-shrink-0 items-center gap-1 text-xs font-semibold text-pg-accent hover:underline"
+                >
+                  {copiedId === inv.id ? (
+                    <>
+                      <Check className="h-3 w-3" aria-hidden /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3 w-3" aria-hidden /> Copy
+                    </>
+                  )}
+                </button>
                 <button
                   onClick={() => revokeInvite(inv.id)}
                   className="flex-shrink-0 text-xs font-semibold text-red-400 hover:underline"
