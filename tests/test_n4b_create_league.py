@@ -13,12 +13,18 @@ from backend.recaps.auth import require_supabase_user
 
 
 @pytest.fixture
-def mock_store():
+def mock_store(monkeypatch):
     """Mock RecapStore so no real DB calls happen.
 
     Each test overrides ``mock_store._request.side_effect`` with the
     sequence of responses its scenario expects.
+
+    Also sets CRED_ENCRYPTION_KEY so the credential-encryption path is
+    hermetic: the pgp_sym_encrypt RPC itself is mocked via ``_request``,
+    but ``_encrypt`` guards on the env var being present before calling
+    it. Without this the with-creds tests 500 in a clean env (e.g. CI).
     """
+    monkeypatch.setenv("CRED_ENCRYPTION_KEY", "test-encryption-key")
     store = MagicMock()
     store._request = MagicMock(return_value={})
     import backend.api.routers.create_league as cl
