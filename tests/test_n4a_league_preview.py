@@ -211,7 +211,6 @@ class TestValidateEspnLeagueUnit:
             )(),
         )
 
-        result = LeagueValidation.__wrapped__ = None  # no-op
         from backend.league.create import validate_espn_league
 
         result = validate_espn_league(espn_league_id=123, season=2026)
