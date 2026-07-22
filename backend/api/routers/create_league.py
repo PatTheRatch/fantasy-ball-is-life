@@ -90,12 +90,15 @@ def _encrypt(store: RecapStore, plaintext: str | None) -> str:
 
 
 def _count_user_leagues(store: RecapStore, user_id: str) -> int:
-    """Count leagues owned by a user."""
+    """Count leagues owned by a user.
+
+    RecapStore already authenticates with the service-role key,
+    so no extra headers are needed.
+    """
     rows = store._request(
         "GET",
         "leagues",
         params={"owner_user_id": f"eq.{user_id}", "select": "id"},
-        headers={"Accept-Profile": "service_role"},
     )
     return len(rows) if isinstance(rows, list) else 0
 
@@ -122,7 +125,8 @@ def create_league(
 
     Requires a valid Supabase session. Enforces a cap of 2 owned leagues.
     """
-    user_id: str = _user.get("sub", "")
+    # Supabase's /auth/v1/user object is keyed by "id", not "sub".
+    user_id: str = _user.get("id", "")
     if not user_id:
         raise HTTPException(status_code=401, detail={"code": "unauthorized"})
 
@@ -154,9 +158,10 @@ def create_league(
     encrypted_swid = _encrypt(store, body.swid)
     encrypted_s2 = _encrypt(store, body.espn_s2)
 
-    # 5. Insert league row (service-role — bypasses RLS)
+    # 5. All pre-conditions passed — persist now.
     league_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+
     store._request(
         "POST",
         "leagues",
@@ -174,56 +179,27 @@ def create_league(
             "created_at": now,
             "updated_at": now,
         },
-        headers={
-            "Prefer": "return=minimal",
-            "Accept-Profile": "service_role",
-        },
+        prefer="return=minimal",
     )
 
-    # 6. Create owner membership (role=admin)
+    # 6. Create owner membership (role=admin), optionally with a team claim.
+    team_name = body.team_name.strip() if body.team_name else None
+    membership_payload: dict[str, Any] = {
+        "id": str(uuid.uuid4()),
+        "league_id": league_id,
+        "user_id": user_id,
+        "role": "admin",
+        "created_at": now,
+    }
+    if team_name:
+        membership_payload["team_name"] = team_name
+
     store._request(
         "POST",
         "league_memberships",
-        json={
-            "id": str(uuid.uuid4()),
-            "league_id": league_id,
-            "user_id": user_id,
-            "role": "admin",
-            "created_at": now,
-        },
-        headers={
-            "Prefer": "return=minimal",
-            "Accept-Profile": "service_role",
-        },
+        json=membership_payload,
+        prefer="return=minimal",
     )
-
-    # 7. Claim team if provided
-    team_name = body.team_name.strip() if body.team_name else None
-    if team_name:
-        existing_claims = store._request(
-            "GET",
-            "league_memberships",
-            params={
-                "league_id": f"eq.{league_id}",
-                "team_name": f"ilike.{team_name}",
-                "select": "id",
-            },
-            headers={"Accept-Profile": "service_role"},
-        )
-        if existing_claims:
-            raise HTTPException(
-                status_code=409,
-                detail={"code": "team_taken", "message": f"The team '{team_name}' is already claimed."},
-            )
-
-        store._request(
-            "PATCH",
-            f"league_memberships?league_id=eq.{league_id}&user_id=eq.{user_id}",
-            json={"team_name": team_name},
-            headers={
-                "Accept-Profile": "service_role",
-            },
-        )
 
     return CreateLeagueResponse(
         id=league_id,
