@@ -49,6 +49,14 @@ def _raise_validation_error(result: LeagueValidation) -> None:
                 "message": result.error_message,
             },
         )
+    if result.error_code == "espn_unavailable":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": result.error_code,
+                "message": result.error_message,
+            },
+        )
     # private_league, bad_cookies → 422
     raise HTTPException(
         status_code=422,

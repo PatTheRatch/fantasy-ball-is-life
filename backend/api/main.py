@@ -98,6 +98,7 @@ from backend.api.routers import (  # noqa: E402
     admin,
     commentary,
     create,
+    create_league,
     draft,
     league,
     legacy_redirects,
@@ -115,3 +116,4 @@ app.include_router(optimizer.router)
 app.include_router(recaps.router)
 app.include_router(admin.router)
 app.include_router(create.router)  # N-4a: POST /leagues/preview
+app.include_router(create_league.router)  # N-4b: POST /leagues

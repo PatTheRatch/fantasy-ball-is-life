@@ -85,6 +85,15 @@ def validate_espn_league(
             error_code="not_found",
             error_message=str(exc),
         )
+    except Exception as exc:
+        return LeagueValidation(
+            valid=False,
+            error_code="espn_unavailable",
+            error_message=(
+                f"ESPN is currently unreachable ({type(exc).__name__}). "
+                "Please try again in a few minutes."
+            ),
+        )
 
     handles = ESPNHandles(league=league)
     meta: dict[str, Any] = pull_league_meta(handles)
