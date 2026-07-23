@@ -84,9 +84,9 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 | **N-2** | ✅ done (#62) | DB layer + public self-join: `league_invites` migration, `redeem_league_invite` + `claimed_team_names` RPCs, self-join INSERT policy, team-claim unique index, member DELETE policy, `JoinLeague` component, 16 authenticated RLS boundary tests running in CI against local Supabase | RLS boundary proven in CI; `JoinLeague` component + migration merged |
 | **N-2b** | ✅ done (#64) | Wire it into the app: `JoinLeague` rendered on League Home (non-member vs member-no-team branching), `InviteAdmin` in Settings (create/list/revoke invites + member list/remove, `is_league_admin`-gated), `/join?invite=` redeem page with login round-trip preserving `next`, copy-link button (#65) | Non-member on public league sees Join card and claims a team; admin mints/revokes links; invite redeem works through sign-in |
 | **N-2c** | ⬜ **blocker** | Transactional email: real SMTP provider (Resend/Postmark/SendGrid) + verified domain (SPF/DKIM) in Supabase Auth; open signup (`VITE_SIGNUP_OPEN=true`) *after* email confirmed. See addendum below. | Confirm-signup + reset-password deliver to a real inbox (not spam) across Gmail + non-Gmail; signup honestly open |
-| **N-3** | ⬜ next | Multi-league de-rooting (see detailed section below) | App works for a second seeded league end-to-end with no rebuild; worker refreshes both |
-| **N-4** | ⬜ | Create-league wizard + backend endpoint: live ESPN validation, cookies-only-if-private branch, encrypted cred storage, cap=2, auto owner/admin + team claim, worker enrollment | A new user creates a working league solo; invalid ID/cookies rejected with clear errors at the validation step |
-| **N-5** | ⬜ | Credential health: worker writes refresh status, admin reconnect banner + re-entry flow | Expired cookies surface a reconnect prompt within one refresh cycle instead of silent stale data |
+| **N-3** | ✅ done (#67) | Multi-league de-rooting (see detailed section below) | App works for a second seeded league end-to-end with no rebuild; worker refreshes both |
+| **N-4** | ✅ done (#68, #69, #70, #72) | Create-league wizard + backend endpoint: live ESPN validation, cookies-only-if-private branch, encrypted cred storage, cap=2, auto owner/admin + team claim, initial-refresh enrolment | A new user creates a working league solo; invalid ID/cookies rejected with clear errors at the validation step |
+| **N-5** | ⬜ next | Credential health: worker writes refresh status, admin reconnect banner + re-entry flow | Expired cookies surface a reconnect prompt within one refresh cycle instead of silent stale data |
 
 Notes on what actually shipped vs. the original N-2 plan: the invite work
 was split into **N-2 (DB + component + tests)** and **N-2b (app wiring +
@@ -94,6 +94,14 @@ admin UI + redeem page)**. The "signup gate opens + email-confirm ON" item
 that was originally bundled into N-2 turned out to be a real configuration
 blocker (built-in SMTP won't deliver) and was carved out as **N-2c** — it
 is the current gate on real humans onboarding.
+
+Like N-2, **N-4 shipped in slices**: N-4a (`POST /leagues/preview`
+read-only ESPN validation, #68), N-4b (`POST /leagues` — create with
+cap=2, encrypted creds, owner membership, #69), N-4c (background initial
+snapshot refresh on creation, #70), and N-4d (the two-step create-league
+wizard at `/leagues/new`, #72). A companion PR (#71) added a conftest
+scrub of deployment secrets so hermetic tests can't silently depend on a
+developer's shell env (they now fail the same way locally and in CI).
 
 Sequencing rationale: N-2/N-2b before N-3 because they deliver the
 immediate value (leaguemates join on the single hardcoded league);
