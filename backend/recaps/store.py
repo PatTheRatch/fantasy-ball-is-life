@@ -95,6 +95,40 @@ class RecapStore:
         )
         return rows[0] if rows else None
 
+    def get_week_scoreboard(
+        self, *, league_id: str, season: int, week: int
+    ) -> dict[str, Any] | None:
+        """Return the stored per-week scoreboard row, or None if not yet
+        backfilled. One immutable row per (league, season, week)."""
+        rows = self._request(
+            "GET",
+            "league_week_scoreboards",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "week": f"eq.{week}",
+                "select": "payload_json,fetched_at,week",
+                "limit": "1",
+            },
+        )
+        return rows[0] if rows else None
+
+    def list_week_scoreboard_weeks(
+        self, *, league_id: str, season: int
+    ) -> set[int]:
+        """Weeks that already have a stored per-week scoreboard (so the
+        worker backfill can skip immutable, already-fetched past weeks)."""
+        rows = self._request(
+            "GET",
+            "league_week_scoreboards",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "select": "week",
+            },
+        )
+        return {int(r["week"]) for r in (rows or []) if r.get("week") is not None}
+
     def list_league_slugs(self) -> list[str]:
         """N-3: every league slug, for the refresh-all worker loop."""
         rows = self._request(

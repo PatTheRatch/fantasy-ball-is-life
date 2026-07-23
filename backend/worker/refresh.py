@@ -59,6 +59,78 @@ def _upsert_phase(
     )
 
 
+def _clean_scoreboard_df(df: "pd.DataFrame") -> list[dict[str, Any]]:
+    """Convert a scoreboard DataFrame to JSON-safe rows (NaN/inf → None)."""
+    import math
+
+    import pandas as pd
+
+    rows: list[dict[str, Any]] = []
+    for _, row in df.iterrows():
+        clean: dict[str, Any] = {}
+        for k, v in row.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                clean[k] = None
+            elif isinstance(v, float):
+                clean[k] = round(v, 4)
+            else:
+                clean[k] = v if not pd.isna(v) else None
+        rows.append(clean)
+    return rows
+
+
+def _upsert_week_scoreboard(
+    store: RecapStore,
+    league_id: str,
+    season: int,
+    week: int,
+    payload: object,
+) -> None:
+    """UPSERT one immutable per-week scoreboard row (league_week_scoreboards)."""
+    now = datetime.now(timezone.utc).isoformat()
+    store._request(
+        "POST",
+        "league_week_scoreboards",
+        params={"on_conflict": "league_id,season,week"},
+        json={
+            "league_id": league_id,
+            "season": season,
+            "week": week,
+            "payload_json": payload,
+            "fetched_at": now,
+        },
+        prefer="resolution=merge-duplicates",
+    )
+
+
+def _backfill_week_scoreboards(
+    store: RecapStore,
+    handles: object,
+    league_id: str,
+    season: int,
+    current_week: int,
+) -> str:
+    """Ensure every past matchup week (1..current_week-1) has an immutable
+    per-week scoreboard row. Past weeks are fetched once; already-stored
+    weeks are skipped. Per-week failures are isolated. Returns a summary."""
+    from backend.league.data_feed import get_current_scoreboard
+
+    have = store.list_week_scoreboard_weeks(league_id=league_id, season=season)
+    missing = [w for w in range(1, current_week) if w not in have]
+    filled = failed = 0
+    for w in missing:
+        try:
+            df_w = get_current_scoreboard(handles, scoring_period=w)
+            _upsert_week_scoreboard(
+                store, league_id, season, w, _clean_scoreboard_df(df_w)
+            )
+            filled += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("Backfill week %s failed: %s", w, exc)
+    return f"ok (filled {filled}, failed {failed}, skipped {len(have)})"
+
+
 def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     """Refresh all phases for one league from live ESPN.
 
@@ -181,21 +253,26 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     # ── scoreboard ─────────────────────────────────────────────────────────
     phase = "scoreboard"
     try:
-        import math
         df = get_current_scoreboard(handles, scoring_period=week)
-        scoreboard_rows: list[dict[str, Any]] = []
-        for _, row in df.iterrows():
-            clean: dict[str, Any] = {}
-            for k, v in row.items():
-                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                    clean[k] = None
-                elif isinstance(v, float):
-                    clean[k] = round(v, 4)  # sanity: trim float precision
-                else:
-                    clean[k] = v if not pd.isna(v) else None
-            scoreboard_rows.append(clean)
+        scoreboard_rows = _clean_scoreboard_df(df)
+        # Rolling latest-state row (existing behaviour) ...
         _upsert_phase(store, league_id, season, week, phase, scoreboard_rows)
+        # ... plus an immutable per-week copy so past weeks render correctly.
+        _upsert_week_scoreboard(store, league_id, season, week, scoreboard_rows)
         results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
+
+    # ── week_scoreboards backfill ────────────────────────────────────────────
+    # Past matchup weeks are immutable, so fetch each missing one once. On a
+    # league's first refresh this pulls weeks 1..(week-1); afterwards it is a
+    # no-op. Failure-isolated per week so one bad week never blocks the rest.
+    phase = "week_scoreboards_backfill"
+    try:
+        results[phase] = _backfill_week_scoreboards(
+            store, handles, league_id, season, week
+        )
     except Exception as exc:
         results[phase] = f"error: {exc}"
         logger.warning("Phase '%s' failed: %s", phase, exc)
