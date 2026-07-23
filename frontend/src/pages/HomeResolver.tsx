@@ -71,14 +71,17 @@ function Lobby() {
           Browse the demo league <ArrowRight className="h-3 w-3" aria-hidden />
         </Link>
       </div>
-      <div className="rounded-pg-lg border border-pg-border bg-pg-card p-5 opacity-50">
-        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+      <Link
+        to="/leagues/new"
+        className="rounded-pg-lg border border-pg-border bg-pg-card p-5 block hover:border-pg-accent/50 transition-colors group"
+      >
+        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-300 group-hover:text-white">
           Set up a new league
         </h2>
-        <p className="mt-2 text-sm text-slate-500">
-          Coming soon — you'll be able to create and configure a new league here.
+        <p className="mt-2 text-sm text-slate-400">
+          Create a league by linking your ESPN fantasy league — two clicks, one form.
         </p>
-      </div>
+      </Link>
     </div>
   )
 }

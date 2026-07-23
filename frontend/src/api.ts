@@ -973,4 +973,52 @@ export async function getSnapshot(
   return data
 }
 
+// ── N-4d: Create-league wizard helpers ────────────────────────────────────
+
+export interface LeaguePreview {
+  name: string
+  teams: number
+  scoring_type: string
+  season: number
+  team_names: string[]
+}
+
+export async function getLeaguePreview(
+  token: string,
+  body: { espn_league_id: number; season: number; swid?: string; espn_s2?: string },
+): Promise<LeaguePreview> {
+  const { data } = await directClient.post<LeaguePreview>("/leagues/preview", body, {
+    headers: bearer(token),
+  })
+  return data
+}
+
+export interface CreatedLeague {
+  id: string
+  slug: string
+  name: string
+  espn_league_id: number
+  espn_season: number
+  timezone: string
+  team_name: string | null
+}
+
+export async function createLeague(
+  token: string,
+  body: {
+    espn_league_id: number
+    season: number
+    name: string
+    swid?: string
+    espn_s2?: string
+    team_name?: string
+  },
+): Promise<CreatedLeague> {
+  const { data } = await directClient.post<CreatedLeague>("/leagues", body, {
+    headers: bearer(token),
+  })
+  return data
+}
+
 export { client as apiClient }
+
