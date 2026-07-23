@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.league.create import validate_espn_league
@@ -112,12 +112,29 @@ def _raise_validation_error(result) -> None:
     raise HTTPException(status_code=422, detail={"code": result.error_code, "message": result.error_message})
 
 
+def _background_refresh(slug: str) -> None:
+    """Run refresh_league in a background task with failure isolation.
+
+    Any exception (ESPN down, bad creds) is logged and swallowed — the
+    league already exists and the next scheduled refresh-all will retry.
+    A failed initial refresh must never surface as an error to the user.
+    """
+    try:
+        from backend.worker.refresh import refresh_league
+        refresh_league(slug=slug)
+    except Exception:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception("Background refresh failed for slug=%s — will retry on next scheduled refresh-all", slug)
+
+
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
 
 @router.post("", response_model=CreateLeagueResponse, status_code=201)
 def create_league(
     body: CreateLeagueRequest,
+    background_tasks: BackgroundTasks,
     _user: dict[str, Any] = Depends(require_supabase_user),
 ) -> CreateLeagueResponse:
     """Create a new league, validate against ESPN, encrypt credentials, and
@@ -200,6 +217,11 @@ def create_league(
         json=membership_payload,
         prefer="return=minimal",
     )
+
+    # 7. Schedule initial refresh in the background (N-4c).
+    # The league already exists; a failed refresh is logged and retried
+    # on the next scheduled refresh-all.
+    background_tasks.add_task(_background_refresh, slug)
 
     return CreateLeagueResponse(
         id=league_id,
