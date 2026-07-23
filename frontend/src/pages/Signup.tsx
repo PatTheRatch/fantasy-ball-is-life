@@ -21,6 +21,11 @@ export function Signup() {
   const { session, loading } = useAuth()
   const [params] = useSearchParams()
   const hasInvite = (params.get('invite') ?? '').trim() !== ''
+  // N-2b: carry the invite round-trip. `next` (e.g. /join?invite=…) is where
+  // the user should land after confirming; `loginHref` preserves invite+next
+  // so switching to sign-in doesn't drop them.
+  const next = params.get('next') ?? '/'
+  const loginHref = params.toString() ? `/login?${params.toString()}` : '/login'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -36,9 +41,18 @@ export function Signup() {
     }
     setSubmitting(true)
     setError(null)
+    // Send the user back to `next` (e.g. /join?invite=…) after they click the
+    // confirmation email, so the invite redeem runs once they're signed in.
+    // NOTE: the absolute URL's path must be allowed in Supabase Auth's
+    // redirect allowlist (additional_redirect_urls) for prod.
+    const emailRedirectTo =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}${next}`
+        : undefined
     const { error: signUpError } = await supabase.auth.signUp({
       email,
       password,
+      options: emailRedirectTo ? { emailRedirectTo } : undefined,
     })
     setSubmitting(false)
     if (signUpError) {
@@ -58,7 +72,7 @@ export function Signup() {
         title="Invite only"
         subtitle="Sign-ups are limited to invited league members."
         footer={
-          <Link className="font-semibold text-pg-accent" to="/login">
+          <Link className="font-semibold text-pg-accent" to={loginHref}>
             Back to sign in
           </Link>
         }
@@ -76,7 +90,7 @@ export function Signup() {
         title="Check your email"
         subtitle="We sent a confirmation link to finish creating your account."
         footer={
-          <Link className="font-semibold text-pg-accent" to="/login">
+          <Link className="font-semibold text-pg-accent" to={loginHref}>
             Back to sign in
           </Link>
         }
@@ -95,7 +109,7 @@ export function Signup() {
       footer={
         <>
           Already have an account?{' '}
-          <Link className="font-semibold text-pg-accent" to="/login">
+          <Link className="font-semibold text-pg-accent" to={loginHref}>
             Sign in
           </Link>
         </>

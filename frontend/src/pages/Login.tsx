@@ -60,7 +60,14 @@ export function Login() {
       footer={
         <>
           Need access?{' '}
-          <Link className="font-semibold text-pg-accent" to="/signup">
+          <Link
+            className="font-semibold text-pg-accent"
+            to={
+              searchParams.toString()
+                ? `/signup?${searchParams.toString()}`
+                : '/signup'
+            }
+          >
             Request an account
           </Link>
         </>
