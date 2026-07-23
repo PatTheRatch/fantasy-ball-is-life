@@ -6,8 +6,10 @@ import { useAuth } from '../lib/authContext'
 /**
  * N-2b: /join?invite=<token> — redeem an invite and land in the league.
  * Signed in → call redeem RPC → redirect to league home.
- * Not signed in → send to /login with a next param so the invite
- * survives the round-trip.
+ * Not signed in → send to /signup (most invitees are new) carrying the
+ * invite token (so the signup form reveals even while public signup is
+ * gated) and a `next` back here, so the invite survives the round-trip.
+ * Signup offers "already have an account? Sign in", which preserves both.
  */
 export function JoinPage() {
   const [searchParams] = useSearchParams()
@@ -28,8 +30,14 @@ export function JoinPage() {
     if (error) return  // N-2b: don't retry after a failed redeem
 
     if (!session || !user) {
-      // Not signed in — redirect to login preserving the token
-      navigate(`/login?next=${encodeURIComponent('/join?invite=' + token)}`, { replace: true })
+      // Not signed in — send new invitees to signup, carrying the invite
+      // token (reveals the form + survives the round-trip) and a `next`
+      // back to this page so the redeem runs once they're authenticated.
+      const next = `/join?invite=${token}`
+      navigate(
+        `/signup?invite=${encodeURIComponent(token)}&next=${encodeURIComponent(next)}`,
+        { replace: true },
+      )
       return
     }
 
