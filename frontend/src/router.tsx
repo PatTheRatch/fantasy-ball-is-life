@@ -6,6 +6,7 @@ import {
   SeasonRoute,
 } from './lazyPages'
 import { RequireAuth } from './lib/RequireAuth'
+import { CreateLeagueWizard } from './pages/CreateLeagueWizard'
 import { DraftRedirect } from './pages/DraftRedirect'
 import { HomeResolver } from './pages/HomeResolver'
 import { InSeasonRedirect } from './pages/InSeasonRedirect'
@@ -57,6 +58,15 @@ export const router = createBrowserRouter([
       { path: 'season', element: <SeasonRoute /> },
       // N-3: league-scoped season tools (bare /season keeps the default league).
       { path: 'leagues/:slug/season', element: <SeasonRoute /> },
+      // N-4d: create-league wizard (login-required).
+      {
+        path: 'leagues/new',
+        element: (
+          <RequireAuth>
+            <CreateLeagueWizard />
+          </RequireAuth>
+        ),
+      },
       {
         path: 'settings',
         element: (
