@@ -14,7 +14,14 @@ from backend.recaps.auth import require_supabase_user
 
 @pytest.fixture
 def mock_store(monkeypatch):
-    """Mock RecapStore so no real DB calls happen."""
+    """Mock RecapStore so no real DB calls happen.
+
+    Also sets CRED_ENCRYPTION_KEY so the credential-encryption path is
+    hermetic: the pgp_sym_encrypt RPC is mocked via ``_request``, but
+    ``_encrypt`` guards on the env var before calling it. Without this the
+    with-creds tests 500 in a clean env (e.g. CI).
+    """
+    monkeypatch.setenv("CRED_ENCRYPTION_KEY", "test-encryption-key")
     store = MagicMock()
     store._request = MagicMock(return_value={})
     import backend.api.routers.create_league as cl
@@ -113,17 +120,9 @@ class TestCreateLeagueHappyPath:
         resp = client.post("/leagues", json=_BASE_REQUEST)
 
         assert resp.status_code == 201
-        # The background task was queued with the new league's slug.
-        mock_refresh.assert_called_once()
-        # BackgroundTasks.add_task calls the function — so it's called directly.
-        # Actually BackgroundTasks.add_task queues a callable to run after the response.
-        # In TestClient, background tasks run immediately after the response.
-        # So _background_refresh is actually called and returns.
-        # Since we mocked it, assert it was called with the slug.
-        assert mock_refresh.call_count >= 1
-        # The slug should match
-        args = mock_refresh.call_args[0]
-        assert args[0] == "test-league"
+        # TestClient runs background tasks after the response, so the mocked
+        # _background_refresh is invoked once with the new league's slug.
+        mock_refresh.assert_called_once_with("test-league")
 
     def test_team_claim_included_in_response(self, mock_store, mock_auth, mock_validate, mock_refresh):
         mock_store._request.side_effect = _happy_side_effect()
