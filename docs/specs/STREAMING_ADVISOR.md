@@ -96,6 +96,27 @@ Score every (add, drop) pair by **net expected category flips**:
    tie-broken by total projected-margin improvement in targeted categories.
 
 Guardrails:
+- **The Wemby rule — long-term value beats this-week schedule.** A naive
+  week-scoped engine would happily conclude "star big, 1 game left this week,
+  weak in your target category → droppable for a 4-game streamer." That is
+  catastrophic advice: you never drop Wembanyama in week 2 because you need
+  assists. Drop candidacy is therefore gated on **surplus over replacement**,
+  computed on the *season* horizon, before any this-week math runs:
+
+  ```
+  replacement_value   = best available FA's season per-game value
+  surplus(player)     = player_season_value − replacement_value
+  droppable(player)   ⇔ surplus(player) ≤ DROP_THRESHOLD
+  ```
+
+  Season per-game value comes from the projection framework's **season
+  horizon** (it already distinguishes season vs weekly exports) via the same
+  9-cat z-score/value math the draft optimizer uses (`value_col`). A star's
+  surplus over any FA is enormous, so he is *never* in the drop pool — no
+  matter how thin his week looks. Fringe players sit at/below replacement and
+  churn freely. This gate runs **first**; the weekly pairing engine (above)
+  only ever sees the droppable tail of the roster. Suggestions display each
+  drop's surplus so the trade-off is visible ("costs ~0 long-term value").
 - Never suggest dropping a player whose removal flips a `narrow_win` to a
   loss (the "don't drop your steals anchor to chase blocks" rule falls out of
   the math, but assert it explicitly in tests).
@@ -172,8 +193,8 @@ tables).
 | Phase | Scope | Depends on | Done when |
 |---|---|---|---|
 | **S-1** | Category gap analysis: `backend/advisor/gaps.py` — live + projected scoreboard → per-category classification (normalized margins, ratio-cat handling) | — | Unit tests: each classification reachable; ratio cats via made/attempts; deterministic |
-| **S-2** | Free-agent valuation: FA pool + games-remaining + active projection source → expected remaining-week contribution per category (roster players too) | S-1 | Hermetic tests (mock `free_agents`/schedule/projections); injured-out and zero-games filtered; waiver-locked flagged |
-| **S-3** | Pairing engine + `GET /leagues/{slug}/advisor/suggestions` (+ `advisor_suggestions` logging, 15-min cache) | S-2 | Guardrail tests: never breaks a `narrow_win`; skips `lost_cause`; top-3 deterministic; endpoint contract tests |
+| **S-2** | Valuation, both horizons: FA pool + games-remaining + active projection source → expected remaining-week contribution per category (roster players too), **plus season-horizon per-game value and surplus-over-replacement per roster player** | S-1 | Hermetic tests (mock `free_agents`/schedule/projections); injured-out and zero-games filtered; waiver-locked flagged; surplus computed from the season horizon |
+| **S-3** | Droppability gate + pairing engine + `GET /leagues/{slug}/advisor/suggestions` (+ `advisor_suggestions` logging, 15-min cache) | S-2 | Guardrail tests: **the Wemby test** (high-surplus star never suggested as a drop, even with 1 game left and a deficit in his weak category); never breaks a `narrow_win`; skips `lost_cause`; top-3 deterministic; endpoint contract tests |
 | **S-4** | UI: "Suggested moves" card on Matchup Tools tab (auto-load, claimed-team default, team switcher) | S-3 | Vitest: renders suggestions + category-flip line; empty/error states; slug-scoped query keys |
 | **S-5** *(later)* | `nba_api` enrichment adapter in the projection framework (recent form + minutes trends), behind the standard adapter interface | S-3 | Adapter + tests only, zero advisor changes (framework criterion 6) |
 | **S-6** *(later)* | AI narrative on suggestions ("why this move") via commentary infra | S-3 | Narrative renders under each suggestion; deterministic math unchanged |
@@ -188,7 +209,11 @@ one-slice-at-a-time delivery model used for N-4.
   made/attempts; TO inverted.
 - **S-2/S-3:** fully hermetic — mock the ESPN pool, schedule, and projection
   source. Property-style guardrails: no suggestion may reduce projected
-  category wins; suggestions stable under input reordering.
+  category wins; suggestions stable under input reordering. **The Wemby
+  test:** construct a roster with a top-5 season-value player who has 1 game
+  left and is weak in the team's `winnable_deficit` category, plus a fat
+  4-game FA streamer — assert the star is never the suggested drop and the
+  actual suggestion comes from the sub-replacement tail.
 - **Endpoint:** contract tests (shape, cache header, unknown team → 404,
   team with no claimed games → empty suggestions, not an error).
 - **Meta:** clean-env runs (`env -u …`) and real-signature (`spec=`) mocks —
@@ -208,6 +233,12 @@ one-slice-at-a-time delivery model used for N-4.
   scoreboard; test it hard.
 - **Open:** default FA pool size (150?) and whether to let the user
   position-filter in the UI (v1: no filter, show top pairs).
+- **Open:** `DROP_THRESHOLD` tuning — how much surplus over replacement makes
+  a player "core" vs "streamable." Start conservative (protect more than
+  strictly optimal; a too-timid advisor is annoying, a Wemby-dropper is dead
+  on arrival) and tune against real rosters. Consider expressing it as a
+  roster percentile ("bottom ~3 slots are streamable") rather than an
+  absolute value number.
 - **Open:** should suggestions consider *multi-add* strategies (2 moves)?
   v1: single add/drop pairs only — multi-move is combinatorial and rarely
   actionable before waivers clear.
