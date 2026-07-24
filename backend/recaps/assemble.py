@@ -20,7 +20,7 @@ from backend.commentary.schemas import (
 )
 from backend.league.scoreboard import WeeklyScoreboard
 from backend.recaps import playoffs
-from backend.recaps.store import RecapStore
+from backend.recaps.store import RecapStore, RecapStoreError
 
 STAT_ORDER = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
 
@@ -300,7 +300,10 @@ def _live_power_rankings(weeks_csv: str, recent_weeks: int = 3):
     for _, row in out.iterrows():
         team = str(row["Team"])
         rec = records.get(team, {"wins": 0, "losses": 0, "ties": 0})
+        allplay_win_pct = round(float(row.get("allplay_win_pct", 0) or 0), 2)
+        actual_win_pct = round(float(row.get("actual_win_pct", 0) or 0), 2)
         entry = {
+            # Capitalized fields: legacy shape, kept for back-compat.
             "Team": team,
             "Rank": int(row["Rank"]),
             "Score": round(float(row["composite_score"]), 4),
@@ -308,11 +311,33 @@ def _live_power_rankings(weeks_csv: str, recent_weeks: int = 3):
             "wins": rec["wins"],
             "losses": rec["losses"],
             "ties": rec["ties"],
+            # Lowercase fields: what StandingsTab/PowerRankingsTab actually
+            # read (`row.team`, `row.rank`, `pr.allplay_win_pct`, ...). These
+            # were previously missing entirely, so every consumer of them
+            # silently fell back to a default (0, or an empty {} on the
+            # Standings-tab rankMap join, since it keys on `r.team`).
+            "team": team,
+            "rank": int(row["Rank"]),
+            "allplay_win_pct": allplay_win_pct,
+            "actual_win_pct": actual_win_pct,
+            "recent_allplay_win_pct": round(float(row.get("recent_allplay_win_pct", 0) or 0), 2),
+            # "Luck": actual (real head-to-head) win% vs all-play (schedule-
+            # adjusted deserved) win%. >1 overperforms your fundamentals
+            # (lucky); <1 underperforms (unlucky). Guard divide-by-zero
+            # (e.g. week 1 with no all-play data yet) to a neutral 1.0.
+            "Win % Ratio": (
+                round(actual_win_pct / allplay_win_pct, 4) if allplay_win_pct else 1.0
+            ),
+            # Overwritten below once ≥2 weeks exist; default keeps week-1
+            # renders sane instead of reading undefined.
+            "rank_change": 0,
         }
         for c in stat_cols:
             key = f"{c.lower().replace('%', '_pct')}_rank"
             if key in row.index:
-                entry[f"{c}_rank"] = int(row[key]) if pd.notna(row[key]) else None
+                rank_val = int(row[key]) if pd.notna(row[key]) else None
+                entry[f"{c}_rank"] = rank_val  # legacy uppercase key
+                entry[key] = rank_val  # lowercase key PowerRankingsTab reads
         result.append(entry)
 
     if len(all_weeks) >= 2:
@@ -329,7 +354,9 @@ def _live_power_rankings(weeks_csv: str, recent_weeks: int = 3):
                 cur = entry["Rank"]
                 prev = prior_map.get(entry["Team"])
                 entry["PriorRank"] = prev
-                entry["Movement"] = int(prev) - int(cur) if prev is not None else 0
+                movement = int(prev) - int(cur) if prev is not None else 0
+                entry["Movement"] = movement
+                entry["rank_change"] = movement
 
     return result
 
@@ -384,9 +411,22 @@ def assemble_weekly_snapshot(
         # phases "scoreboard" is rolling latest-state (current week only), so a
         # past week would otherwise render the current scoreboard. Fall back to
         # it only when this week hasn't been backfilled yet.
-        week_sb = store.get_week_scoreboard(
-            league_id=league["id"], season=season, week=week
-        )
+        #
+        # Defensive: if league_week_scoreboards is unreachable (e.g. a
+        # migration hasn't been applied to this environment yet), degrade to
+        # the rolling-latest scoreboard instead of 500ing the whole snapshot —
+        # a wrong-week render is recoverable; an error page is not.
+        week_sb = None
+        try:
+            week_sb = store.get_week_scoreboard(
+                league_id=league["id"], season=season, week=week
+            )
+        except RecapStoreError:
+            logging.warning(
+                "get_week_scoreboard unavailable for league=%s week=%s — "
+                "falling back to rolling-latest scoreboard",
+                league["id"], week,
+            )
         if week_sb and week_sb.get("payload_json"):
             scoreboard = week_sb["payload_json"]
         else:

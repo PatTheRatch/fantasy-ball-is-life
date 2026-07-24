@@ -59,9 +59,34 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m pytest tests/ --ignore=tests/test_n2_rls.py -q
 
+  # ── Apply migrations to the PRODUCTION Supabase project ─────────────
+  # Runs only on main (never on PRs — this targets the real database, not
+  # test-rls's ephemeral local instance). Gates the deploy: if a migration
+  # fails, build-and-deploy does not run, so we never ship backend code
+  # that expects a table/column the production DB doesn't have yet.
+  #
+  # Requires two repo secrets that must be added once (Patrick):
+  #   SUPABASE_ACCESS_TOKEN — a Supabase personal access token (CLI auth)
+  #   SUPABASE_DB_PASSWORD  — the project's Postgres password (for `link`)
+  migrate:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Link + push migrations to production
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref wuzoengojiqotusulwhj
+          supabase db push
+
   # ── Deploy ─────────────────────────────────────────────────────────
   build-and-deploy:
-    needs: [test-rls, test-backend]
+    needs: [test-rls, test-backend, migrate]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
