@@ -37,6 +37,7 @@ class TestSnapshotRead:
         """Not force_fresh → reads from snapshots, no ESPN call."""
         mock_store = Mock()
         mock_store.get_all_phases.return_value = _make_phases()
+        mock_store.get_week_scoreboard.return_value = None  # per-week: fall back to phases scoreboard
 
         with patch.object(assemble, "RecapStore", return_value=mock_store):
             with patch("backend.recaps.awards.select_awards", return_value=[]):
@@ -89,6 +90,7 @@ class TestSnapshotRead:
         """No snapshots → empty/degraded, not a 500."""
         mock_store = Mock()
         mock_store.get_all_phases.return_value = {}
+        mock_store.get_week_scoreboard.return_value = None
 
         with patch.object(assemble, "RecapStore", return_value=mock_store):
             with patch("backend.recaps.awards.select_awards", return_value=[]):

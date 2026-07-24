@@ -380,7 +380,17 @@ def assemble_weekly_snapshot(
 
         single_week_all_play: list[dict[str, Any]] = []
 
-        scoreboard = phases.get("scoreboard", {}).get("payload_json", []) or []
+        # Prefer the immutable per-week scoreboard for the REQUESTED week; the
+        # phases "scoreboard" is rolling latest-state (current week only), so a
+        # past week would otherwise render the current scoreboard. Fall back to
+        # it only when this week hasn't been backfilled yet.
+        week_sb = store.get_week_scoreboard(
+            league_id=league["id"], season=season, week=week
+        )
+        if week_sb and week_sb.get("payload_json"):
+            scoreboard = week_sb["payload_json"]
+        else:
+            scoreboard = phases.get("scoreboard", {}).get("payload_json", []) or []
         scoreboard_ok = bool(scoreboard)
 
         transactions = phases.get("transactions", {}).get("payload_json", []) or []
