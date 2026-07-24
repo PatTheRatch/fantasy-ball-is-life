@@ -6,33 +6,47 @@ Aisha's technical review before implementation (per
 **Author:** Claude Code (implementation engineer)
 **Date:** 2026-07-24
 **Decision basis:** Capture longitudinal league state daily so we can build
-richer analysis later. Roster history is **un-backfillable** (see §1), so the
-value of capturing it now does not depend on knowing the eventual use.
+richer analysis later. Both daily rosters **and** true intra-week scoreboard
+*progression* are effectively **un-backfillable** (see §1) — ESPN doesn't
+preserve mid-week roster/lineup state — so the value of capturing them now does
+not depend on knowing the eventual use.
 
 ---
 
-## 1. Why now — and why rosters are the urgent half
+## 1. Why now — both datasets capture something ESPN doesn't keep
 
 ESPN's API answers "what is this roster **right now**?" and "what were the
-**box scores** for a past scoring period?" — but it will **not** tell you who
-was on a team's roster last Tuesday. Once waivers run and a player is dropped,
-that prior roster state is gone from ESPN forever.
+**final box scores** for a past matchup period?" — but it does **not** preserve
+mid-week roster/lineup state. Once waivers run and a player is dropped, both the
+prior roster *and* the day-by-day picture that depended on it are gone.
 
-- **Daily rosters are ephemeral.** Capture them today or lose them permanently.
-  This is the classic record-now-or-never case: worth doing even before we've
-  decided what analysis it feeds, because the data cannot be reconstructed.
-- **Daily scoreboards are reconstructable.** ESPN retains historical
-  matchup/scoring-period data (that's exactly what the `league_week_scoreboards`
-  backfill in the per-week-snapshots change relies on). So daily scoreboard
-  capture is a *convenience/optimization*, not a one-shot-or-lose-it — it
-  captures intra-week progression cheaply, but we could rebuild it later.
+- **Daily rosters are ephemeral.** ESPN won't tell you who was on a team's
+  roster last Tuesday. Capture them today or lose them permanently — the classic
+  record-now-or-never case, worth doing even before we've decided what analysis
+  it feeds.
+- **Daily scoreboard *progression* is also effectively un-backfillable.** This
+  is the subtle one, and an earlier draft of this spec got it wrong by calling
+  daily scoreboards merely "reconstructable." What's actually reconstructable
+  from ESPN is the **final week total** (that's what the `league_week_scoreboards`
+  backfill relies on) — *not* the honest "who was ahead at the end of day 2."
+  Rebuilding a mid-week standing requires knowing each team's active lineup on
+  each day, and ESPN's final box score blurs or loses the contributions of
+  players who were streamed in and dropped again before the week ended. So the
+  deeper a league's in-week add/drop activity, the less faithfully the day-by-day
+  score can be rebuilt. **The only clean source of true intra-week progression
+  is to snapshot it as it happens.**
 
-**Consequence for sequencing:** ship roster capture first; scoreboards follow.
+Both gaps share one root cause: **mid-week roster state that ESPN doesn't
+retain.** That's why both belong in the priority tier — not rosters alone.
+
+What *is* still reconstructable: final weekly results (already handled by
+`league_week_scoreboards`). Daily capture is about the *trajectory*, not the
+endpoint.
 
 Storing complete daily blobs (rather than a premature normalized schema) means
-any later reshaping — per-player timelines, churn metrics — is itself
-backfillable *from our own storage*. Capture completely now; normalize when a
-concrete use demands it.
+any later reshaping — per-player timelines, churn metrics, lead-change
+timelines — is itself backfillable *from our own storage*. Capture completely
+now; normalize when a concrete use demands it.
 
 ## 2. What we capture
 
@@ -159,8 +173,10 @@ cross-season retention only if it ever becomes material (it won't soon).
 | **D-4** | `league_daily_scoreboards` migration + capture wired into the same job | D-2 | Daily scoreboard row written per league per day |
 | **D-5** *(optional, later)* | Per-league waiver-aware capture timing | D-3 | Capture fires ~1h after each league's waiver window |
 
-D-1→D-3 (rosters, the un-backfillable half) is the priority path; D-4 (daily
-scoreboards) is a small add-on; D-5 is a refinement.
+D-1→D-4 (rosters *and* daily scoreboards) is the priority path — both capture
+un-backfillable mid-week state (§1). Rosters lead only because they're the
+simplest first slice, not because scoreboards are optional. D-5 is a later
+refinement.
 
 ## 8. Test plan
 
@@ -194,8 +210,11 @@ scoreboards) is a small add-on; D-5 is a refinement.
 ## 10. Out of scope (v1)
 
 - Any user-facing UI or analysis on this data — this spec is **capture only**.
-  Timelines, churn metrics, waiver-ROI, ownership graphs, etc. are separate
-  features built later *on top of* the stored snapshots.
+  Timelines, churn metrics, waiver-ROI, ownership graphs, and **intra-week
+  lead-change / comeback-and-collapse tracking** ("you were up 6–1 on
+  Wednesday and lost") are separate features built later *on top of* the
+  stored snapshots — and that last one is only possible *because* we capture
+  daily progression (§1).
 - Normalized per-player-day tables (derive later from the blobs if needed).
 - Cross-season player/team identity resolution.
 - Retention/archival policy.
