@@ -129,6 +129,63 @@ class RecapStore:
         )
         return {int(r["week"]) for r in (rows or []) if r.get("week") is not None}
 
+    def get_week_transactions(
+        self, *, league_id: str, season: int, week: int
+    ) -> dict[str, Any] | None:
+        """The stored per-week transactions row, or None if not backfilled."""
+        rows = self._request(
+            "GET",
+            "league_week_transactions",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "week": f"eq.{week}",
+                "select": "payload_json,fetched_at,week",
+                "limit": "1",
+            },
+        )
+        return rows[0] if rows else None
+
+    def list_all_week_transactions(
+        self, *, league_id: str, season: int, through_week: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Every stored transaction row for the season, flattened.
+
+        Powers season-cumulative counts (Standings "Moves"/"Trades"). When
+        ``through_week`` is given, only weeks <= it are included, so a past
+        week's view reflects the season *as of* that week rather than today.
+        """
+        params: dict[str, Any] = {
+            "league_id": f"eq.{league_id}",
+            "season": f"eq.{season}",
+            "select": "week,payload_json",
+            "order": "week.asc",
+        }
+        if through_week is not None:
+            params["week"] = f"lte.{through_week}"
+        rows = self._request("GET", "league_week_transactions", params=params)
+        out: list[dict[str, Any]] = []
+        for row in rows or []:
+            payload = row.get("payload_json") or []
+            if isinstance(payload, list):
+                out.extend(payload)
+        return out
+
+    def list_week_transaction_weeks(
+        self, *, league_id: str, season: int
+    ) -> set[int]:
+        """Weeks that already have stored transactions (backfill skip-list)."""
+        rows = self._request(
+            "GET",
+            "league_week_transactions",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "select": "week",
+            },
+        )
+        return {int(r["week"]) for r in (rows or []) if r.get("week") is not None}
+
     def list_league_slugs(self) -> list[str]:
         """N-3: every league slug, for the refresh-all worker loop."""
         rows = self._request(
