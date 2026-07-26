@@ -79,6 +79,67 @@ def _clean_scoreboard_df(df: "pd.DataFrame") -> list[dict[str, Any]]:
     return rows
 
 
+#: The 9 H2H categories, in the order the Standings tab renders them.
+_SEASON_STAT_CATS = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
+
+
+def _season_stat_rank_key(cat: str) -> str:
+    """`PTS` -> `pts_rank`, `FG%` -> `fg_pct_rank` — the lowercase, normalized
+    key the Standings tab's `catRankKey()` builds."""
+    return cat.lower().replace("%", "_pct") + "_rank"
+
+
+def _build_season_stats(weeks: list[int]) -> list[dict[str, Any]]:
+    """Season category totals + per-category league ranks, one row per team.
+
+    Reuses the all-play frame (`WeeklyScoreboard.all_play`) that already
+    powers power rankings: it sums counting stats across weeks and means the
+    ratio categories (FG%/FT%), which is the correct aggregation for each.
+
+    Ranks are 1 = best. TO is inverted (fewest turnovers ranks first); every
+    other category ranks descending.
+    """
+    import pandas as pd
+
+    from backend.api.deps import _scoreboard
+
+    if not weeks:
+        return []
+
+    df = _scoreboard().all_play(weeks=weeks)
+    if df is None or df.empty or "Team" not in df.columns:
+        return []
+
+    available = [c for c in _SEASON_STAT_CATS if c in df.columns]
+    if not available:
+        return []
+
+    stats = df[["Team"] + available].copy()
+    for c in available:
+        stats[c] = pd.to_numeric(stats[c], errors="coerce")
+
+    ranks: dict[str, Any] = {}
+    for c in available:
+        # Fewer turnovers is better; everything else is more-is-better.
+        ascending = c == "TO"
+        ranks[c] = stats[c].rank(method="min", ascending=ascending).astype("Int64")
+
+    rows: list[dict[str, Any]] = []
+    for idx, row in stats.iterrows():
+        entry: dict[str, Any] = {"Team": str(row["Team"])}
+        # `team` alias too: the Standings tab joins on `r.Team ?? r.team`.
+        entry["team"] = entry["Team"]
+        for c in available:
+            val = row[c]
+            entry[c] = None if pd.isna(val) else round(float(val), 4)
+            rank_val = ranks[c].loc[idx]
+            entry[_season_stat_rank_key(c)] = (
+                None if pd.isna(rank_val) else int(rank_val)
+            )
+        rows.append(entry)
+    return rows
+
+
 def _upsert_week_scoreboard(
     store: RecapStore,
     league_id: str,
@@ -305,14 +366,15 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
         logger.warning("Phase '%s' failed: %s", phase, exc)
 
     # ── season_stats ───────────────────────────────────────────────────────
+    # Previously stored an empty list ("fix properly in a follow-up"), which
+    # left every category column on the Standings tab reading 0 in all three
+    # views (Totals / Per-Week Avg / Ranks). Computed for real now.
     phase = "season_stats"
     try:
-        # Season stats computation is complex (all_play over multiple weeks).
-        # For now, store an empty list and fix properly in a follow-up.
-        # The StandingsTab computes per-week averages client-side from totals,
-        # and the Power Rankings tab uses power_rankings data directly.
-        _upsert_phase(store, league_id, season, week, phase, [])
-        results[phase] = "ok (deferred)"
+        weeks_list = list(range(1, week + 1))
+        season_stats_rows = _build_season_stats(weeks_list)
+        _upsert_phase(store, league_id, season, week, phase, season_stats_rows)
+        results[phase] = f"ok ({len(season_stats_rows)} teams)"
     except Exception as exc:
         results[phase] = f"error: {exc}"
         logger.warning("Phase '%s' failed: %s", phase, exc)
