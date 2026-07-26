@@ -37,6 +37,60 @@ def _number(value: Any) -> Optional[float]:
     return parsed if math.isfinite(parsed) else None
 
 
+def standings_from_week_scoreboards(
+    weeks_data: list[tuple[int, list[dict[str, Any]]]],
+) -> list[dict[str, Any]]:
+    """Accumulate H2H-each-category standings from per-week scoreboards.
+
+    ``weeks_data`` is ``[(week, scoreboard_rows), ...]``. Because the caller
+    chooses which weeks to pass, standings can be computed *as of* any week —
+    the fix for past weeks rendering the end-of-season table.
+
+    H2H Each-Category: a team's record is the sum of CATEGORY wins/losses/
+    ties, not matchup wins (7-1-1 in a week adds 7-1-1, not 1-0). Win% counts
+    a tie as half a win, expressed 0-100 to match ``allplay_win_pct``.
+    """
+    from collections import defaultdict
+
+    records: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"wins": 0, "losses": 0, "ties": 0}
+    )
+
+    for week_no, rows in weeks_data:
+        for m in canonical_matchups(rows or [], week_no):
+            home = m.get("home_team", "")
+            away = m.get("away_team", "")
+            hcw = int(m.get("home_category_wins", 0) or 0)
+            acw = int(m.get("away_category_wins", 0) or 0)
+            cat_ties = int(m.get("ties", 0) or 0)
+            if home:
+                records[home]["wins"] += hcw
+                records[home]["losses"] += acw
+                records[home]["ties"] += cat_ties
+            if away:
+                records[away]["wins"] += acw
+                records[away]["losses"] += hcw
+                records[away]["ties"] += cat_ties
+
+    standings_rows: list[dict[str, Any]] = []
+    for team, rec in records.items():
+        total = rec["wins"] + rec["losses"] + rec["ties"]
+        wp = ((rec["wins"] + 0.5 * rec["ties"]) / total * 100) if total > 0 else 0.0
+        standings_rows.append(
+            {
+                "team_name": team,
+                "wins": rec["wins"],
+                "losses": rec["losses"],
+                "ties": rec["ties"],
+                "win_pct": round(wp, 1),
+            }
+        )
+    standings_rows.sort(key=lambda r: (-r["win_pct"], -r["wins"]))
+    for i, r in enumerate(standings_rows):
+        r["standing"] = i + 1
+    return standings_rows
+
+
 def canonical_matchups(scoreboard: list[dict[str, Any]], week: int) -> list[dict[str, Any]]:
     # ── Catalyst helpers ──────────────────────────────────────────────
     _CATALYST_COUNTING_STATS = {"PTS", "REB", "AST", "STL", "BLK", "3PM"}
@@ -385,7 +439,29 @@ def assemble_weekly_snapshot(
         store = RecapStore()
         phases = store.get_all_phases(league_id=league["id"], season=season)
 
+        # Standings AS OF the requested week. The stored `standings` phase is
+        # rolling latest-state (accumulated through the CURRENT week), so a
+        # past week previously rendered the end-of-season table. Per-week
+        # scoreboards let us recompute the table as it stood that week — no
+        # extra storage, and the same accumulation math the worker uses.
         stored_standings = phases.get("standings", {}).get("payload_json", [])
+        try:
+            week_rows = store.list_week_scoreboards(
+                league_id=league["id"], season=season, through_week=week
+            )
+            if week_rows:
+                derived = standings_from_week_scoreboards(
+                    [(int(r["week"]), r.get("payload_json") or []) for r in week_rows]
+                )
+                if derived:
+                    stored_standings = derived
+        except RecapStoreError:
+            logging.warning(
+                "list_week_scoreboards unavailable for league=%s — standings "
+                "fall back to rolling latest state",
+                league["id"],
+            )
+
         standings: list[dict[str, Any]] = []
         standings_ok = bool(stored_standings)
         if standings_ok:
