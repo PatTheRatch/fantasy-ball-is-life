@@ -314,49 +314,21 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     # ── standings ──────────────────────────────────────────────────────────
     phase = "standings"
     try:
-        from backend.recaps.assemble import canonical_matchups
-        from collections import defaultdict
-        records: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "ties": 0})
+        # Shared accumulation with the read path (assemble), so the worker's
+        # stored table and a recomputed past-week table can never drift.
+        from backend.recaps.assemble import standings_from_week_scoreboards
 
+        weeks_data: list[tuple[int, list[dict[str, Any]]]] = []
         for w in range(1, week + 1):
             try:
                 df = get_current_scoreboard(handles, scoring_period=w)
-                rows = df.to_dict(orient="records") if not df.empty else []
-                matchups = canonical_matchups(rows, w)
+                weeks_data.append(
+                    (w, df.to_dict(orient="records") if not df.empty else [])
+                )
             except Exception:
                 continue
-            # H2H Each-Category scoring: a team's record is the sum of
-            # CATEGORY wins/losses/ties, not matchup wins. Winning 7 cats,
-            # losing 1, tying 1 in a week adds 7-1-1 to the record (not 1-0).
-            for m in matchups:
-                home = m.get("home_team", "")
-                away = m.get("away_team", "")
-                hcw = int(m.get("home_category_wins", 0) or 0)
-                acw = int(m.get("away_category_wins", 0) or 0)
-                cat_ties = int(m.get("ties", 0) or 0)
-                if home:
-                    records[home]["wins"] += hcw
-                    records[home]["losses"] += acw
-                    records[home]["ties"] += cat_ties
-                if away:
-                    records[away]["wins"] += acw
-                    records[away]["losses"] += hcw
-                    records[away]["ties"] += cat_ties
 
-        standings_rows: list[dict[str, Any]] = []
-        for team, rec in records.items():
-            total = rec["wins"] + rec["losses"] + rec["ties"]
-            # Win% counts a tie as half a win (standard H2H-category convention).
-            wp = ((rec["wins"] + 0.5 * rec["ties"]) / total * 100) if total > 0 else 0.0
-            standings_rows.append({
-                "team_name": team, "wins": rec["wins"],
-                "losses": rec["losses"], "ties": rec["ties"],
-                "win_pct": round(wp, 1)
-            })
-        standings_rows.sort(key=lambda r: (-r["win_pct"], -r["wins"]))
-        for i, r in enumerate(standings_rows):
-            r["standing"] = i + 1
-
+        standings_rows = standings_from_week_scoreboards(weeks_data)
         _upsert_phase(store, league_id, season, week, phase, standings_rows)
         results[phase] = "ok"
     except Exception as exc:

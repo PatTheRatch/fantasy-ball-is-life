@@ -113,6 +113,27 @@ class RecapStore:
         )
         return rows[0] if rows else None
 
+    def list_week_scoreboards(
+        self, *, league_id: str, season: int, through_week: int
+    ) -> list[dict[str, Any]]:
+        """Per-week scoreboard rows for weeks 1..``through_week``, ordered.
+
+        Lets standings be recomputed *as of* any past week instead of only
+        the rolling latest state.
+        """
+        rows = self._request(
+            "GET",
+            "league_week_scoreboards",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "week": f"lte.{through_week}",
+                "select": "week,payload_json",
+                "order": "week.asc",
+            },
+        )
+        return rows or []
+
     def list_week_scoreboard_weeks(
         self, *, league_id: str, season: int
     ) -> set[int]:
