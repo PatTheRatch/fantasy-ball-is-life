@@ -20,7 +20,7 @@ from backend.commentary.schemas import (
 )
 from backend.league.scoreboard import WeeklyScoreboard
 from backend.recaps import playoffs
-from backend.recaps.store import RecapStore
+from backend.recaps.store import RecapStore, RecapStoreError
 
 STAT_ORDER = ["PTS", "REB", "AST", "STL", "BLK", "3PM", "FG%", "FT%", "TO"]
 
@@ -393,8 +393,44 @@ def assemble_weekly_snapshot(
             scoreboard = phases.get("scoreboard", {}).get("payload_json", []) or []
         scoreboard_ok = bool(scoreboard)
 
-        transactions = phases.get("transactions", {}).get("payload_json", []) or []
+        # Per-week transactions for the REQUESTED week. The phases
+        # "transactions" row is rolling latest-state (current week only), so
+        # every past week previously rendered the CURRENT week's feed — which
+        # is also why trades appeared to never exist: unless a trade happened
+        # this week, no week showed one. Same defensive fallback as the
+        # scoreboard: a missing table degrades, never 500s.
+        week_txn = None
+        try:
+            week_txn = store.get_week_transactions(
+                league_id=league["id"], season=season, week=week
+            )
+        except RecapStoreError:
+            logging.warning(
+                "get_week_transactions unavailable for league=%s week=%s — "
+                "falling back to rolling-latest transactions",
+                league["id"], week,
+            )
+        if week_txn and week_txn.get("payload_json") is not None:
+            transactions = week_txn["payload_json"] or []
+        else:
+            transactions = phases.get("transactions", {}).get("payload_json", []) or []
         transactions_ok = bool(transactions)
+
+        # Season-cumulative transactions through this week — season totals
+        # (Standings Moves/Trades) must not be limited to one week.
+        try:
+            season_transactions = store.list_all_week_transactions(
+                league_id=league["id"], season=season, through_week=week
+            )
+        except RecapStoreError:
+            logging.warning(
+                "list_all_week_transactions unavailable for league=%s — "
+                "season totals fall back to this week only",
+                league["id"],
+            )
+            season_transactions = list(transactions)
+        if not season_transactions:
+            season_transactions = list(transactions)
 
         season_stats = phases.get("season_stats", {}).get("payload_json", []) or []
         season_stats_ok = bool(season_stats)
@@ -427,6 +463,9 @@ def assemble_weekly_snapshot(
             lambda: league_api.transactions_week(scoring_period=week),
             warnings,
         )
+        # force_fresh is the live admin path; no per-week store to aggregate,
+        # so season totals degrade to this week's rows.
+        season_transactions = list(transactions or [])
         season_stats, season_stats_ok = _capture(
             "Season statistics",
             lambda: league_api.season_stats(weeks=weeks_csv),
@@ -496,6 +535,9 @@ def assemble_weekly_snapshot(
         standings=_with_evidence(standings, "standing", "team_id"),
         power_rankings=ranking_facts,
         transactions=_with_evidence(transactions, "transaction", "activity_id"),
+        season_transactions=_with_evidence(
+            season_transactions, "season-transaction", "activity_id"
+        ),
         season_stats=_with_evidence(season_stats, "season-stat", "Team"),
         award_candidates=[],
         data_quality=DataQualityReport(

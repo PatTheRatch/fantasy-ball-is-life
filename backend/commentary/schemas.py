@@ -87,6 +87,10 @@ class WeeklyFactSnapshot(BaseModel):
     standings: list[dict[str, Any]]
     power_rankings: list[dict[str, Any]]
     transactions: list[dict[str, Any]]
+    # Season-cumulative transactions through `week` (the per-week
+    # `transactions` above stays week-scoped for the newsroom feed).
+    # Powers season totals like the Standings tab's Moves/Trades columns.
+    season_transactions: list[dict[str, Any]] = []
     season_stats: list[dict[str, Any]]
     award_candidates: list[dict[str, Any]]
     data_quality: DataQualityReport

@@ -38,6 +38,8 @@ class TestSnapshotRead:
         mock_store = Mock()
         mock_store.get_all_phases.return_value = _make_phases()
         mock_store.get_week_scoreboard.return_value = None  # per-week: fall back to phases scoreboard
+        mock_store.get_week_transactions.return_value = None
+        mock_store.list_all_week_transactions.return_value = []
 
         with patch.object(assemble, "RecapStore", return_value=mock_store):
             with patch("backend.recaps.awards.select_awards", return_value=[]):
@@ -91,6 +93,8 @@ class TestSnapshotRead:
         mock_store = Mock()
         mock_store.get_all_phases.return_value = {}
         mock_store.get_week_scoreboard.return_value = None
+        mock_store.get_week_transactions.return_value = None
+        mock_store.list_all_week_transactions.return_value = []
 
         with patch.object(assemble, "RecapStore", return_value=mock_store):
             with patch("backend.recaps.awards.select_awards", return_value=[]):

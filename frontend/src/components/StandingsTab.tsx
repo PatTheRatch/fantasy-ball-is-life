@@ -83,25 +83,38 @@ export function StandingsTab({
   const stats = (snap?.season_stats ?? []) as Record<string, unknown>[]
   const rankings = (snap?.power_rankings ?? []) as Record<string, unknown>[]
 
+  // Season totals come from `season_transactions` (cumulative through this
+  // week). `transactions` is deliberately week-scoped for the newsroom feed,
+  // so counting it here only ever showed one week of Moves and almost never
+  // a Trade. Falls back to the week rows when season data isn't present yet.
+  const seasonTxns = useMemo(
+    () =>
+      ((snap?.season_transactions ?? snap?.transactions ?? []) as Record<
+        string,
+        unknown
+      >[]),
+    [snap?.season_transactions, snap?.transactions],
+  )
+
   const txnCounts = useMemo(() => {
     const m: Record<string, number> = {}
-    for (const t of (snap?.transactions ?? []) as Record<string, unknown>[]) {
+    for (const t of seasonTxns) {
       if (t.action_type !== 'ADD') continue
       const tn = norm(String(t.team_name ?? ''))
       if (tn) m[tn] = (m[tn] || 0) + 1
     }
     return m
-  }, [snap?.transactions])
+  }, [seasonTxns])
 
   const tradeCounts = useMemo(() => {
     const m: Record<string, number> = {}
-    for (const t of (snap?.transactions ?? []) as Record<string, unknown>[]) {
+    for (const t of seasonTxns) {
       if (t.action_type !== 'TRADE') continue
       const tn = norm(String(t.team_name ?? ''))
       if (tn) m[tn] = (m[tn] || 0) + 1
     }
     return m
-  }, [snap?.transactions])
+  }, [seasonTxns])
 
   const rows: Record<string, unknown>[] = useMemo(() => {
     const statsMap: Record<string, Record<string, unknown>> = {}

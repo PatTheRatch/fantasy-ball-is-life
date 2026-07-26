@@ -103,6 +103,58 @@ def _upsert_week_scoreboard(
     )
 
 
+def _upsert_week_transactions(
+    store: RecapStore,
+    league_id: str,
+    season: int,
+    week: int,
+    payload: object,
+) -> None:
+    """UPSERT one per-week transactions row (league_week_transactions)."""
+    now = datetime.now(timezone.utc).isoformat()
+    store._request(
+        "POST",
+        "league_week_transactions",
+        params={"on_conflict": "league_id,season,week"},
+        json={
+            "league_id": league_id,
+            "season": season,
+            "week": week,
+            "payload_json": payload,
+            "fetched_at": now,
+        },
+        prefer="resolution=merge-duplicates",
+    )
+
+
+def _backfill_week_transactions(
+    store: RecapStore,
+    handles: object,
+    league_id: str,
+    season: int,
+    current_week: int,
+) -> str:
+    """Ensure every past week (1..current_week-1) has stored transactions.
+
+    A completed week's transactions never change, so each is fetched once.
+    Per-week failures are isolated. Returns a summary string.
+    """
+    from backend.league import data_feed as feed
+
+    have = store.list_week_transaction_weeks(league_id=league_id, season=season)
+    missing = [w for w in range(1, current_week) if w not in have]
+    filled = failed = 0
+    for w in missing:
+        try:
+            rows = feed.week_transactions_for_week(handles, week=w)
+            _upsert_week_transactions(store, league_id, season, w, rows or [])
+            filled += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("Transaction backfill week %s failed: %s", w, exc)
+    return f"ok (filled {filled}, failed {failed}, skipped {len(have)})"
+
+
 def _backfill_week_scoreboards(
     store: RecapStore,
     handles: object,
@@ -286,8 +338,24 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
         # day. week_transactions_for_week() resolves the week's real scoring-
         # period window and fetches all transactions within it.
         txn_rows = feed.week_transactions_for_week(handles, week=week)
+        # Rolling latest-state row (existing behaviour) ...
         _upsert_phase(store, league_id, season, week, phase, txn_rows or [])
+        # ... plus a per-week copy so season-cumulative counts (Standings
+        # "Moves"/"Trades") aren't limited to the current week.
+        _upsert_week_transactions(store, league_id, season, week, txn_rows or [])
         results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
+
+    # ── week_transactions backfill ─────────────────────────────────────────
+    # Past weeks are immutable; fetch each missing one once. First refresh
+    # after this ships pulls weeks 1..(week-1); afterwards it's a no-op.
+    phase = "week_transactions_backfill"
+    try:
+        results[phase] = _backfill_week_transactions(
+            store, handles, league_id, season, week
+        )
     except Exception as exc:
         results[phase] = f"error: {exc}"
         logger.warning("Phase '%s' failed: %s", phase, exc)

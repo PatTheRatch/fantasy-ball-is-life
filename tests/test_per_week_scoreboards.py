@@ -114,6 +114,16 @@ def _league() -> dict:
 class TestAssembleReadPath:
     def _patch_phases(self, monkeypatch, latest_scoreboard):
         """Stored-read path: get_all_phases returns the rolling latest state."""
+        # Per-week transactions are a separate concern; stub them out so these
+        # scoreboard tests exercise only the scoreboard selection.
+        monkeypatch.setattr(
+            RecapStore, "get_week_transactions",
+            lambda self, *, league_id, season, week: None,
+        )
+        monkeypatch.setattr(
+            RecapStore, "list_all_week_transactions",
+            lambda self, *, league_id, season, through_week=None: [],
+        )
         monkeypatch.setattr(
             RecapStore,
             "get_all_phases",

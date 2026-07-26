@@ -257,7 +257,18 @@ def get_public_snapshot(
         # Reuse the already-computed snapshot; normalize the *_json columns into
         # the matchups/standings/... shape the tabs read.
         _normalize_stored_snapshot(edition, league)
-        return {"league": league, "snapshot": edition["snapshot"]}
+        snapshot = edition["snapshot"]
+        # A stored edition freezes only that week's transactions, so season
+        # totals (Standings Moves/Trades) would be week-limited on published
+        # weeks. The per-week rows are already stored, so aggregate them here
+        # rather than duplicating a column into league_week_snapshots.
+        try:
+            snapshot["season_transactions"] = store.list_all_week_transactions(
+                league_id=league["id"], season=season, through_week=week
+            ) or snapshot.get("transactions", [])
+        except RecapStoreError:
+            snapshot["season_transactions"] = snapshot.get("transactions", [])
+        return {"league": league, "snapshot": snapshot}
 
     # No stored snapshot yet — assemble deterministically from ESPN so the tabs
     # always have data.
