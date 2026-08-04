@@ -266,6 +266,34 @@ def season_stats(
     return {"data": payload or [], "fetched_at": fetched_at}
 
 
+@router.get("/playoff-schedule")
+def playoff_schedule() -> dict[str, Any]:
+    """Games per NBA team during THIS league's playoff weeks (W-1).
+
+    Playoff weeks derive from the league's own stored ESPN settings; game
+    counts come from the ESPN pro schedule (one live call — the NBA schedule
+    changes ~never mid-season, and the request-scoped ESPN cache absorbs
+    repeats within a request). Empty states (`reason`) are honest, never
+    errors: settings not yet snapshotted, or schedule not yet released.
+    """
+    from backend.league.playoff_schedule import build_playoff_schedule
+
+    settings_payload, _ = _snapshot_read("settings")
+
+    pro_schedule = None
+    try:
+        h = _handles()
+        pro_schedule = h.league.espn_request.get_pro_schedule()
+    except Exception as e:  # pre-release / ESPN outage → honest empty below
+        logging.warning("playoff-schedule: pro schedule unavailable: %s", e)
+
+    return build_playoff_schedule(
+        settings=settings_payload,
+        calendar_weeks=feed.get_matchup_weeks(),
+        pro_schedule=pro_schedule,
+    )
+
+
 @router.get("/rosters/{on_date}")
 def rosters_on_date(on_date: date) -> List[dict[str, Any]]:
     h = _handles()

@@ -14,6 +14,7 @@ import {
   formatApiError,
   getLeagueSettings,
   getLeagueTeams,
+  getPlayoffSchedule,
   postDraftCustomPlan,
   postDraftPick,
   postDraftPlans,
@@ -85,6 +86,21 @@ export function DraftPage() {
     queryFn: () => getLeagueSettings(slug),
     retry: 0,
   })
+
+  // W-3: NBA-team → games during this league's playoff weeks, for the
+  // roster table's PO G column (the late-round tiebreaker). The schedule
+  // changes ~never, so cache hard; pre-release the map is just null.
+  const playoffScheduleQuery = useQuery({
+    queryKey: ['playoff-schedule', slug],
+    queryFn: () => getPlayoffSchedule(slug),
+    staleTime: 24 * 60 * 60 * 1000,
+    retry: false,
+  })
+  const playoffTotals = useMemo(() => {
+    const teams = playoffScheduleQuery.data?.teams
+    if (!teams || teams.length === 0) return null
+    return Object.fromEntries(teams.map((t) => [t.pro_team, t.total]))
+  }, [playoffScheduleQuery.data])
 
   const generateMutation = useMutation({
     mutationFn: () => postDraftPlans({ ...params, picks }),
@@ -373,6 +389,7 @@ export function DraftPage() {
             onSelectPlan={setActivePlanId}
             ownedKeys={ownedKeys}
             targetKeys={targetKeys}
+            playoffTotals={playoffTotals}
           />
           <PlanRail
             budgetSpent={budgetSpent}
