@@ -511,3 +511,69 @@ class RecapStore:
                 seen.add(p)
                 result[p] = r
         return result
+
+    # ------------------------------------------------------------------
+    # NBA data ingest (FCP Projections M-1)
+    # ------------------------------------------------------------------
+
+    def upsert_nba_player_seasons(self, rows: list[dict[str, Any]]) -> None:
+        """Upsert player-season stat rows, keyed on (person_id, season)."""
+        if not rows:
+            return
+        self._request(
+            "POST",
+            "nba_player_seasons",
+            params={"on_conflict": "person_id,season"},
+            json=rows,
+            prefer="resolution=merge-duplicates",
+        )
+
+    def upsert_nba_player_bios(self, rows: list[dict[str, Any]]) -> None:
+        """Upsert player bio rows, keyed on person_id."""
+        if not rows:
+            return
+        self._request(
+            "POST",
+            "nba_player_bio",
+            params={"on_conflict": "person_id"},
+            json=rows,
+            prefer="resolution=merge-duplicates",
+        )
+
+    def has_nba_player_season(self, season: int) -> bool:
+        """True if at least one row is stored for the season (skip-check)."""
+        rows = self._request(
+            "GET",
+            "nba_player_seasons",
+            params={
+                "season": f"eq.{season}",
+                "select": "person_id",
+                "limit": "1",
+            },
+        )
+        return bool(rows)
+
+    def list_nba_bio_person_ids(self) -> set[int]:
+        """All person_ids with a stored bio. Paginated past PostgREST's
+        max_rows cap so the resumable bio backfill sees every stored row."""
+        ids: set[int] = set()
+        offset = 0
+        page_size = 1000
+        while True:
+            rows = (
+                self._request(
+                    "GET",
+                    "nba_player_bio",
+                    params={
+                        "select": "person_id",
+                        "order": "person_id.asc",
+                        "limit": str(page_size),
+                        "offset": str(offset),
+                    },
+                )
+                or []
+            )
+            ids.update(int(r["person_id"]) for r in rows)
+            if len(rows) < page_size:
+                return ids
+            offset += page_size
