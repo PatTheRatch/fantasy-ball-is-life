@@ -10,6 +10,7 @@ create table if not exists public.nba_player_bio (
     dob date,
     height text,                              -- e.g. "6-9"
     weight int,                               -- pounds
+    position text,                            -- e.g. "Forward", "Guard-Forward"
     draft_year int,
     draft_round int,
     draft_pick int,
