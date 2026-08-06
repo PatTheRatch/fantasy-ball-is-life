@@ -311,6 +311,25 @@ export async function getLeagueSettings(slug: string): Promise<LeagueSettings> {
   return data.data
 }
 
+export interface PlayoffScheduleTeam {
+  pro_team: string
+  games_by_week: Record<string, number>
+  total: number
+}
+
+export interface PlayoffScheduleResponse {
+  playoff_weeks: number[]
+  teams: PlayoffScheduleTeam[]
+  /** Present only on honest-empty responses: 'settings_unavailable' | 'schedule_unavailable'. */
+  reason?: string
+}
+
+/** W-1: games per NBA team during this league's playoff weeks. */
+export async function getPlayoffSchedule(slug: string): Promise<PlayoffScheduleResponse> {
+  const { data } = await client.get<PlayoffScheduleResponse>(leaguePath(slug, '/playoff-schedule'))
+  return data
+}
+
 export async function getSeasonStats(slug: string, weeks: string): Promise<JsonRecord[]> {
   const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath(slug, '/season-stats'), {
     params: { weeks },

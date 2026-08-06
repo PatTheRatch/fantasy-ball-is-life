@@ -360,10 +360,13 @@ export function RosterTable({
   plan,
   ownedKeys,
   targetKeys,
+  playoffTotals,
 }: {
   plan: DraftPlanSnapshot | null
   ownedKeys: Set<string>
   targetKeys: Set<string>
+  /** W-3: NBA-team → games in this league's playoff weeks (null pre-schedule). */
+  playoffTotals: Record<string, number> | null
 }) {
   if (!plan) return null
   return (
@@ -380,6 +383,9 @@ export function RosterTable({
               <th className="py-1.5 pr-2 text-left">Player</th>
               <th className="py-1.5 pr-2 text-right">$</th>
               <th className="py-1.5 pr-2 text-right">Max</th>
+              <th className="py-1.5 pr-2 text-right" title="NBA games during your league's playoff weeks">
+                PO G
+              </th>
               {CATS.map((c) => (
                 <th key={c} className="px-1 py-1.5 text-right">
                   {c}
@@ -395,6 +401,9 @@ export function RosterTable({
                 player={p}
                 owned={ownedKeys.has(p.player_key)}
                 targeted={targetKeys.has(p.player_key)}
+                playoffGames={
+                  playoffTotals?.[String(p.team ?? '').toUpperCase()] ?? null
+                }
               />
             ))}
           </tbody>
@@ -408,10 +417,13 @@ export function PlayerRowView({
   player,
   owned,
   targeted,
+  playoffGames = null,
 }: {
   player: DraftPlayerRow
   owned: boolean
   targeted: boolean
+  /** W-3: games this player's NBA team plays in your playoff weeks. */
+  playoffGames?: number | null
 }) {
   return (
     <tr className="border-b border-pg-border/60 font-mono text-xs">
@@ -420,6 +432,9 @@ export function PlayerRowView({
       <td className="py-1.5 pr-2 text-right text-slate-300">{fmtBid(player.value)}</td>
       <td className="py-1.5 pr-2 text-right font-semibold" style={{ color: ACCENT }}>
         {fmtBid(player.max_bid)}
+      </td>
+      <td className="py-1.5 pr-2 text-right text-slate-300">
+        {playoffGames ?? '—'}
       </td>
       <td className="px-1 py-1.5 text-right text-slate-300">{fmtStat(player.pts)}</td>
       <td className="px-1 py-1.5 text-right text-slate-300">{fmtStat(player.reb)}</td>
@@ -486,6 +501,7 @@ export function Board(props: {
   onSelectPlan: (id: string) => void
   ownedKeys: Set<string>
   targetKeys: Set<string>
+  playoffTotals: Record<string, number> | null
 }) {
   const {
     onBlockKey, setOnBlockKey, onCheck, checkPending, triageResult,
@@ -494,7 +510,7 @@ export function Board(props: {
     pickName, setPickName, pickPrice, setPickPrice, pickTeamId, setPickTeamId,
     onSubmitPick, activePlan, fallbackNext, everyPlanBroken,
     relaxProposal, onRelax, onAcceptRelax, relaxPending, relaxError,
-    plans, activePlanId, onSelectPlan, ownedKeys, targetKeys,
+    plans, activePlanId, onSelectPlan, ownedKeys, targetKeys, playoffTotals,
   } = props
 
   return (
@@ -537,7 +553,12 @@ export function Board(props: {
         />
       )}
       <PivotPlansStrip plans={plans} activePlanId={activePlanId} onSelect={onSelectPlan} />
-      <RosterTable plan={activePlan} ownedKeys={ownedKeys} targetKeys={targetKeys} />
+      <RosterTable
+        plan={activePlan}
+        ownedKeys={ownedKeys}
+        targetKeys={targetKeys}
+        playoffTotals={playoffTotals}
+      />
     </div>
   )
 }

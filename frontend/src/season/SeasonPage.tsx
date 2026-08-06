@@ -11,6 +11,7 @@ import {
 } from '../api'
 import { AiCommentaryCard } from '../components/AiCommentaryCard'
 import { WEEK_MAX, WEEK_MIN } from '../lib/matchupWeeks'
+import { PlayoffScheduleCard } from './PlayoffScheduleCard'
 import { Skeleton } from './Skeleton'
 import {
   ESPN_RED,
@@ -582,6 +583,8 @@ export function SeasonPage() {
           )}
         </section>
       </div>
+
+      <PlayoffScheduleCard slug={slug} />
 
       <section className="border-t border-slate-800/80 pt-4">
         <button
