@@ -330,6 +330,53 @@ export async function getPlayoffSchedule(slug: string): Promise<PlayoffScheduleR
   return data
 }
 
+export interface AccuracyCategoryScore {
+  mae: number
+  mae_pct: number | null
+  /** Signed mean error: positive = the source over-projects this category. */
+  bias: number
+  /** Spearman rank correlation across fantasy teams; null when undefined. */
+  rank_corr: number | null
+  teams?: number
+  weeks?: number
+}
+
+export interface AccuracySourceSummary {
+  source: string
+  weeks_scored: number
+  per_category: Record<string, AccuracyCategoryScore>
+}
+
+export interface AccuracyWeekEntry {
+  source: string
+  week: number
+  set_id: string
+  uploaded_at: string
+  players_unassigned: number
+  teams_matched: number
+  teams_total: number
+  per_category: Record<string, AccuracyCategoryScore>
+}
+
+export interface ProjectionAccuracyResponse {
+  league: string
+  season: number
+  weeks_with_actuals: number[]
+  sources: AccuracySourceSummary[]
+  weeks: AccuracyWeekEntry[]
+  unscoreable: { source: string; week: number; reason: string }[]
+  /** Present only on honest-empty responses (e.g. 'league_not_snapshotted'). */
+  reason?: string
+}
+
+/** M-2: projected-vs-actual scoring for every stored projection source. */
+export async function getProjectionAccuracy(slug: string): Promise<ProjectionAccuracyResponse> {
+  const { data } = await client.get<ProjectionAccuracyResponse>(
+    leaguePath(slug, '/projection-accuracy'),
+  )
+  return data
+}
+
 export async function getSeasonStats(slug: string, weeks: string): Promise<JsonRecord[]> {
   const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(leaguePath(slug, '/season-stats'), {
     params: { weeks },

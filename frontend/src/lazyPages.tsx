@@ -9,6 +9,9 @@ const MatchupWeekPageLazy = lazy(() =>
 const SeasonLazy = lazy(() =>
   import('./pages/Season').then((m) => ({ default: m.Season })),
 )
+const AccuracyPageLazy = lazy(() =>
+  import('./pages/AccuracyPage').then((m) => ({ default: m.AccuracyPage })),
+)
 
 function withSuspense(node: ReactNode) {
   return <Suspense fallback={<p className="text-slate-400">Loading…</p>}>{node}</Suspense>
@@ -25,4 +28,9 @@ export function MatchupWeekPageRoute() {
 
 export function SeasonRoute() {
   return withSuspense(<SeasonLazy />)
+}
+
+/** M-2: internal projection-accuracy scoreboard. */
+export function AccuracyPageRoute() {
+  return withSuspense(<AccuracyPageLazy />)
 }
