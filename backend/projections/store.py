@@ -64,6 +64,9 @@ class ProjectionSet:
     matched_count: int = 0
     unmatched_players: list[str] = field(default_factory=list)
     week: Optional[int] = None              # P-6: matchup week (for horizon='week')
+    league_slug: Optional[str] = None       # M-2: league-scoped sets (ESPN week
+                                            # snapshots embed one league's rosters);
+                                            # None = global (BBM/Hashtag uploads)
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +96,7 @@ class _Manifest:
                     "matched_count": s.matched_count,
                     "unmatched_players": s.unmatched_players,
                     "week": s.week,
+                    "league_slug": s.league_slug,
                 }
                 for s in self.sets
             ],
@@ -111,6 +115,7 @@ class _Manifest:
                 matched_count=s.get("matched_count", 0),
                 unmatched_players=s.get("unmatched_players", []),
                 week=s.get("week"),
+                league_slug=s.get("league_slug"),
             )
             for s in data.get("sets", [])
         ]
@@ -163,12 +168,19 @@ class ProjectionStore:
         matched_count: int = 0,
         unmatched_players: Optional[Sequence[str]] = None,
         week: Optional[int] = None,
+        league_slug: Optional[str] = None,
+        activate: bool = True,
     ) -> ProjectionSet:
         """Persist canonical projection rows as parquet.  Atomic write.
 
         For ``horizon='week'``, the ``week`` field scopes this set to a
         specific matchup period.  When omitted, the caller should pass it
         explicitly (the router defaults it from the ESPN matchup period).
+
+        M-2: ``activate=False`` records the set without promoting it to the
+        horizon's active slot — used by the worker's weekly ESPN snapshot so
+        benchmarking data never hijacks the user's chosen projection source.
+        ``league_slug`` marks a set as scoped to one league's rosters.
         """
         if uploaded_at is None:
             uploaded_at = datetime.now(timezone.utc).isoformat()
@@ -194,9 +206,11 @@ class ProjectionStore:
             matched_count=matched_count,
             unmatched_players=list(unmatched_players or []),
             week=week,
+            league_slug=league_slug,
         )
         self._manifest.sets.insert(0, pset)
-        self._manifest.active[horizon] = set_id
+        if activate:
+            self._manifest.active[horizon] = set_id
         self._save_manifest()
         return pset
 

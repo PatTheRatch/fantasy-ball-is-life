@@ -482,6 +482,28 @@ class RecapStore:
         )
         return rows[0] if rows else None
 
+    def get_current_snapshot_week(
+        self, *, league_id: str, season: int
+    ) -> int | None:
+        """Matchup week of the freshest stored snapshot, or None.
+
+        Cheap current-week lookup (no payloads) — used by the accuracy
+        scoreboard to exclude the in-progress week from scoring."""
+        rows = self._request(
+            "GET",
+            "league_state_snapshots",
+            params={
+                "league_id": f"eq.{league_id}",
+                "season": f"eq.{season}",
+                "select": "week",
+                "order": "fetched_at.desc",
+                "limit": "1",
+            },
+        )
+        if not rows or rows[0].get("week") is None:
+            return None
+        return int(rows[0]["week"])
+
     def get_all_phases(
         self,
         *,

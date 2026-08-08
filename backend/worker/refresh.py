@@ -244,6 +244,49 @@ def _backfill_week_scoreboards(
     return f"ok (filled {filled}, failed {failed}, skipped {len(have)})"
 
 
+def _snapshot_week_projections(
+    slug: str, handles: object, week: int, *, pstore: object | None = None
+) -> str:
+    """M-2: persist this week's ESPN-15 projection as a benchmark snapshot.
+
+    ESPN week projections are otherwise live-only (the virtual set) — nothing
+    records what ESPN projected at the time, so past weeks can never be
+    scored. One snapshot per (league, week), saved with ``activate=False`` so
+    the user's active projection choice (e.g. a BBM upload) is never touched.
+    Re-runs within the same week are no-ops.
+    """
+    from backend.projections.adapter import EspnAdapter
+    from backend.projections.store import ESPN_VIRTUAL_SET_ID, ProjectionStore
+
+    if pstore is None:
+        pstore = ProjectionStore()
+    existing = [
+        s
+        for s in pstore.list_sets(source="espn", horizon="week")
+        if s.set_id != ESPN_VIRTUAL_SET_ID
+        and s.week == week
+        and s.league_slug == slug
+    ]
+    if existing:
+        return f"ok (week {week} already snapshotted)"
+
+    rows = EspnAdapter(window=15).parse(
+        handles=handles, current_matchup_period=week
+    )
+    if not rows:
+        return "skipped (no rostered players)"
+
+    pset = pstore.save_set(
+        rows,
+        "espn",
+        "week",
+        week=week,
+        league_slug=slug,
+        activate=False,
+    )
+    return f"ok (snapshot {pset.set_id[:8]}, {len(rows)} players)"
+
+
 def refresh_league(*, slug: str | None = None) -> dict[str, str]:
     """Refresh all phases for one league from live ESPN.
 
@@ -345,6 +388,16 @@ def refresh_league(*, slug: str | None = None) -> dict[str, str]:
         # ... plus an immutable per-week copy so past weeks render correctly.
         _upsert_week_scoreboard(store, league_id, season, week, scoreboard_rows)
         results[phase] = "ok"
+    except Exception as exc:
+        results[phase] = f"error: {exc}"
+        logger.warning("Phase '%s' failed: %s", phase, exc)
+
+    # ── projection snapshot (M-2 accuracy scoreboard) ──────────────────────
+    # Record what ESPN-15 projects for the current week, once per week, so
+    # the accuracy scoreboard can score it after the week completes.
+    phase = "projection_snapshot"
+    try:
+        results[phase] = _snapshot_week_projections(ctx.slug, handles, week)
     except Exception as exc:
         results[phase] = f"error: {exc}"
         logger.warning("Phase '%s' failed: %s", phase, exc)

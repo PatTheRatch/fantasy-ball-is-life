@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppLayout } from './layouts/AppLayout'
 import {
+  AccuracyPageRoute,
   DraftPageRoute,
   MatchupWeekPageRoute,
   SeasonRoute,
@@ -58,6 +59,8 @@ export const router = createBrowserRouter([
       { path: 'season', element: <SeasonRoute /> },
       // N-3: league-scoped season tools (bare /season keeps the default league).
       { path: 'leagues/:slug/season', element: <SeasonRoute /> },
+      // M-2: internal projection-accuracy scoreboard.
+      { path: 'leagues/:slug/accuracy', element: <AccuracyPageRoute /> },
       // N-4d: create-league wizard (login-required).
       {
         path: 'leagues/new',

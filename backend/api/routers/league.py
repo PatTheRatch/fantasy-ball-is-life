@@ -294,6 +294,53 @@ def playoff_schedule() -> dict[str, Any]:
     )
 
 
+@router.get("/projection-accuracy")
+def projection_accuracy() -> dict[str, Any]:
+    """M-2: the projection accuracy scoreboard (internal page data).
+
+    Scores every stored week-horizon projection set (BBM uploads, the
+    worker's weekly ESPN snapshots, later FCP) against the actual weekly
+    team totals in ``league_week_scoreboards``. The current in-progress
+    week is excluded — partial actuals aren't a fair target. Missing data
+    is reported as reasons (``unscoreable``), never errors.
+    """
+    from backend.api.deps import _resolve_ctx, _resolve_league_uuid
+    from backend.projections.accuracy import build_accuracy_scoreboard
+    from backend.recaps.store import RecapStore, RecapStoreError
+
+    ctx = _resolve_ctx()
+    league_uuid = _resolve_league_uuid(ctx.espn_league_id)
+    if not league_uuid:
+        return {
+            "league": ctx.slug,
+            "season": ctx.espn_season,
+            "weeks_with_actuals": [],
+            "sources": [],
+            "weeks": [],
+            "unscoreable": [],
+            "reason": "league_not_snapshotted",
+        }
+
+    store = RecapStore()
+    try:
+        current_week = store.get_current_snapshot_week(
+            league_id=league_uuid, season=ctx.espn_season
+        )
+    except RecapStoreError:
+        current_week = None
+
+    try:
+        return build_accuracy_scoreboard(
+            recap_store=store,
+            league_id=league_uuid,
+            league_slug=ctx.slug,
+            season=ctx.espn_season,
+            current_week=current_week,
+        )
+    except RecapStoreError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
 @router.get("/rosters/{on_date}")
 def rosters_on_date(on_date: date) -> List[dict[str, Any]]:
     h = _handles()
