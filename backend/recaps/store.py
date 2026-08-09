@@ -599,3 +599,66 @@ class RecapStore:
             if len(rows) < page_size:
                 return ids
             offset += page_size
+
+    def list_nba_player_seasons(
+        self, *, season: int | None = None
+    ) -> list[dict[str, Any]]:
+        """All stored player-season rows, optionally filtered by season.
+
+        Paginated past PostgREST's 1,000-row cap because the full table is
+        ~8,000 rows.  Returns bare dicts keyed to the M-1 migration columns
+        (per-game averages; minutes is the season total; usg_pct / team_pace
+        / team_ortg may be None).
+        """
+        params: dict[str, str] = {
+            "select": (
+                "person_id,normalized_name,display_name,season,age,team,position,"
+                "gp,gs,minutes,mpg,fgm,fga,ftm,fta,tpm,tpa,tov,usg_pct,"
+                "pts,reb,ast,stl,blk,team_pace,team_ortg,fetched_at"
+            ),
+            "order": "person_id.asc,season.asc",
+        }
+        if season is not None:
+            params["season"] = f"eq.{season}"
+
+        all_rows: list[dict[str, Any]] = []
+        offset = 0
+        page_size = 1000
+        while True:
+            page_params = {**params, "limit": str(page_size), "offset": str(offset)}
+            rows = self._request("GET", "nba_player_seasons", params=page_params) or []
+            all_rows.extend(rows)
+            if len(rows) < page_size:
+                return all_rows
+            offset += page_size
+
+    def list_nba_player_bios(self) -> list[dict[str, Any]]:
+        """All stored player bio rows, paginated past the 1,000-row cap.
+
+        Returns bare dicts keyed to the M-1 migration columns.
+        """
+        all_rows: list[dict[str, Any]] = []
+        offset = 0
+        page_size = 1000
+        while True:
+            rows = (
+                self._request(
+                    "GET",
+                    "nba_player_bio",
+                    params={
+                        "select": (
+                            "person_id,normalized_name,display_name,dob,"
+                            "height,weight,draft_year,draft_round,draft_pick,"
+                            "experience,fetched_at"
+                        ),
+                        "order": "person_id.asc",
+                        "limit": str(page_size),
+                        "offset": str(offset),
+                    },
+                )
+                or []
+            )
+            all_rows.extend(rows)
+            if len(rows) < page_size:
+                return all_rows
+            offset += page_size
