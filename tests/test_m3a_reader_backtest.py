@@ -156,7 +156,8 @@ class TestEvaluate:
 
         result = evaluate(pred, actual)
         assert result.players_evaluated == 2
-        assert result.players_excluded == 0
+        assert result.excluded_low_gp == 0
+        assert result.excluded_no_prediction == 0
         for cat in CATEGORIES:
             assert result.mae[cat] == pytest.approx(0.0, abs=1e-9), f"{cat} MAE not zero"
 
@@ -254,10 +255,11 @@ class TestEvaluate:
 
         result = evaluate(pred, actual, min_gp=20)
         assert result.players_evaluated == 2  # player 3 excluded by GP
-        assert result.players_excluded == 1
+        assert result.excluded_low_gp == 1
+        assert result.excluded_no_prediction == 0
 
     def test_rookie_excluded_count(self):
-        """Players in actuals but not in predictions are counted as excluded."""
+        """A qualified player with no prediction row is counted, not vanished."""
         pred = pd.DataFrame({
             "person_id": [1],
             "pts": [25.0], "reb": [7.0], "ast": [6.0],
@@ -276,15 +278,40 @@ class TestEvaluate:
         })
 
         result = evaluate(pred, actual)
-        # Player 2 is in actuals but not in predictions → excluded from inner merge
-        assert result.players_evaluated == 1  # only player 1 evaluated
-        assert result.players_excluded == 0  # excluded_by_gp count, not the rookie count
+        assert result.players_evaluated == 1
+        assert result.excluded_no_prediction == 1
+        assert result.excluded_low_gp == 0
 
-        # The merge is inner, so player 2 is simply not evaluated.
-        # The naive_baseline function would report the count of players in
-        # actuals that weren't in predictions — that's the "rookie" count.
-        # Let me verify the merge is inner join.
-        assert 2 not in pred["person_id"].values
+    def test_pct_nan_error_drops_weight_from_denominator(self):
+        """A player whose predicted percentage is undefined (0 attempts)
+        contributes neither error nor weight — their actual attempts must
+        not dilute the weighted MAE."""
+        pred = pd.DataFrame({
+            "person_id": [1, 2],
+            "pts": [25.0, 20.0], "reb": [7.0, 4.0], "ast": [6.0, 3.0],
+            "stl": [1.0, 1.0], "blk": [0.5, 0.5], "tpm": [2.0, 1.5],
+            "tov": [3.0, 2.0],
+            # Player 1: no predicted FT attempts → FT% undefined
+            "fgm": [9.0, 7.0], "fga": [18.0, 14.0],
+            "ftm": [0.0, 4.0], "fta": [0.0, 5.0],
+        })
+        actual = pd.DataFrame({
+            "person_id": [1, 2],
+            "season": [2024, 2024],
+            "gp": [75, 80],
+            "pts": [25.0, 20.0], "reb": [7.0, 4.0], "ast": [6.0, 3.0],
+            "stl": [1.0, 1.0], "blk": [0.5, 0.5], "tpm": [2.0, 1.5],
+            "tov": [3.0, 2.0],
+            "fgm": [9.0, 7.0], "fga": [18.0, 14.0],
+            # Player 1 really took 6.0 FTA/game; player 2's FT% missed by 0.10
+            "ftm": [4.0, 3.5], "fta": [6.0, 5.0],
+        })
+
+        result = evaluate(pred, actual)
+        # Only player 2 has a defined FT% error: |0.8 - 0.7| = 0.10.
+        # If player 1's 6.0 actual FTA leaked into the denominator the MAE
+        # would read 0.045 — the bug this guards against.
+        assert result.mae["ft_pct"] == pytest.approx(0.10, abs=1e-6)
 
 
 # ── backtest: naive baseline (via mocked store) ───────────────────────────────
@@ -307,7 +334,8 @@ class TestNaiveBaseline:
 
         result = naive_baseline(store, target_season=2024, min_gp=20)
         assert result.players_evaluated == 2
-        assert result.players_excluded == 0
+        assert result.excluded_low_gp == 0
+        assert result.excluded_no_prediction == 0
         for cat in CATEGORIES:
             assert result.mae[cat] == pytest.approx(0.0, abs=1e-9), f"{cat} MAE not zero"
 
@@ -345,18 +373,18 @@ class TestNaiveBaseline:
 
         result = naive_baseline(store, target_season=2024, min_gp=20)
 
-        # Only player 1 evaluated (has N-1). Player 2 is a rookie — no prior.
+        # Only player 1 evaluated (has N-1). Player 2 is a rookie — no
+        # prior season, so no prediction — and is REPORTED, never vanished.
         assert result.players_evaluated == 1
-        # The "excluded" count from evaluate is for GP filter; the rookie
-        # is simply not in the prediction set to begin with.
-        # The merge is inner, so player 2 just doesn't appear.
-        assert result.players_excluded == 0  # no GP-based exclusion
+        assert result.excluded_no_prediction == 1
+        assert result.excluded_low_gp == 0
 
     def test_backtest_result_repr_and_table(self):
         result = BacktestResult(
             season=2024,
             players_evaluated=200,
-            players_excluded=15,
+            excluded_low_gp=15,
+            excluded_no_prediction=40,
             mae={
                 "pts": 3.21, "reb": 1.87, "ast": 1.54,
                 "stl": 0.33, "blk": 0.28, "tpm": 0.62,
@@ -368,6 +396,9 @@ class TestNaiveBaseline:
         assert "200" in repr(result)
         assert "pts" in table
         assert "3.21" in table
+        # Both exclusion counts surface in the human-readable table
+        assert "15" in table
+        assert "40" in table
 
     def test_empty_store_graceful(self):
         """Empty store → no crash, sensible result."""
@@ -376,6 +407,8 @@ class TestNaiveBaseline:
 
         result = naive_baseline(store, target_season=2024)
         assert result.players_evaluated == 0
+        assert result.excluded_low_gp == 0
+        assert result.excluded_no_prediction == 0
         assert all(np.isnan(v) for v in result.mae.values())
 
 
@@ -399,13 +432,52 @@ class TestSafePct:
 class TestRecapStoreReadMethods:
     """Verify the new reader methods handle pagination correctly."""
 
-    def test_list_nba_player_seasons_paginates(self):
-        """list_nba_player_seasons paginates past 1000 rows."""
+    def test_list_nba_player_seasons_paginates(self, monkeypatch):
+        """A full 1000-row page triggers a second request at offset 1000."""
         store = RecapStore(url="http://test", service_role_key="test-key")
-        store.timeout = 1.0
 
-        # Instead of hitting a real server, let's just verify the method
-        # signature and that it accepts the season kwarg.
-        import inspect
-        sig = inspect.signature(store.list_nba_player_seasons)
-        assert "season" in sig.parameters
+        page1 = [{"person_id": i, "season": 2024} for i in range(1000)]
+        page2 = [{"person_id": 1000 + i, "season": 2024} for i in range(371)]
+        calls: list[dict] = []
+
+        def _fake_request(method, path, *, params=None, json=None, prefer=None):
+            calls.append(params)
+            return page1 if params["offset"] == "0" else page2
+
+        monkeypatch.setattr(store, "_request", _fake_request)
+
+        rows = store.list_nba_player_seasons(season=2024)
+        assert len(rows) == 1371
+        assert [c["offset"] for c in calls] == ["0", "1000"]
+        assert all(c["season"] == "eq.2024" for c in calls)
+
+    def test_list_nba_player_seasons_short_page_stops(self, monkeypatch):
+        """A short page (< 1000 rows) ends pagination after one request."""
+        store = RecapStore(url="http://test", service_role_key="test-key")
+        calls: list[dict] = []
+
+        def _fake_request(method, path, *, params=None, json=None, prefer=None):
+            calls.append(params)
+            return [{"person_id": 1, "season": 2024}]
+
+        monkeypatch.setattr(store, "_request", _fake_request)
+
+        rows = store.list_nba_player_seasons()
+        assert len(rows) == 1
+        assert len(calls) == 1
+        assert "season" not in calls[0]  # no filter when season is omitted
+
+    def test_list_nba_player_bios_includes_position(self, monkeypatch):
+        """The bio select carries position — M-3b's regression-to-position-
+        means needs it."""
+        store = RecapStore(url="http://test", service_role_key="test-key")
+        seen: list[dict] = []
+
+        def _fake_request(method, path, *, params=None, json=None, prefer=None):
+            seen.append(params)
+            return []
+
+        monkeypatch.setattr(store, "_request", _fake_request)
+
+        store.list_nba_player_bios()
+        assert "position" in seen[0]["select"]

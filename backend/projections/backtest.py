@@ -47,19 +47,30 @@ _CAT_MAP: dict[str, str] = {
 
 @dataclass
 class BacktestResult:
-    """One backtest run — per-category MAE + player counts."""
+    """One backtest run — per-category MAE + player counts.
+
+    The two exclusion counts answer different questions and must never be
+    conflated: ``excluded_low_gp`` is the target-season sample filter
+    (below ``min_gp``); ``excluded_no_prediction`` is qualified players the
+    prediction set has no row for — for the naive baseline that means no
+    prior season, i.e. rookies (M-5's job). Both are reported, never
+    silently dropped.
+    """
 
     season: int
     players_evaluated: int
-    players_excluded: int  # no prior season = rookie = excluded (M-5's job)
-    mae: dict[str, float]  # category → mean absolute error
+    excluded_low_gp: int          # below min_gp in the target season
+    excluded_no_prediction: int   # qualified but absent from predictions (rookies)
+    mae: dict[str, float]         # category → mean absolute error
     # Raw data for inspection / plotting (optional)
     errors_df: pd.DataFrame | None = None
 
     def __repr__(self) -> str:
         lines = [
             f"BacktestResult(season={self.season}, "
-            f"n={self.players_evaluated}, excluded={self.players_excluded})"
+            f"n={self.players_evaluated}, "
+            f"excluded_low_gp={self.excluded_low_gp}, "
+            f"excluded_no_prediction={self.excluded_no_prediction})"
         ]
         for cat, val in self.mae.items():
             lines.append(f"  {cat:>6s}: {val:.4f}")
@@ -76,7 +87,9 @@ class BacktestResult:
         rows.append("")
         rows.append(
             f"  Evaluated: {self.players_evaluated}  "
-            f"Excluded (no prior season): {self.players_excluded}"
+            f"Excluded: {self.excluded_low_gp} below min GP, "
+            f"{self.excluded_no_prediction} without a prediction "
+            f"(no prior season = rookie, M-5's job)"
         )
         return "\n".join(rows)
 
@@ -109,7 +122,7 @@ def evaluate(
     """
     # Filter actuals to players with sufficient GP
     qualified = actuals[actuals["gp"] >= min_gp].copy()
-    excluded_count = actuals["person_id"].nunique() - qualified["person_id"].nunique()
+    excluded_low_gp = actuals["person_id"].nunique() - qualified["person_id"].nunique()
 
     # Merge on person_id
     merged = pd.merge(
@@ -122,12 +135,16 @@ def evaluate(
     )
 
     players_evaluated = merged["person_id"].nunique()
+    # Qualified players the prediction set has no row for. The inner merge
+    # drops them silently — count them so they're reported, not vanished.
+    excluded_no_prediction = qualified["person_id"].nunique() - players_evaluated
 
     if players_evaluated == 0:
         return BacktestResult(
             season=int(qualified["season"].iloc[0]) if len(qualified) > 0 else 0,
             players_evaluated=0,
-            players_excluded=excluded_count,
+            excluded_low_gp=excluded_low_gp,
+            excluded_no_prediction=excluded_no_prediction,
             mae={cat: float("nan") for cat in CATEGORIES},
         )
 
@@ -143,23 +160,13 @@ def evaluate(
     fg_pct_pred = _safe_pct(merged["fgm_pred"], merged["fga_pred"])
     fg_pct_actual = _safe_pct(merged["fgm_actual"], merged["fga_actual"])
     fg_errors = (fg_pct_pred - fg_pct_actual).abs()
-    fg_weights = merged["fga_actual"]
-    mae["fg_pct"] = float(
-        (fg_errors * fg_weights).sum() / fg_weights.sum()
-        if fg_weights.sum() > 0
-        else float("nan")
-    )
+    mae["fg_pct"] = _weighted_mae(fg_errors, merged["fga_actual"])
 
     # FT% — attempt-weighted
     ft_pct_pred = _safe_pct(merged["ftm_pred"], merged["fta_pred"])
     ft_pct_actual = _safe_pct(merged["ftm_actual"], merged["fta_actual"])
     ft_errors = (ft_pct_pred - ft_pct_actual).abs()
-    ft_weights = merged["fta_actual"]
-    mae["ft_pct"] = float(
-        (ft_errors * ft_weights).sum() / ft_weights.sum()
-        if ft_weights.sum() > 0
-        else float("nan")
-    )
+    mae["ft_pct"] = _weighted_mae(ft_errors, merged["fta_actual"])
 
     # Build per-player error DataFrame for inspection
     errors_df = merged[["person_id", "gp"]].copy()
@@ -174,7 +181,8 @@ def evaluate(
     return BacktestResult(
         season=season_val,
         players_evaluated=players_evaluated,
-        players_excluded=excluded_count,
+        excluded_low_gp=excluded_low_gp,
+        excluded_no_prediction=excluded_no_prediction,
         mae=mae,
         errors_df=errors_df,
     )
@@ -206,7 +214,8 @@ def naive_baseline(
         return BacktestResult(
             season=target_season,
             players_evaluated=0,
-            players_excluded=0,
+            excluded_low_gp=0,
+            excluded_no_prediction=0,
             mae={cat: float("nan") for cat in CATEGORIES},
         )
 
@@ -218,9 +227,7 @@ def naive_baseline(
     # Actuals: target season stats
     actual = df[df["season"] == target_season].copy()
 
-    # Rename prior columns to "pred" for the evaluate merge
     pred_cols = list(_CAT_MAP.values()) + ["fgm", "fga", "ftm", "fta"]
-    rename = {c: c for c in pred_cols}  # evaluate expects no suffix on pred
     predictions = prior[["person_id"] + pred_cols].copy()
 
     # Actuals need gp for min_gp filter + season
@@ -286,3 +293,17 @@ def _safe_pct(makes: pd.Series, attempts: pd.Series) -> pd.Series:
     """Derive percentages safely — 0 / 0 → NaN, not inf."""
     result = makes / attempts.replace(0, float("nan"))
     return result.clip(0.0, 1.0)
+
+
+def _weighted_mae(errors: pd.Series, weights: pd.Series) -> float:
+    """Weighted MAE where a NaN error drops the player from BOTH sides.
+
+    A player with an undefined percentage (0 attempts on either side)
+    contributes neither error nor weight — leaving their attempts in the
+    denominator would silently understate the MAE.
+    """
+    mask = errors.notna()
+    denom = weights[mask].sum()
+    if denom <= 0:
+        return float("nan")
+    return float((errors[mask] * weights[mask]).sum() / denom)

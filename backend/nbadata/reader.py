@@ -51,7 +51,7 @@ def read_player_seasons(
     """Read all nba_player_seasons rows, optionally filtered by season.
 
     Returns a DataFrame with the M-1 data contract:
-      - Stats are per-game averages (the ingest stores totals, derived as rates here).
+      - Stats are per-game averages, exactly as the ingest stored them.
       - ``minutes`` is the season total; ``mpg`` is minutes/game.
       - ``usg_pct``, ``team_pace``, ``team_ortg`` may be NaN (advanced data
         is fetched in a second pass that may not have run yet).
@@ -95,8 +95,8 @@ def read_player_bios(store: RecapStore) -> pd.DataFrame:
         )
         return pd.DataFrame(columns=[
             "person_id", "normalized_name", "display_name", "dob",
-            "height", "weight", "draft_year", "draft_round", "draft_pick",
-            "experience",
+            "height", "weight", "position", "draft_year", "draft_round",
+            "draft_pick", "experience",
         ])
 
     df = pd.DataFrame(rows)

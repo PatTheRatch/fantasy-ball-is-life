@@ -648,8 +648,8 @@ class RecapStore:
                     params={
                         "select": (
                             "person_id,normalized_name,display_name,dob,"
-                            "height,weight,draft_year,draft_round,draft_pick,"
-                            "experience,fetched_at"
+                            "height,weight,position,draft_year,draft_round,"
+                            "draft_pick,experience,fetched_at"
                         ),
                         "order": "person_id.asc",
                         "limit": str(page_size),
