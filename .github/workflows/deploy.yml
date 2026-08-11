@@ -17,7 +17,7 @@ jobs:
           # Pinned (not 'latest'): resolving 'latest' hits the GitHub API
           # unauthenticated from shared runners and rate-limits, which
           # killed the migrate job. v3 + a fixed version resolves via npm.
-          version: 2.84.2
+          version: 2.113.0
 
       - name: Start local Supabase
         run: supabase start
@@ -81,7 +81,7 @@ jobs:
           # Pinned (not 'latest'): resolving 'latest' hits the GitHub API
           # unauthenticated from shared runners and rate-limits, which
           # killed the migrate job. v3 + a fixed version resolves via npm.
-          version: 2.84.2
+          version: 2.113.0
       - name: Link + push migrations to production
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
