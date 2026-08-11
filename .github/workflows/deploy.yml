@@ -12,9 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
-          version: latest
+          # Pinned (not 'latest'): resolving 'latest' hits the GitHub API
+          # unauthenticated from shared runners and rate-limits, which
+          # killed the migrate job. v3 + a fixed version resolves via npm.
+          version: 2.84.2
 
       - name: Start local Supabase
         run: supabase start
@@ -73,9 +76,12 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
-          version: latest
+          # Pinned (not 'latest'): resolving 'latest' hits the GitHub API
+          # unauthenticated from shared runners and rate-limits, which
+          # killed the migrate job. v3 + a fixed version resolves via npm.
+          version: 2.84.2
       - name: Link + push migrations to production
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
