@@ -1,0 +1,172 @@
+{
+  "2025": {
+    "consolationLadderDisabled": false,
+    "divisions": [
+      {
+        "id": 1,
+        "name": "UK",
+        "size": 12
+      }
+    ],
+    "matchupPeriodCount": 17,
+    "matchupPeriodLength": 1,
+    "matchupPeriods": {
+      "1": [
+        1
+      ],
+      "10": [
+        10
+      ],
+      "11": [
+        11
+      ],
+      "12": [
+        12
+      ],
+      "13": [
+        13
+      ],
+      "14": [
+        14
+      ],
+      "15": [
+        15
+      ],
+      "16": [
+        16
+      ],
+      "17": [
+        17
+      ],
+      "18": [
+        18
+      ],
+      "19": [
+        19
+      ],
+      "2": [
+        2
+      ],
+      "20": [
+        20
+      ],
+      "3": [
+        3
+      ],
+      "4": [
+        4
+      ],
+      "5": [
+        5
+      ],
+      "6": [
+        6
+      ],
+      "7": [
+        7
+      ],
+      "8": [
+        8
+      ],
+      "9": [
+        9
+      ]
+    },
+    "periodTypeId": 2,
+    "playoffMatchupPeriodLength": 1,
+    "playoffMatchupPeriodLengthByRound": {},
+    "playoffReseed": true,
+    "playoffSeedingRule": "INTRA_DIVISION_RECORD",
+    "playoffSeedingRuleBy": 0,
+    "playoffTeamCount": 6,
+    "variablePlayoffMatchupPeriodLength": false
+  },
+  "2026": {
+    "consolationLadderDisabled": false,
+    "divisions": [
+      {
+        "id": 1,
+        "name": "UK",
+        "size": 14
+      }
+    ],
+    "matchupPeriodCount": 19,
+    "matchupPeriodLength": 1,
+    "matchupPeriods": {
+      "1": [
+        1
+      ],
+      "10": [
+        10
+      ],
+      "11": [
+        11
+      ],
+      "12": [
+        12
+      ],
+      "13": [
+        13
+      ],
+      "14": [
+        14
+      ],
+      "15": [
+        15
+      ],
+      "16": [
+        16
+      ],
+      "17": [
+        17
+      ],
+      "18": [
+        18
+      ],
+      "19": [
+        19
+      ],
+      "2": [
+        2
+      ],
+      "20": [
+        20
+      ],
+      "21": [
+        21
+      ],
+      "22": [
+        22
+      ],
+      "3": [
+        3
+      ],
+      "4": [
+        4
+      ],
+      "5": [
+        5
+      ],
+      "6": [
+        6
+      ],
+      "7": [
+        7
+      ],
+      "8": [
+        8
+      ],
+      "9": [
+        9
+      ]
+    },
+    "periodTypeId": 2,
+    "playoffMatchupPeriodLength": 1,
+    "playoffMatchupPeriodLengthByRound": {},
+    "playoffReseed": true,
+    "playoffSeedingRule": "H2H_RECORD",
+    "playoffSeedingRuleBy": 0,
+    "playoffTeamCount": 7,
+    "variablePlayoffMatchupPeriodLength": false
+  }
+}
