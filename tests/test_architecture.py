@@ -109,9 +109,7 @@ def test_routers_do_not_import_repos_models_or_sqlalchemy() -> None:
     offences: list[str] = []
     for path in sorted(routers.rglob("*.py")):
         for imported in _imported_roots(path):
-            if imported == "sqlalchemy" or imported.startswith(
-                ("backend.repos", "backend.models")
-            ):
+            if imported.startswith(("sqlalchemy", "backend.repos", "backend.models")):
                 offences.append(f"{path.relative_to(REPO)} imports {imported}")
     assert not offences, "routers must not import repos/models/sqlalchemy:\n" + "\n".join(
         offences

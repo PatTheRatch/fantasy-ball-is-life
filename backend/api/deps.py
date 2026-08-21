@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from backend.platform.auth import AuthError, ExpiredToken, Principal, verify_token
 from backend.platform.settings import jwt_audience, jwt_issuer
 from backend.repos.identity import AuthBootstrapRepository
-from backend.services.identity import resolve_current_user
+from backend.services.identity import IdentityResolutionError, resolve_current_user
 
 
 class UserDTO(BaseModel):
@@ -68,7 +68,12 @@ def get_current_user(
     """Resolve the authenticated principal to a user (get-or-create) and return
     its DTO. The business logic lives in ``services.identity``."""
     bootstrap = AuthBootstrapRepository(session)
-    user = resolve_current_user(principal, bootstrap)
+    try:
+        user = resolve_current_user(principal, bootstrap)
+    except IdentityResolutionError as exc:
+        # Token is valid but can't map to an account (e.g. no email claim on a
+        # first login) — a client/token condition, not a server fault.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     # A newly-created user's UUIDv7 id is materialized on flush (the ``uuid7``
     # default is Python-side); flush so the DTO carries a real id.
     session.flush()

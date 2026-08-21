@@ -75,3 +75,9 @@ def test_me_returns_401_for_invalid_token(client: tuple[TestClient, RSAPrivateKe
     test_client, private = client
     token = sign_token(private, kid=KID, sub="sub-1", audience="wrong-audience")
     assert test_client.get("/api/v1/me", headers=_auth(token)).status_code == 401
+
+
+def test_me_returns_422_for_token_without_email(client: tuple[TestClient, RSAPrivateKey]) -> None:
+    test_client, private = client
+    token = sign_token(private, kid=KID, sub="sub-no-email")
+    assert test_client.get("/api/v1/me", headers=_auth(token)).status_code == 422
