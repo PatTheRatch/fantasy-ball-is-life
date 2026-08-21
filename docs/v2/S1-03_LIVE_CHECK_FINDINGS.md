@@ -46,7 +46,7 @@ must be read and honoured, not assumed.
 | Question | Answer |
 |---|---|
 | Do playoff/championship periods appear in `matchupPeriods`? | **Yes.** 2025: 20 periods = 17 regular + 3 playoff. 2026: 22 = 19 + 3. |
-| How does the All-Star break appear? | **As absent scoring-period ids, not a period.** The pro schedule goes from scoring period 115 (last games, 2025-02-14) to 121 (first games back, 2025-02-20); ids 116–120 are absent because no NBA games are played those five days (2025-02-15 → 02-19). Days with no games consume no scoring-period id. See the break-window fixture. |
+| How does the All-Star break appear? | **As empty scoring-period ids, not a period.** The pro schedule goes from scoring period 115 (last games, 2025-02-14) to 121 (first games back, 2025-02-20). The five break days (2025-02-15 → 02-19) occupy ids 116–120 but have no games, so they are absent from `proGamesByScoringPeriod`. The ids are still allocated — Feb 20 is id 121, not 116 — so the id space does not collapse around no-game days. See the break-window fixture. |
 | Is the shape stable across seasons? | Structurally yes (`matchupPeriodLength` stays 1), but `matchupPeriodCount`, `playoffTeamCount`, and `playoffSeedingRule` change year to year (e.g. 17→19 regular matchups, 6→7 playoff teams). |
 
 ## Implication for S1-06 (fantasy core schema)
@@ -57,10 +57,10 @@ must be read and honoured, not assumed.
 - Playoff periods live in the same mapping as regular-season periods; the
   split is `matchupPeriodCount` (regular) vs the remainder (playoff), so
   `matchup_periods` needs a `kind` (regular/playoff) derived from index > count.
-- The All-Star break is **absent scoring-period ids** (e.g. ids 116–120 skipped
-  in Feb 2025), not a row in the matchup-period mapping — finality/status logic
-  must not assume contiguous scoring periods, and must derive dates from
-  `proGamesByScoringPeriod`, never from an arithmetic assumption that
+- The All-Star break is **empty scoring-period ids** (e.g. ids 116–120 have no
+  games in Feb 2025), not a row in the matchup-period mapping — finality/status
+  logic must not assume every scoring-period id has games, and must derive dates
+  from `proGamesByScoringPeriod`, never from an arithmetic assumption that
   scoring-period id + 1 = next calendar day.
 - The hardcoded `MATCHUP_WEEKS_2025_26` in V1 (22 hand-typed week ranges) is
   confirmed unnecessary: this mapping + `proGamesByScoringPeriod` dates gives

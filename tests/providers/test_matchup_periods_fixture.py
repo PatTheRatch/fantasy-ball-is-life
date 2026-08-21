@@ -119,10 +119,11 @@ def _load_break_window() -> dict[str, list[str] | None]:
 
 
 def test_all_star_break_is_absent_scoring_period_ids() -> None:
-    """The break (Feb 2025) skips scoring-period ids 116–120.
+    """The break (Feb 2025) leaves scoring-period ids 116–120 empty.
 
     ``proGamesByScoringPeriod`` has no entry for those ids because no NBA
-    games are played — days with no games consume no scoring-period id.
+    games are played — but the ids are still allocated (the first game back
+    is id 121, not 116).
     """
     window = _load_break_window()
     assert window["115"] is not None, "last game day before the break"
