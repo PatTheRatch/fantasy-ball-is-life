@@ -44,6 +44,24 @@ _CALL_GAP = 0.75          # seconds between nba_api calls (respect NBA.com)
 _MAX_RETRIES = 3
 _BACKOFF_BASE = 2.0       # multiplicative backoff: 2s, 4s, 8s
 
+# stats.nba.com serves full-season queries slowly and drops connections it
+# doesn't like the look of. nba_api's default 30s read timeout is too tight
+# for LeagueDashPlayerStats; the explicit browser headers are the
+# community-standard set that keeps their CDN from stalling requests.
+_NBA_TIMEOUT = 90
+_NBA_HEADERS = {
+    "Host": "stats.nba.com",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nba.com/",
+    "Origin": "https://www.nba.com",
+    "Connection": "keep-alive",
+}
+
 # Columns that only exist on the Advanced measure type.
 _ADVANCED_COLUMNS = ("USG_PCT", "PACE", "OFF_RATING")
 
@@ -332,6 +350,8 @@ def _fetch_season_stats(season: int) -> pd.DataFrame:
                 season_type_all_star="Regular Season",
                 per_mode_detailed="PerGame",
                 measure_type_detailed_defense="Base",
+                headers=_NBA_HEADERS,
+                timeout=_NBA_TIMEOUT,
             )
             df = resp.get_data_frames()[0]
             _sleep_between_calls()
@@ -364,6 +384,8 @@ def _fetch_advanced_stats(season: int) -> pd.DataFrame:
                 season_type_all_star="Regular Season",
                 per_mode_detailed="PerGame",
                 measure_type_detailed_defense="Advanced",
+                headers=_NBA_HEADERS,
+                timeout=_NBA_TIMEOUT,
             )
             df = resp.get_data_frames()[0]
             _sleep_between_calls()
@@ -422,7 +444,11 @@ def _fetch_bio(person_id: int) -> dict[str, Any]:
 
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            resp = commonplayerinfo.CommonPlayerInfo(player_id=person_id)
+            resp = commonplayerinfo.CommonPlayerInfo(
+                player_id=person_id,
+                headers=_NBA_HEADERS,
+                timeout=_NBA_TIMEOUT,
+            )
             df = resp.get_data_frames()[0]
             _sleep_between_calls()
             if df.empty:
