@@ -199,6 +199,15 @@ in V2 (explicit, attributable, revocable share records; nothing shared
 by default), but the user-facing signals surface is not built in V2.
 This keeps a later feature from requiring a migration.
 
+Decision 28: Observability of failure. Every failure mode current FCP
+produced was silent --- a headline endpoint returning 500 unnoticed,
+players dropped from projection sets on a name mismatch, a documented
+CLI command that could never run. V2 treats "you can tell when it is
+broken" as a design constraint, not tooling: derived results carry an
+explicit status and reason, unresolved identity is queued and counted,
+and job outcomes are queryable data rather than log lines. Expressed as
+a non-negotiable in section 10.
+
 ## 5. Core Domain Model Direction
 
 The following is the conceptual V2 map. It is not yet a final SQL
