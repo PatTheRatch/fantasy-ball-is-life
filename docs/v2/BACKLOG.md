@@ -26,15 +26,15 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   Categories, all-play scoring, standings fold, name normalisation. 53 domain
   tests + 5 architecture tests. Ports classification §9 items 2, 3, 4, 6, 7, 9.
 
-- [ ] **S1-02 · ESPN transport gateway** — **NEXT**
+- [x] **S1-02 · ESPN transport gateway** — `db9cdfe`
   Port V1's `backend/league/gateway.py` into `backend/providers/espn/client.py`.
   Explicit connect/read timeouts, typed `ESPNTimeoutError` / `ESPNUnavailableError`,
   504/502/500 mapping, and the namespace-scoped patch that must not mutate the
-  shared `requests` module. Carries 9 invariants from the register (§7
+  shared `requests` module. Carries 12 invariants from the register (§7
   "Transport policy"). No domain dependency, no database — pure transport.
   *Charter: §7 (adapters, not the domain model), D28 (failures are visible).*
 
-- [ ] **S1-03 · Live check: `matchupPeriods`**
+- [ ] **S1-03 · Live check: `matchupPeriods`** — **NEXT**
   The one unresolved unknown in the design. Against a real ESPN basketball
   league, confirm `settings.matchup_periods` is populated, capture its exact
   shape and key types, and check how playoff/championship periods and the
@@ -129,4 +129,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-01 merged.*
+*Claude updates this on approval. Last change: S1-02 merged.*
