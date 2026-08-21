@@ -43,13 +43,13 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   model has no input and the schema needs revisiting.
   *See [`PROVIDER_INGESTION_DESIGN.md`](PROVIDER_INGESTION_DESIGN.md) headline finding.*
 
-- [ ] **S1-04 · Persistence foundation** — **NEXT**
+- [x] **S1-04 · Persistence foundation** — `066579c`
   SQLAlchemy 2.0 typed models, Alembic, `backend/platform/db.py`, settings
   loading, test database via a CI service container. No tables yet beyond what
   S1-05 needs. Migrations must apply *and roll back* in CI.
   *Charter: D23, D20 (correctness before performance).*
 
-- [ ] **S1-05 · Identity + tenancy**
+- [ ] **S1-05 · Identity + tenancy** — **NEXT**
   `users`, `managers`, `manager_user_links`. Local JWKS token verification —
   no per-request round trip. `LeagueScope` / `UserScope` that repositories
   **cannot be constructed without**, plus the route-policy matrix test that
@@ -129,4 +129,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-03 merged.*
+*Claude updates this on approval. Last change: S1-04 merged.*
