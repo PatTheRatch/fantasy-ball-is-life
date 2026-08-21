@@ -45,9 +45,21 @@ def test_patch_applies_default_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["timeout"] == ESPN_TIMEOUT
 
 
+def _dummy_requests() -> object:
+    """A throwaway ``requests``-like object for the patch to wrap.
+
+    ``install_espn_timeout_patch`` rebinds the name ``requests`` inside
+    ``espn_api.requests.espn_requests``. Tests that exercise the patch hand it
+    a throwaway so monkeypatch teardown restores the real binding — otherwise a
+    proxy leaks into global module state and couples tests by run order.
+    """
+    return type("_Dummy", (), {"get": staticmethod(lambda *a, **k: "ok")})()
+
+
 # V1: test_patch_is_idempotent
 def test_patch_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client, "_PATCHED", False)
+    monkeypatch.setattr(espn_requests_module, "requests", _dummy_requests())
     install_espn_timeout_patch()
     proxy_once = espn_requests_module.requests
     install_espn_timeout_patch()
@@ -65,6 +77,7 @@ def test_patch_does_not_mutate_shared_requests_module(
 
     original_get = requests_module.get
     monkeypatch.setattr(client, "_PATCHED", False)
+    monkeypatch.setattr(espn_requests_module, "requests", _dummy_requests())
     install_espn_timeout_patch()
     assert requests_module.get is original_get
 
