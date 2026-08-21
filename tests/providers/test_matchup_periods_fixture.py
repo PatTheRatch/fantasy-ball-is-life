@@ -76,10 +76,22 @@ def test_playoff_periods_are_present() -> None:
         )
 
 
-def test_regular_season_count_matches_matchup_period_count() -> None:
-    for settings in _load().values():
-        assert isinstance(settings["matchupPeriodCount"], int)
-        assert settings["matchupPeriodCount"] > 0
+def test_regular_and_playoff_periods_partition_cleanly() -> None:
+    """Regular periods are 1..matchupPeriodCount; the rest are playoff.
+
+    This is the split S1-06 needs to derive ``kind`` from: index <=
+    ``matchupPeriodCount`` is regular, index > it is playoff.
+    """
+    for season, settings in _load().items():
+        count = settings["matchupPeriodCount"]
+        periods = settings["matchupPeriods"]
+        total = len(periods)
+        keys = {int(k) for k in periods}
+        assert keys == set(range(1, total + 1)), f"season {season} keys not 1..N"
+        regular = {int(k) for k in periods if int(k) <= count}
+        playoff = {int(k) for k in periods if int(k) > count}
+        assert regular == set(range(1, count + 1)), f"season {season} regular"
+        assert playoff == set(range(count + 1, total + 1)), f"season {season} playoff"
 
 
 # --- field presence (what S1-06 schema will consume) ------------------------
@@ -96,3 +108,35 @@ def test_schedule_settings_has_required_fields() -> None:
     }
     for season, settings in _load().items():
         assert required <= set(settings), f"season {season} missing fields"
+
+
+# --- pro schedule: the All-Star break is absent ids, not a period ------------
+
+
+def _load_break_window() -> dict[str, list[str] | None]:
+    path = Path(__file__).parent / "fixtures" / "espn_pro_schedule_break_window.json"
+    return json.loads(path.read_text())
+
+
+def test_all_star_break_is_absent_scoring_period_ids() -> None:
+    """The break (Feb 2025) skips scoring-period ids 116–120.
+
+    ``proGamesByScoringPeriod`` has no entry for those ids because no NBA
+    games are played — days with no games consume no scoring-period id.
+    """
+    window = _load_break_window()
+    assert window["115"] is not None, "last game day before the break"
+    assert window["121"] is not None, "first game day after the break"
+    for missing in ("116", "117", "118", "119", "120"):
+        assert window[missing] is None, f"scoring period {missing} should be absent"
+
+
+def test_all_star_break_dates_are_not_contiguous() -> None:
+    """The last pre-break date and first post-break date are days apart,
+    proving the gap is real and not a date-labelling artifact."""
+    window = _load_break_window()
+    last_pre_break = window["115"][0]   # 2025-02-14
+    first_post_break = window["121"][0]  # 2025-02-20
+    assert last_pre_break == "2025-02-14"
+    assert first_post_break == "2025-02-20"
+
