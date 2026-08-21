@@ -1,49 +1,107 @@
-# CI gate for CONTRIBUTING.md's review-gated flow: every PR (and main) must
-# pass the backend tests and a frontend build + lint before merge. Pairs with
-# branch protection on `main` (repo settings — Patrick), which should require
-# both jobs.
+# CI for the V2 development line.
 #
-# Integration tests that need the real projections file (gitignored) or live
-# ESPN skip cleanly by design, so a bare CI checkout runs the pure/unit subset
-# and skips the rest. Seeing skips here is expected, not a gap in the gate.
+# V2 starts as a clean foundation: the charter and design docs exist, the
+# application does not yet. Rather than deleting this workflow until code
+# lands (and forgetting to restore it), each job detects whether its half of
+# the tree exists and reports honestly when it does not.
+#
+# The alternative -- a job that unconditionally passes -- would be a green
+# check that tests nothing, which is exactly the silent-success failure mode
+# charter Decision 28 exists to prevent.
+#
+# Production deploys never run from this branch. deploy.yml is scoped to main.
 name: CI
 
 on:
   pull_request:
   push:
-    branches: [main, v2]
+    branches: [v2]
 
 jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Detect backend
+        id: detect
+        run: |
+          if [ -f pyproject.toml ] || [ -f requirements.txt ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No backend yet::V2 is design-only at this commit. This job will run tests as soon as a pyproject.toml or requirements.txt exists."
+          fi
+
       - uses: actions/setup-python@v5
+        if: steps.detect.outputs.present == 'true'
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: python -m pytest -q
+
+      - name: Install
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          if [ -f pyproject.toml ]; then pip install -e '.[dev]'
+          else pip install -r requirements.txt; fi
+
+      - name: Tests
+        if: steps.detect.outputs.present == 'true'
+        run: python -m pytest -q
 
   frontend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+
+      - name: Detect frontend
+        id: detect
+        run: |
+          if [ -f frontend/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No frontend yet::V2 is design-only at this commit. This job will build and test as soon as frontend/package.json exists."
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.detect.outputs.present == 'true'
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run build
-      - run: npx tsc --noEmit
-      - run: npm run test
-      # Lint everything EXCEPT AiCommentaryCard if it still carries legacy
-      # react-hooks debt. InSeason monolith was retired in P-7 — do not grow
-      # this ignore list.
-      - run: >
+
+      - name: Install, build, type-check, test, lint
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npx tsc --noEmit
+          npm run test
           npx eslint .
-          --ignore-pattern src/components/AiCommentaryCard.tsx
+
+  docs:
+    # Cheap guard that the design docs stay internally linkable. Runs always,
+    # so this branch is never fully untested even while it is docs-only.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check intra-repo doc links resolve
+        run: |
+          fail=0
+          for f in $(find docs -name '*.md' -type f) README.md; do
+            [ -f "$f" ] || continue
+            for target in $(grep -oE '\]\([^)]+\)' "$f" | sed 's/^](//; s/)$//'); do
+              case "$target" in http*|'#'*|'') continue ;; esac
+              clean="${target%%#*}"
+              [ -z "$clean" ] && continue
+              # the filesystem resolves ../ on its own; no realpath needed
+              if [ ! -e "$(dirname "$f")/$clean" ]; then
+                echo "::error file=$f::broken link -> $target"
+                fail=1
+              fi
+            done
+          done
+          [ "$fail" = 0 ] && echo "all intra-repo doc links resolve"
+          exit $fail

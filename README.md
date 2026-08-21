@@ -1,62 +1,98 @@
-# fantasy-ball-is-life
+# Full Court Press — V2
 
-A GM's cockpit for 9-category head-to-head fantasy basketball. Connects to your
-ESPN league, tells you who to start/add/target, and writes the weekly recap for
-your league group chat automatically.
+> **This is the `v2` branch: a clean foundation. V1 lives on `main` and is still the deployed product.**
+
+A fantasy-basketball league history and intelligence platform with a private
+competitive layer.
+
+**Follow the league together. Dominate it privately.**
+
+- **Shared** — turn results, transactions, rivalries, records and manager
+  decisions into an ongoing sports story a whole league follows.
+- **Private** — turn the same underlying facts into competitive intelligence
+  for an individual manager: draft, stream, trade, project, simulate.
+
+---
+
+## Why this branch is nearly empty
+
+V2 is a deliberate restart, not a refactor. Three independent forensic audits
+agreed: the basketball domain logic is valuable, the architecture around it
+carries scars from repeated scope expansion. The decision (charter §18, and
+`docs/CLAUDE_GREENFIELD_ARCHITECTURE.md` Part C) was **preserve the domain
+logic, rebuild the application around it**.
+
+So this branch starts clean. V1's 251 code files are not here — not because
+they are worthless, but because roughly 70% of them are classified KILL and
+having them in the tree makes it ambiguous what is being built versus what is
+being replaced.
+
+**Nothing was lost.** V1 is complete on `main`, still deployed, and is
+explicitly the behavioural reference and test oracle (charter §9).
+
+## Reading V1 while building V2
+
+```bash
+# one-off file read
+git show main:backend/league/scoreboard.py
+
+# side-by-side working copy, pinned to main
+git worktree add ../fcp-v1 main
+```
+
+The worktree is the right tool when capturing characterization tests — run V1,
+record its outputs, assert V2 reproduces them.
+
+## Start here
+
+Read in this order. All of it also lives on `main`, which is authoritative.
+
+| Document | What it is |
+|---|---|
+| [`docs/FCP_V2_Product_Architecture_Charter.md`](docs/FCP_V2_Product_Architecture_Charter.md) | **Authoritative.** 28 decisions, 10 non-negotiables, the north-star test |
+| [`docs/v2/schema/README.md`](docs/v2/schema/README.md) | Binding schema conventions + the seven domain files |
+| [`docs/v2/PROVIDER_INGESTION_DESIGN.md`](docs/v2/PROVIDER_INGESTION_DESIGN.md) | Ingestion pipeline, adapter contract, replay |
+| [`docs/v2/V1_CLASSIFICATION.md`](docs/v2/V1_CLASSIFICATION.md) | KEEP/EXTRACT/REWRITE/KILL/DEFER + the 44-invariant register |
+| [`docs/CLAUDE_FCP_AUDIT.md`](docs/CLAUDE_FCP_AUDIT.md) | What went wrong in V1, cited to `path:line` |
+
+If you are an agent picking up work: read the charter, then
+`docs/v2/schema/README.md`, then the domain file you are touching. The schema
+README's conventions are binding — an ID strategy or lineage block invented
+locally is wrong even if internally consistent.
+
+## The non-negotiables
+
+From charter §10. These are the failure modes V1 actually produced.
+
+- No silent cross-league or cross-manager state leakage.
+- No durable product state stored only on a container filesystem.
+- No provider-specific client object as the canonical domain model.
+- No player identity strategy based primarily on fuzzy names.
+- No hardcoded season calendars.
+- No private strategy leaking into shared storytelling without explicit action.
+- No derived metric without a versioned definition when used historically.
+- No overwriting projection history when a user edits assumptions.
+- No normalization that cannot explain where a canonical fact came from.
+- **No silent degradation** — a feature that cannot produce its output says so,
+  records why, and surfaces it.
+
+## Build order
+
+Charter §11. Slice 1's port list is `docs/v2/V1_CLASSIFICATION.md` §9.
+
+1. ~~Freeze the charter~~ ✅
+2. ~~V2 domain schema~~ ✅ `docs/v2/schema/`
+3. ~~Provider ingestion design~~ ✅
+4. Identity resolution design — largely settled in schema `04` + the ingestion design
+5. ~~Classify V1~~ ✅
+6. **Thin vertical slice** ← next. user → manager → league → season → ESPN sync
+   → canonical teams/players/periods → one shared league page, **with tenancy
+   from day one** (charter D26)
+7. Historical event capture — cannot be backfilled, so it starts early
+8. Reintroduce intelligence (projections, matchups, draft)
+9. Rebuild storytelling from canonical facts
 
 ## Status
 
-Consolidated from the working `PatriotGames` codebase (July 2026). Currently a
-single-league app for the Patriot Games league; architecture is being made
-multi-league-ready for a possible wider mid-season launch.
-
-Product decisions (locked 2026-07-08):
-
-- **Audience:** Patrick's league first; wider launch later if it earns it.
-- **Projections:** user-uploaded for now, behind a pluggable projection-source
-  framework (Basketball Monster / ESPN / Hashtag Basketball / our own model) —
-  see `docs/specs/PROJECTION_SOURCE_FRAMEWORK.md`.
-- **Platform:** web-first. No App Store until the auth story is solid.
-
-Team roles and the feature definition-of-done live in
-[`docs/AISHA_OPERATING_MANUAL.md`](docs/AISHA_OPERATING_MANUAL.md).
-
-## Layout
-
-Backend lives under `backend/`, grouped by concern
-(`docs/specs/BACKEND_RESTRUCTURE.md`, approved by Aisha 2026-07-12):
-
-| Path | What |
-|---|---|
-| `backend/api/main.py` | FastAPI app factory; routers under `backend/api/routers/` (league, draft, commentary, projections, optimizer); shared helpers in `backend/api/deps.py` |
-| `backend/commentary/` | AI commentary: prompt builders, provider clients, and validated structured recap generation |
-| `backend/league/` | `data_feed.py` (ESPN pull layer — rosters, transactions, matchups, scoreboards, projection attachment); `fantasy.py` (`MyLeague` — power rankings, universe-wins math) |
-| `backend/draft/` | The Draft Room engine: `optimizer.py` (auction draft optimizer, cvxpy integer program), `engine.py` (per-pick recompute loop), `strategies.py` (plan-diversity strategy map), `targets_mc.py` (Monte Carlo category targets), `values.py` (Forge Value — projection-derived auction values), `auction_sim.py` (auction-room price simulator) |
-| `backend/analytics/consistency.py` | Player consistency metrics (feeds the confidence endpoints) |
-| `backend/config.py` | Central config — ESPN credentials, league-owner draft-pool knobs, tunable constants |
-| `backend/projections/` | Reserved for the projection-source framework (`docs/specs/PROJECTION_SOURCE_FRAMEWORK.md`, pending review); empty for now |
-| `frontend/` | React 19 + Vite + Tailwind web app (the product UI) |
-| `docs/` | Operating manual, project dossier, ESPN access handoff, feature specs |
-| `player_rankings/`, `data/` | Local data drop zones — gitignored |
-
-## Setup
-
-```bash
-# Backend
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in keys/cookies (see docs/ESPN_ACCESS_HANDOFF.md)
-uvicorn backend.api.main:app --reload
-
-# Frontend
-cd frontend && npm install && npm run dev
-```
-
-Phase 1 weekly recap drafts default to DeepSeek's lower-cost
-`deepseek-v4-flash` model. Set `DEEPSEEK_API_KEY` and
-`RECAP_LLM_PROVIDER=deepseek` in the root `.env`; the key stays server-side.
-The legacy commentary endpoints continue to use `ANTHROPIC_API_KEY`.
-
-## The 9 categories
-
-`PTS, REB, AST, STL, BLK, 3PM, FG%, FT%, TO` — turnovers score inverted (lower is better).
+Design complete, no code. `v2` triggers CI but never deploys — production
+deploys run only from `main`.
