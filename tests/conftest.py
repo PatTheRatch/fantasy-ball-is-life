@@ -10,7 +10,19 @@ before push.
 
 from __future__ import annotations
 
+import os
+import pathlib
+from collections.abc import Iterator
+
 import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import text
+from sqlalchemy.orm import Session, sessionmaker
+
+from backend.platform.db import make_engine, make_session_factory
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
 
 SCRUBBED_SECRETS = (
     "DATABASE_URL",
@@ -18,6 +30,8 @@ SCRUBBED_SECRETS = (
     "SUPABASE_ANON_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPABASE_JWKS_URL",
+    "SUPABASE_JWT_ISSUER",
+    "SUPABASE_JWT_AUDIENCE",
     "CRED_ENCRYPTION_KEY",
     "WORKER_SECRET",
     "ESPN_SWID",
@@ -39,3 +53,39 @@ def _scrub_ambient_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in SCRUBBED_SECRETS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def db_url() -> str:
+    """The test database URL, or skip when unset (CI provides a Postgres)."""
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL not set; runs in CI against the Postgres service")
+    return url
+
+
+@pytest.fixture
+def migrated_session_factory(db_url: str) -> Iterator[sessionmaker[Session]]:
+    """Migrate the test DB to head, truncate identity tables, and hand out a
+    session factory bound to it."""
+    cfg = Config(str(REPO / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", db_url)
+    command.upgrade(cfg, "head")
+
+    engine = make_engine(db_url)
+    with Session(engine) as session:
+        for table in ("manager_user_links", "managers", "users"):
+            session.execute(text(f'TRUNCATE "{table}" CASCADE'))
+        session.commit()
+
+    try:
+        yield make_session_factory(engine)
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def db_session(migrated_session_factory: sessionmaker[Session]) -> Iterator[Session]:
+    """A truncated, migrated session for repository/service tests."""
+    with migrated_session_factory() as session:
+        yield session

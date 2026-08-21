@@ -35,3 +35,18 @@ def database_url_for_tests() -> str:
     so pytest never mistakes the accessor for a test when imported.
     """
     return _require("TEST_DATABASE_URL")
+
+
+def jwt_issuer() -> str:
+    """The expected ``iss`` claim on a Supabase-issued JWT."""
+    return _require("SUPABASE_JWT_ISSUER")
+
+
+def jwt_audience() -> str:
+    """The expected ``aud`` claim on a Supabase-issued JWT."""
+    return _require("SUPABASE_JWT_AUDIENCE")
+
+
+def jwt_jwks_url() -> str:
+    """The URL of the JWKS keyset used to verify Supabase-issued JWTs."""
+    return _require("SUPABASE_JWKS_URL")
