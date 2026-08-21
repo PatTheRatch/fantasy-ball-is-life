@@ -5,6 +5,7 @@ description = "Full Court Press V2 — fantasy basketball league history and int
 requires-python = ">=3.12"
 dependencies = [
     "rapidfuzz>=3.9",
+    "espn-api>=0.19.0",
 ]
 
 [project.optional-dependencies]
@@ -36,3 +37,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.12"
 strict = true
 files = ["backend"]
+
+[[tool.mypy.overrides]]
+module = "espn_api.*"
+ignore_missing_imports = true
