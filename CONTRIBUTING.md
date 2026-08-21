@@ -99,6 +99,12 @@ docs/<short-name>               docs only
 **`main` is V1 and is still deployed.** Nothing from V2 goes there until
 cutover. The only commits to `main` are V1 fixes and design documents.
 
+**One carve-out:** syncing `main` → `v2` (`git merge origin/main`) is
+maintenance, not a bite. It carries already-reviewed design documents across
+and needs no PR. It is the only direct write to `v2`, and it must never carry
+code — if a merge from `main` brings anything under `backend/` or `frontend/`,
+stop, because something has gone wrong.
+
 ---
 
 ## Definition of done
