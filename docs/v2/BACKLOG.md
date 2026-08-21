@@ -49,7 +49,7 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   S1-05 needs. Migrations must apply *and roll back* in CI.
   *Charter: D23, D20 (correctness before performance).*
 
-- [ ] **S1-05 · Identity + tenancy** — **NEXT**
+- [x] **S1-05 · Identity + tenancy** — `30b5778`
   `users`, `managers`, `manager_user_links`. Local JWKS token verification —
   no per-request round trip. `LeagueScope` / `UserScope` that repositories
   **cannot be constructed without**, plus the route-policy matrix test that
@@ -59,7 +59,7 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   *Charter: D2, D9, D12, D13, D26; non-negotiable #1.*
   *Schema: [`schema/01-identity.md`](schema/01-identity.md).*
 
-- [ ] **S1-06 · Fantasy core schema** — depends on S1-03
+- [ ] **S1-06 · Fantasy core schema** — **NEXT** — depends on S1-03
   `leagues`, `league_seasons`, `league_settings`, `categories`,
   `league_season_categories`, `fantasy_teams`, `fantasy_team_seasons`,
   `matchup_periods` with `status` finality. Periods derived from the provider,
@@ -129,4 +129,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-04 merged.*
+*Claude updates this on approval. Last change: S1-05 merged.*
