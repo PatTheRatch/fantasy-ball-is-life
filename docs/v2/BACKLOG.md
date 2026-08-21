@@ -34,7 +34,7 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   "Transport policy"). No domain dependency, no database — pure transport.
   *Charter: §7 (adapters, not the domain model), D28 (failures are visible).*
 
-- [ ] **S1-03 · Live check: `matchupPeriods`** — **NEXT**
+- [x] **S1-03 · Live check: `matchupPeriods`** — `df36507`
   The one unresolved unknown in the design. Against a real ESPN basketball
   league, confirm `settings.matchup_periods` is populated, capture its exact
   shape and key types, and check how playoff/championship periods and the
@@ -43,7 +43,7 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   model has no input and the schema needs revisiting.
   *See [`PROVIDER_INGESTION_DESIGN.md`](PROVIDER_INGESTION_DESIGN.md) headline finding.*
 
-- [ ] **S1-04 · Persistence foundation**
+- [ ] **S1-04 · Persistence foundation** — **NEXT**
   SQLAlchemy 2.0 typed models, Alembic, `backend/platform/db.py`, settings
   loading, test database via a CI service container. No tables yet beyond what
   S1-05 needs. Migrations must apply *and roll back* in CI.
@@ -121,7 +121,7 @@ Known to come, roughly in order:
 
 | # | Question | Blocks |
 |---|---|---|
-| 1 | Does `matchupPeriods` cover playoff/championship periods, and how does the All-Star break appear? | S1-06 |
+| 1 | Does `matchupPeriods` cover playoff/championship periods, and how does the All-Star break appear? — resolved S1-03 | S1-06 |
 | 2 | Roster fetch cost — one request per team per day, or one league-wide call? | Historical capture |
 | 3 | Story vocabulary: newsroom / recap / story / timeline. Pick one for tables, API and UI. | Newsroom slice |
 | 4 | Self-delivering recaps — absent from the charter by omission, not decision. Product call needed. | Newsroom slice |
@@ -129,4 +129,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-02 merged.*
+*Claude updates this on approval. Last change: S1-03 merged.*
