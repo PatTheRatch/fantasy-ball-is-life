@@ -90,7 +90,7 @@ jobs:
       - name: Check intra-repo doc links resolve
         run: |
           fail=0
-          for f in $(find docs -name '*.md' -type f) README.md; do
+          for f in $(find docs -name '*.md' -type f) README.md CONTRIBUTING.md; do
             [ -f "$f" ] || continue
             for target in $(grep -oE '\]\([^)]+\)' "$f" | sed 's/^](//; s/)$//'); do
               case "$target" in http*|'#'*|'') continue ;; esac
