@@ -442,7 +442,7 @@ Process-local caches plus on-disk projection state mean the backend **cannot be 
 
 | Suite | Result | Notes |
 |---|---|---|
-| Backend (pytest) | 553 pass · 36 skip · **2 fail** | Both failures pre-existing |
+| Backend (pytest) | 553 pass · 36 skip · 2 fail **locally only** | Both failures are local-env artifacts; CI is green — see below |
 | Frontend (vitest) | 62 pass | Navigation, routing, auth surfaces, a few pages |
 | RLS boundary | 16 skip locally | Run only in `deploy.yml` against ephemeral Supabase |
 
@@ -458,12 +458,14 @@ Bugs found in production have consistently come back with named regression tests
 
 The CI comment frames this as expected: *"Seeing skips here is expected, not a gap in the gate."* That framing is doing a lot of work. A synthetic fixture projection set would close it.
 
-### Two tests failing on main
+### Two local-only failures — CI is green
 
-- `test_nbadata_ingest.py::TestRateLimiting::test_sleep_called_between_api_calls` — fails outright; confirmed to fail independently of any working-tree change.
-- `test_recaps.py::test_generate_endpoint_rejects_anonymous_before_store_or_anthropic` — fails in a full-suite run but **passes in isolation**, making it a test-ordering leak around `CRED_ENCRYPTION_KEY` rather than a product bug.
+Two tests fail on a local run of the full suite. **Neither is a product defect and neither affects CI**, which is green on `main` (`backend: success`, `frontend: success` on runs for `dd25197` and `36f06ea`).
 
-Notably, `ci.yml` would fail on the first of these — **the gate is currently red on main.**
+- `test_nbadata_ingest.py::TestRateLimiting::test_sleep_called_between_api_calls` — raises `ModuleNotFoundError: No module named 'nba_api'`. The package is declared in `requirements.txt:20`, so CI installs it and the test passes; the local `.venv` simply predates the M-1 dependency. A local environment gap, not a code issue.
+- `test_recaps.py::test_generate_endpoint_rejects_anonymous_before_store_or_anthropic` — fails in a full-suite run but **passes in isolation**, making it a test-ordering interaction around `CRED_ENCRYPTION_KEY`. It does not reproduce in CI.
+
+The practical note is about developer experience rather than correctness: a stale local venv produces failures that look like real regressions. `conftest.py` already goes to some length to make local runs match clean CI on *environment variables*; it cannot catch a missing *dependency*. Pinning or verifying installed deps at session start would close the remaining gap.
 
 Frontend coverage is thin relative to surface area: 15 test files against 84 components, concentrated on routing and auth rather than the data-heavy tabs.
 
@@ -561,7 +563,7 @@ Ranked by what would actually hurt.
 7. **Hardcoded season calendars**, duplicated, flagged as a cut-list item at project start.
 8. **Optimizer untested in CI** — 20 skipped tests on the most complex code.
 9. **Stale documentation.** README says `backend/projections/` is "empty for now"; it holds eight modules and the entire M-series. The dossier's status stops five PR series ago.
-10. **Small residue** — a red test on main, `render.yaml`, the stale `PHASES` constant, an unused `timezone` column against a hardcoded London timezone, an ESLint per-file ignore, and (until this session) a broken entrypoint ordering in `backtest.py` that made the documented M-3a command unrunnable.
+10. **Small residue** — `render.yaml`, the stale `PHASES` constant, an unused `timezone` column against a hardcoded London timezone, an ESLint per-file ignore, and (until this session) a broken entrypoint ordering in `backtest.py` that made the documented M-3a command unrunnable.
 
 ---
 
