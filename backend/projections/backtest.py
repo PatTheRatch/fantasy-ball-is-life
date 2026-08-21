@@ -282,10 +282,6 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()
-
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -307,3 +303,7 @@ def _weighted_mae(errors: pd.Series, weights: pd.Series) -> float:
     if denom <= 0:
         return float("nan")
     return float((errors[mask] * weights[mask]).sum() / denom)
+
+
+if __name__ == "__main__":
+    main()
