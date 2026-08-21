@@ -3,6 +3,13 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # Docs-only pushes must not run migrations against the production
+    # database or force-recreate the VPS containers. Applied to `push`
+    # only: PR checks still run on every change, so a docs PR can never
+    # be skipped into a false green.
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   pull_request:
     branches: [main]
 
