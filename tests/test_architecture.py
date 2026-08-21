@@ -96,3 +96,21 @@ def test_no_hardcoded_season_calendar() -> None:
         if "MATCHUP_WEEKS" in text or "_MATCHUP_WEEK_CALENDARS" in text:
             offences.append(str(path.relative_to(REPO)))
     assert not offences, "hardcoded matchup calendar found in:\n" + "\n".join(offences)
+
+
+def test_routers_do_not_import_repos_models_or_sqlalchemy() -> None:
+    """Business logic lives in services, not routers.
+
+    A router that reaches for a repository, a model, or raw SQLAlchemy is doing
+    business logic in the HTTP layer (charter D26 layering). Routers call into
+    ``backend.services`` instead; the repo/model wiring lives in the deps layer.
+    """
+    routers = REPO / "backend" / "api" / "routers"
+    offences: list[str] = []
+    for path in sorted(routers.rglob("*.py")):
+        for imported in _imported_roots(path):
+            if imported.startswith(("sqlalchemy", "backend.repos", "backend.models")):
+                offences.append(f"{path.relative_to(REPO)} imports {imported}")
+    assert not offences, "routers must not import repos/models/sqlalchemy:\n" + "\n".join(
+        offences
+    )

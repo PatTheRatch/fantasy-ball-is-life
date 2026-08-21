@@ -48,15 +48,40 @@ def _extension_exists(url: str, name: str) -> bool:
         engine.dispose()
 
 
+def _table_exists(url: str, name: str) -> bool:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = :name"
+                ),
+                {"name": name},
+            )
+            return result.scalar() is not None
+    finally:
+        engine.dispose()
+
+
+IDENTITY_TABLES = ("users", "managers", "manager_user_links")
+
+
 def test_migrations_apply_and_roll_back() -> None:
     url = _test_url()
     cfg = _config(url)
 
     command.upgrade(cfg, "head")
     assert _extension_exists(url, "citext"), "citext should exist after upgrade"
+    for table in IDENTITY_TABLES:
+        assert _table_exists(url, table), f"{table} should exist after upgrade"
 
     command.downgrade(cfg, "base")
     assert not _extension_exists(url, "citext"), "citext should be gone after downgrade"
+    for table in IDENTITY_TABLES:
+        assert not _table_exists(url, table), f"{table} should be gone after downgrade"
 
     command.upgrade(cfg, "head")
     assert _extension_exists(url, "citext"), "citext should exist after re-apply"
+    for table in IDENTITY_TABLES:
+        assert _table_exists(url, table), f"{table} should exist after re-apply"
