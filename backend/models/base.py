@@ -31,6 +31,19 @@ def uuid7() -> uuid.UUID:
     return uuid.UUID(bytes=bytes(raw))
 
 
+class CreatedAtMixin:
+    """``created_at`` only, for immutable fact/reference tables.
+
+    README §Timestamps: ``updated_at`` signals mutability, so it must be absent
+    on tables that are never updated. Use :class:`TimestampMixin` for mutable
+    tables, this mixin for immutable ones.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class TimestampMixin:
     """``created_at`` / ``updated_at``, per schema README §Timestamps.
 

@@ -8,10 +8,11 @@ relationship is many-to-many and optional in both directions.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -24,7 +25,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CITEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.models.base import TimestampMixin, uuid7
+from backend.models import enums
+from backend.models.base import CreatedAtMixin, TimestampMixin, uuid7
 from backend.platform.db import Base
 
 
@@ -77,4 +79,47 @@ class ManagerUserLink(Base):
             unique=True,
             postgresql_where=text("is_primary"),
         ),
+    )
+
+
+class FantasyTeamSeasonManager(CreatedAtMixin, Base):
+    """Who managed a team in a season, including co-managers. Scope:
+    ``league_season`` · Freshness: ``synced``.
+
+    Charter D9 (co-managers) is the multiple-rows case, distinguished by
+    ``role``. ``from_date``/``to_date`` handle mid-season handover; both null is
+    the common case (a team owned all season). Defined in ``01-identity.md``; it
+    references ``fantasy_team_seasons``, so it lands with the fantasy core.
+    """
+
+    __tablename__ = "fantasy_team_season_managers"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid7)
+    # FK name is abbreviated (no `_fantasy_team_seasons` referred suffix): the
+    # full convention name exceeds Postgres' 63-char identifier limit, and the
+    # column name already names the referred table.
+    fantasy_team_season_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(
+            "fantasy_team_seasons.id",
+            name="fk_fantasy_team_season_managers_fantasy_team_season_id",
+        ),
+        nullable=False,
+    )
+    manager_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("managers.id"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(
+        enums.manager_role, nullable=False, server_default=text("'owner'")
+    )
+    from_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    to_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "fantasy_team_season_id", "manager_id", "from_date",
+            name="uq_fantasy_team_season_managers_season_manager_from",
+        ),
+        Index("ftsm_manager_idx", "manager_id"),
+        Index("ftsm_team_season_idx", "fantasy_team_season_id"),
     )
