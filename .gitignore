@@ -35,3 +35,5 @@ league_*/
 
 # macOS duplicate-file artifacts ("foo 2.ext")
 * 2.*
+# Added by code-review-graph
+.code-review-graph/
