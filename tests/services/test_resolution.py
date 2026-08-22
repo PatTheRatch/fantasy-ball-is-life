@@ -96,6 +96,60 @@ def test_duplicate_name_queues_as_ambiguous_with_entity_ids() -> None:
     assert ids == {a.fcp_entity_id, b.fcp_entity_id}
 
 
+# --- exact_name (birthdate conflict vs. missing) ----------------------------
+# charter D18: prefer unknown over confidently wrong
+
+
+def test_contradictory_birthdate_queues_dob_conflict() -> None:
+    # A two-sided disagreement: provider and candidate both carry a birthdate,
+    # and they differ. This must queue, not auto-link on the name alone.
+    marcus = PlayerCandidate(uuid.uuid4(), "marcus williams", date(1995, 12, 3))
+    decision = _resolve("Marcus Williams", birthdate=date(1999, 1, 1), pool=[marcus])
+    assert decision.action == "queue"
+    assert decision.reason == "dob_conflict"
+    assert decision.match_method is None  # no auto-link
+
+
+def test_dob_conflict_carries_candidate_entity_id_as_evidence() -> None:
+    # The reviewer must be able to act without re-deriving: the conflicting
+    # candidate's entity id rides the queue decision.
+    marcus = PlayerCandidate(uuid.uuid4(), "marcus williams", date(1995, 12, 3))
+    decision = _resolve("Marcus Williams", birthdate=date(1999, 1, 1), pool=[marcus])
+    assert decision.candidates
+    assert decision.candidates[0].fcp_entity_id == marcus.fcp_entity_id
+
+
+def test_candidate_without_birthdate_still_auto_links() -> None:
+    # The most important guard in this bite: an *absent* candidate birthdate is
+    # missing evidence, not contradicting evidence. Implementing the rule as
+    # "any birthdate difference" would queue this instead of auto-linking.
+    no_dob = PlayerCandidate(uuid.uuid4(), "marcus williams", None)
+    decision = _resolve("Marcus Williams", birthdate=date(1999, 1, 1), pool=[no_dob])
+    assert decision.action == "auto_link"
+    assert decision.match_method is MatchMethod.EXACT_NAME
+    assert decision.confidence == 0.850
+    assert decision.fcp_entity_id == no_dob.fcp_entity_id
+
+
+def test_provider_without_birthdate_still_auto_links() -> None:
+    # No provider birthdate means no two-sided disagreement is even possible.
+    with_dob = PlayerCandidate(uuid.uuid4(), "marcus williams", date(1995, 12, 3))
+    decision = _resolve("Marcus Williams", pool=[with_dob])  # birthdate=None
+    assert decision.action == "auto_link"
+    assert decision.match_method is MatchMethod.EXACT_NAME
+    assert decision.confidence == 0.850
+    assert decision.fcp_entity_id == with_dob.fcp_entity_id
+
+
+def test_no_birthdate_either_side_still_auto_links() -> None:
+    no_dob = PlayerCandidate(uuid.uuid4(), "marcus williams", None)
+    decision = _resolve("Marcus Williams", pool=[no_dob])  # birthdate=None
+    assert decision.action == "auto_link"
+    assert decision.match_method is MatchMethod.EXACT_NAME
+    assert decision.confidence == 0.850
+    assert decision.fcp_entity_id == no_dob.fcp_entity_id
+
+
 # --- fuzzy → always queued --------------------------------------------------
 
 
