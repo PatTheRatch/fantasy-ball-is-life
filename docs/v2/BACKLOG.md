@@ -150,6 +150,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   test that was missing — `tests/services/test_resolution.py` covers matching
   and absent DOB, never contradictory.
   *Charter: D18 (prefer unknown over confidently wrong).*
+  Scoped: [`docs/tickets/H-02-conflicting-birthdate-must-not-auto-link.md`](../tickets/H-02-conflicting-birthdate-must-not-auto-link.md).
 
 - [ ] **H-03 · Runs must always reach a terminal state**
   Any exception after `start_run()` leaves the run `running` forever. Wrap
@@ -209,6 +210,17 @@ H-01 and H-02 are correctness bugs in shipped code.
   surface is wired.
   *Charter: §10.*
 
+- [ ] **H-10 · A wrong identity link must be correctable** — depends on H-02
+  `IdentityLinkRepository` exposes only `add()` and `find_active()`, and
+  `resolve_and_link` returns an active link unchanged without re-evaluating
+  evidence — so a wrong link is permanent and authoritative, while the repo
+  docstring claims "a wrong link is superseded, never deleted". Add the
+  correction path it promises: supersede the active link, record the verifier
+  and evidence, create the replacement, and re-resolve the canonical facts
+  that depended on it. H-02 stops new wrong links; this repairs the ones
+  already written.
+  *Charter: D19 — a permanent crosswalk is not the same as an immutable one.*
+
 ---
 
 ## Slice 2 and beyond — not yet cut
@@ -246,4 +258,5 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-01 merged.*
+*Claude updates this on approval. Last change: H-02 scoped and assigned;
+H-10 added — the other half of H-02, repairing links already written.*
