@@ -66,7 +66,8 @@ class ResolutionDecision:
     match_method: MatchMethod | None
     confidence: float | None
     fcp_entity_id: uuid.UUID | None
-    # queue reason: empty_name|empty_pool|no_candidate|ambiguous|low_confidence|fuzzy_name
+    # queue reason: empty_name|empty_pool|no_candidate|ambiguous|dob_conflict|
+    # low_confidence|fuzzy_name
     reason: str | None
     candidates: tuple[QueueCandidate, ...]
 
@@ -93,6 +94,20 @@ def _queue(reason: str, candidates: tuple[QueueCandidate, ...] = ()) -> Resoluti
     return ResolutionDecision("queue", None, None, None, reason, candidates)
 
 
+def _two_sided_dob_conflict(birthdate: date | None, candidate: PlayerCandidate) -> bool:
+    """True iff both sides carry a birthdate and they disagree.
+
+    charter D18: prefer unknown over confidently wrong. Only a *two-sided*
+    disagreement is a conflict — a candidate with ``birthdate=None`` is missing
+    evidence, not contradicting evidence, and must stay eligible to auto-link.
+    """
+    return (
+        birthdate is not None
+        and candidate.birthdate is not None
+        and candidate.birthdate != birthdate
+    )
+
+
 def resolve_identity(
     raw_name: str | None,
     birthdate: date | None,
@@ -106,7 +121,8 @@ def resolve_identity(
     1. ``provider_id`` — an existing link wins (1.000).
     2. ``nba_anchor`` — a provider-exposed NBA id already crosswalked (0.990).
     3. ``exact_name_dob`` — normalised name *and* birthdate (0.950).
-    4. ``exact_name`` — normalised name, unique in the pool (0.850).
+    4. ``exact_name`` — normalised name, unique in the pool and not refuted by
+       a two-sided birthdate disagreement (0.850).
     5. ``fuzzy_name`` — above threshold, unambiguous → **queue** (never auto-link).
     6. anything else → **queue**.
     """
@@ -130,15 +146,27 @@ def resolve_identity(
         if dob_matches:
             return _auto_link(MatchMethod.EXACT_NAME_DOB, dob_matches[0].fcp_entity_id)
 
-    # exact_name — but only if unique; two players sharing a name is ambiguous.
+    # exact_name — unique and not refuted. Partition first: a two-sided
+    # birthdate disagreement is a conflict, not a fall-through, so a reviewer
+    # sees *why* the name matched but the link must not be made (charter D18).
+    # A candidate with no birthdate is missing evidence and stays eligible.
     exact = [c for c in candidates if c.normalized_name == needle]
-    if len(exact) == 1:
-        return _auto_link(MatchMethod.EXACT_NAME, exact[0].fcp_entity_id)
-    if len(exact) > 1:
+    exact_conflict = [c for c in exact if _two_sided_dob_conflict(birthdate, c)]
+    exact_ok = [c for c in exact if not _two_sided_dob_conflict(birthdate, c)]
+
+    if len(exact_ok) == 1:
+        return _auto_link(MatchMethod.EXACT_NAME, exact_ok[0].fcp_entity_id)
+    if len(exact_ok) > 1:
         evidence = tuple(
-            QueueCandidate(c.fcp_entity_id, c.normalized_name, 100.0) for c in exact
+            QueueCandidate(c.fcp_entity_id, c.normalized_name, 100.0) for c in exact_ok
         )
         return _queue("ambiguous", evidence)
+    if exact_conflict:
+        evidence = tuple(
+            QueueCandidate(c.fcp_entity_id, c.normalized_name, 100.0)
+            for c in exact_conflict
+        )
+        return _queue("dob_conflict", evidence)
 
     # fuzzy — always queued, even when unambiguous (policy step 5). Map the
     # fuzzy-matched pool names back to their entity ids for actionable evidence.
