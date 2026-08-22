@@ -125,6 +125,8 @@ FANTASY_TABLES = (
     "fantasy_teams",
     "fantasy_team_seasons",
     "matchup_periods",
+    "matchups",
+    "matchup_category_results",
     "fantasy_team_season_managers",
 )
 NBA_TABLES = ("nba_seasons", "players")
@@ -141,6 +143,7 @@ ENUM_TYPES = (
     "provider_entity_kind",
     "match_method",
     "review_status",
+    "matchup_result",
 )
 #: The synced canonical tables that carry an ``ingestion_run_id`` lineage column.
 LINEAGE_TABLES = (
@@ -148,6 +151,7 @@ LINEAGE_TABLES = (
     "league_season_categories",
     "fantasy_team_seasons",
     "matchup_periods",
+    "matchups",
 )
 EXPECTED_PROVIDER_KEYS = {
     "espn", "yahoo", "sleeper", "nba", "kaggle", "bbm", "hashtag", "manual",
