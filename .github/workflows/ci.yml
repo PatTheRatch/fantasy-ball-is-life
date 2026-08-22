@@ -65,6 +65,12 @@ jobs:
           TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/fcp_test
         run: python -m pytest -q
 
+      - name: Verify OpenAPI snapshot is current
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          python scripts/export-openapi.py
+          git diff --exit-code frontend/openapi.json
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -87,11 +93,13 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install, build, type-check, test, lint
+      - name: Install, drift-check, build, type-check, test, lint
         if: steps.detect.outputs.present == 'true'
         working-directory: frontend
         run: |
           npm ci
+          npm run generate:client
+          git diff --exit-code src/shared/api/openapi.d.ts
           npm run build
           npx tsc --noEmit
           npm run test

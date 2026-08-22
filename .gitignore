@@ -12,6 +12,8 @@ __pycache__/
 # Node / frontend build
 node_modules/
 frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
 
 # IDE / OS
 .idea/
