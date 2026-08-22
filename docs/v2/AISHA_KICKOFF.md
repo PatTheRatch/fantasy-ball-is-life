@@ -21,7 +21,7 @@ Oracle: /Users/patrickmcdowell/fcp-v1                 (V1 on `main`, read-only r
 Before writing anything, read in this order:
 
   1. CONTRIBUTING.md                               — how we work. Binding.
-  2. docs/FCP_V2_Product_Architecture_Charter.md   — 28 decisions, 10 non-negotiables. Authoritative.
+  2. docs/FCP_V2_Product_Architecture_Charter.md   — 29 decisions, 10 non-negotiables. Authoritative.
   3. docs/v2/BACKLOG.md                            — the list. Claude owns it; you never edit it.
 
 Then confirm your baseline is clean before you change anything:

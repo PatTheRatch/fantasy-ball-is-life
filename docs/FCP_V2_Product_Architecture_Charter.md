@@ -208,6 +208,24 @@ explicit status and reason, unresolved identity is queued and counted,
 and job outcomes are queryable data rather than log lines. Expressed as
 a non-negotiable in section 10.
 
+Decision 29: Adjustment composition semantics. Completes Decision 24 by
+defining what a delta actually does when composed. An opportunity
+adjustment means "I disagree with your opportunity assumption, not with
+your production rates," so dependent volume scales with it while
+efficiency is preserved. Three rules follow. Volume scales and
+efficiency does not: makes and attempts scale together and the
+percentage is derived from them, never scaled itself --- scaling FG%
+directly would assert that more minutes make a better shooter. The two
+opportunity fields compose at different levels: minutes_per_game scales
+per-game volume, while games scales season aggregates and leaves
+per-game rates alone. And absolute is the default adjustment mode,
+because a manager asserting "he plays 34 minutes" is asserting a value,
+not a standing percentage of disagreement that should track a moving
+base. Managers may still override any individual rate or stat directly;
+that is a second, explicit opinion layered above the opportunity one.
+Ratified by Patrick 22 August 2026; corroborated by external research in
+docs/v2/research/PROJECTION_ADJUSTMENTS.md.
+
 ## 5. Core Domain Model Direction
 
 The following is the conceptual V2 map. It is not yet a final SQL

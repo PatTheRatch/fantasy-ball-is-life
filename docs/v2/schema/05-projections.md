@@ -2,7 +2,7 @@
 
 **Domain:** projection sources, immutable sets, user adjustments, decision freezes, preferences.
 **Depends on:** 01, 03.
-**Charter:** Decisions 3 (plurality), 4 (editable without destroying), 6 (FCP eventually owns projections), 22 (immutable versioned beliefs), 24 (deltas + freeze on use).
+**Charter:** Decisions 3 (plurality), 4 (editable without destroying), 6 (FCP eventually owns projections), 22 (immutable versioned beliefs), 24 (deltas + freeze on use), 29 (composition semantics).
 
 > Read [`README.md`](README.md) first. Conventions there are binding.
 
@@ -293,6 +293,52 @@ Rules:
 3. A `user_licensed` source with a shared caller raises. Not a warning.
 4. Missing players are **absent and counted**, never zero-filled. `ProjectionView` exposes coverage so a caller can refuse to act on a bad set.
 
+### Composition rule
+
+Charter **Decision 29** (ratified 22 August 2026). An opportunity adjustment
+means *"I disagree with your opportunity assumption, not with your production
+rates."* Three rules, and they are testable:
+
+**1 · Volume scales, efficiency does not.** Scale the counting stats and *both*
+components of every shooting pair. The percentage is derived from the scaled
+components and is therefore invariant:
+
+```
+minutes_per_game 24 → 30   (×1.25)
+
+fgm 4.5  → 5.625        pts 12 → 15.0      reb 6 → 7.5
+fga 10.0 → 12.500       ast  3 → 3.75      tov 2 → 2.5
+fg%  .450 → .450  ← derived, never scaled
+```
+
+Scaling `fg%` directly yields `.5625` — the claim that more minutes make a
+better shooter. This is only expressible because `projection_rows` stores makes
+and attempts rather than a bare percentage.
+
+**2 · `games` and `minutes_per_game` compose at different levels.**
+`minutes_per_game` scales per-game volume. `games` scales season aggregates and
+leaves per-game rates alone — a manager cutting 82 → 65 games for injury risk
+is not saying he plays fewer minutes a night. Applying one rule to both
+double-scales season totals.
+
+**3 · `absolute` is the default mode.** The modes diverge as soon as the base
+moves; on a base of 24 → 27 carrying a "30 minutes" belief:
+
+```
+absolute    30       ← what the manager actually asserted
+delta       +6  → 33
+multiplier ×1.25 → 33.75
+```
+
+A manager asserting "he plays 34" asserts a value, not a standing percentage of
+disagreement that should track a moving base. `multiplier` and `delta` remain
+available for managers who mean them.
+
+Direct overrides of an individual rate or stat sit **above** this layer: a
+second, explicit opinion about production rather than opportunity. Untouched
+fields keep flowing from the newest base, which is the whole point of composing
+at read time rather than forking the set.
+
 ---
 
 ## Requests against other foundation domains
@@ -304,11 +350,7 @@ Rules:
 
 ## Open questions
 
-1. **Adjustment composition semantics.** If a manager sets `minutes_per_game` to 34 on a player projected for 28, do dependent counting stats scale proportionally, or only the field named? Recommend: scale rate stats proportionally by default with an explicit opt-out, because "more minutes" is what a manager means. **Still needs Patrick's ratification, but the recommendation is now externally corroborated** — see [`../research/PROJECTION_ADJUSTMENTS.md`](../research/PROJECTION_ADJUSTMENTS.md). Research added three things this question did not previously state:
-
-   - **Volume scales, efficiency does not.** Scale `fga/fgm/fta/ftm/tpa/tpm` and the counting stats; percentages are *derived* from the scaled components and stay invariant (`10.5/18.3 = .573` → `13.125/22.875 = .573`). Scaling a percentage directly claims more minutes make a better shooter. This works only because `projection_rows` stores makes and attempts rather than bare percentages.
-   - **`games` and `minutes_per_game` compose differently.** `minutes_per_game` scales per-game volume; `games` scales season aggregates and must leave per-game rates alone. One rule applied to both double-scales season totals.
-   - **`absolute` is the right default mode** for minutes. The three modes diverge once the base moves (base 24→27 with a "30" belief yields 30 absolute / 33 delta / 33.75 multiplier), and a manager asserting "he plays 34" is asserting a value, not standing bullishness.
+1. ~~**Adjustment composition semantics.**~~ **Resolved — charter Decision 29**, ratified by Patrick 22 August 2026. Volume scales and efficiency does not; `games` and `minutes_per_game` compose at different levels; `absolute` is the default mode. The rule is normative in [§Composition rule](#composition-rule) above; the research behind it is in [`../research/PROJECTION_ADJUSTMENTS.md`](../research/PROJECTION_ADJUSTMENTS.md).
 2. **Cross-season adjustment carry-over.** Adjustments are season-scoped. Whether a preseason belief carries into the next season is a product question; recommend no, with an explicit copy action.
 3. **Set retention.** Frozen sets accumulate one per source per period per season. That is small; recommend no pruning.
 4. **FCP model output.** When the model ships (charter Decision 6, old spec's M-3), it writes a `projection_sets` row like any other source. No schema change anticipated — that is the point of this design.
