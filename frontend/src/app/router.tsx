@@ -1,10 +1,10 @@
 import { createBrowserRouter } from "react-router-dom";
 import { Layout } from "./layout";
 import { MePage } from "../features/me/MePage";
+import { LeaguePage } from "../features/standings/LeaguePage";
 
-// Routes. The league page (`/leagues/:leagueSeasonId`) lands in S1-11b; the
-// `/me` route here is the full vertical slice — generated client → typed fetch →
-// token attach → react-query → render.
+// Routes. The `/me` route is the full vertical slice from S1-11a; the league
+// page (S1-11b) renders standings for a league season reached by UUID.
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -13,6 +13,10 @@ export const router = createBrowserRouter([
       {
         index: true,
         element: <MePage />,
+      },
+      {
+        path: "leagues/:leagueSeasonId",
+        element: <LeaguePage />,
       },
     ],
   },
