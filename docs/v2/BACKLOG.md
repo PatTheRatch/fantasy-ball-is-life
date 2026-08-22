@@ -79,14 +79,14 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   outcome. Persist before interpret, so replay works.
   *Charter: D16, D17, D28.*
 
-- [ ] **S1-09 · Player identity crosswalk** — **NEXT** — depends on S1-08
-  `players`, `player_external_ids`, `identity_links`,
+- [x] **S1-09 · Player identity crosswalk** — `d162ad5` — depends on S1-08
+  `players`, `provider_identities`, `identity_links`,
   `identity_review_queue`. The one resolution ladder from
   `schema/04`, wired to `domain/names.py`. An unmatched name is queued and
   counted, never dropped.
   *Charter: D18, D19; non-negotiable "no fuzzy-name identity".*
 
-- [ ] **S1-10 · Matchups + standings read path** — depends on S1-06, S1-09
+- [ ] **S1-10 · Matchups + standings read path** — **NEXT** — depends on S1-06, S1-09
   Sync one league's completed periods, fold standings from final periods, and
   serve `GET /api/v1/leagues/{id}/standings` with freshness metadata on the
   response.
@@ -129,4 +129,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-08 merged.*
+*Claude updates this on approval. Last change: S1-09 merged.*
