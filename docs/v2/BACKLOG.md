@@ -126,6 +126,85 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
 
 ---
 
+## Slice 1 hardening — from the red-team triage
+
+Confirmed implementation gaps against a design that already says the right
+thing. Source: [`research/REDTEAM_TRIAGE.md`](research/REDTEAM_TRIAGE.md),
+each verified against the code before landing here. Ordered by severity;
+H-01 and H-02 are correctness bugs in shipped code.
+
+- [ ] **H-01 · Unknown is not a tie** — the non-negotiable violation
+  `compare()` returns `TIE` when either side is `None`/NaN; that persists as
+  `result='tie'` and standings counts it as a real category tie. Charter §10:
+  absence of a result must never be indistinguishable from a result. Add an
+  explicit unknown to the domain result vocabulary, persist `NULL` (the column
+  is *already* nullable), exclude unknown categories from the fold, and mark
+  the matchup partial rather than final. Ports the invariant register's
+  null-vs-zero lesson to null-vs-tie.
+  *Charter: D28, §10. Touches `domain/categories.py`, `services/matchups.py`,
+  `services/standings_read.py`.*
+
+- [ ] **H-02 · Conflicting birthdate must not auto-link**
+  The ladder falls through from `exact_name_dob` to `exact_name` and auto-links
+  at 0.850 even when the candidate's birthdate contradicts the provider's.
+  Treat a two-sided birthdate disagreement as a conflict and queue it. Add the
+  test that was missing — `tests/services/test_resolution.py` covers matching
+  and absent DOB, never contradictory.
+  *Charter: D18 (prefer unknown over confidently wrong).*
+
+- [ ] **H-03 · Runs must always reach a terminal state**
+  Any exception after `start_run()` leaves the run `running` forever. Wrap
+  run-owning services in a lifecycle context manager that guarantees
+  `succeeded | partial | failed` on exit. Also stamp `partial` when a payload
+  is missing scoring categories (pairs with H-01).
+  *Charter: D28 — job outcomes are queryable data, not log lines.*
+
+- [ ] **H-04 · Make tenancy structural, not conventional**
+  Two halves, both currently labels rather than gates: `MatchupRepository` and
+  `LeagueSeasonRepository` take a bare `Session` while `LeagueScopedRepository`
+  sits unused, and `@declare_policy` attaches no dependency while the matrix
+  test only asserts the attribute exists. Bind league repos to a scope, and
+  make the matrix test inspect each route's dependency graph so a
+  `LEAGUE_SCOPED` route without a membership dependency fails CI.
+  **No live hole today** — the standings route is guarded — but D26 claims
+  structure, and structure is what is missing.
+  *Charter: D26, non-negotiable #1.*
+
+- [ ] **H-05 · Constrain what the schema claims**
+  Database-level gaps behind stated invariants: matchups can reference a
+  period and teams from other leagues (composite keys); nothing ties
+  `status='final'` to `finalized_at`; name-only `provider_identities` are not
+  unique (partial unique index on `raw_name WHERE provider_entity_id IS NULL`);
+  `identity_review_open_idx` is not unique; `identity_links.confidence` has no
+  `0..1` bound and `fcp_entity_id` is polymorphic with no FK. Check #12 —
+  `fantasy_team_seasons` likely has the same cross-league binding gap.
+
+- [ ] **H-06 · Wire payload dedupe, or delete the claim**
+  `find_by_hash` and `latest_for` have zero callers; `record_payload` always
+  inserts. Either wire dedupe in — first widening the key, which is
+  `(provider_id, endpoint, content_hash)` where endpoint is
+  `scoreboard/{espn_period_id}` and therefore collides across leagues — or
+  remove the methods and their docstrings. A documented guarantee nothing
+  calls is worse than an absent one.
+
+- [ ] **H-07 · Finality needs a producer** — depends on H-01, H-03
+  Nothing in the codebase writes `matchup_periods.status = 'final'`. The
+  design makes finality the linchpin of sync cost and standings correctness,
+  and it is currently an input nobody produces. Build `finalize_period` as the
+  single transactional owner of that transition: last authoritative fetch →
+  persist → supersede → set `status`/`finalized_at` together. Then rename
+  `sync_league_final_periods`, whose docstring claims to be the sync while
+  behaving as a backfill.
+
+- [ ] **H-08 · Test the interleavings, not the sunny path** — depends on H-07
+  Postgres tests for: exception after the first supersession flush (one live
+  row must survive), two concurrent changed syncs, and run-status on failure.
+  Add per-league serialisation (advisory lock or `SELECT ... FOR UPDATE`) when
+  the scheduler lands — the race is unreachable today because nothing
+  schedules the sync.
+
+---
+
 ## Slice 2 and beyond — not yet cut
 
 Deliberately unscoped. Cutting bites for work that far out invents detail we
