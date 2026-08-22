@@ -73,13 +73,13 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   `espn_api.League`** — that is the §7 violation V1 built its domain on.
   *Schema: [`schema/04-provider-ingestion.md`](schema/04-provider-ingestion.md).*
 
-- [ ] **S1-08 · Ingestion pipeline** — **NEXT** — depends on S1-07
+- [x] **S1-08 · Ingestion pipeline** — `403cc1a` — depends on S1-07
   `ingestion_runs`, `raw_payloads` with `content_hash` dedupe, normalizer
   versioning, lineage columns on canonical rows, `partial` as a real run
   outcome. Persist before interpret, so replay works.
   *Charter: D16, D17, D28.*
 
-- [ ] **S1-09 · Player identity crosswalk** — depends on S1-08
+- [ ] **S1-09 · Player identity crosswalk** — **NEXT** — depends on S1-08
   `players`, `player_external_ids`, `identity_links`,
   `identity_review_queue`. The one resolution ladder from
   `schema/04`, wired to `domain/names.py`. An unmatched name is queued and
@@ -129,4 +129,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-07 merged.*
+*Claude updates this on approval. Last change: S1-08 merged.*
