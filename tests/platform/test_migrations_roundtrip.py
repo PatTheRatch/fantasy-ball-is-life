@@ -127,8 +127,9 @@ FANTASY_TABLES = (
     "matchup_periods",
     "fantasy_team_season_managers",
 )
-NBA_TABLES = ("nba_seasons",)
+NBA_TABLES = ("nba_seasons", "players")
 INGESTION_TABLES = ("providers", "provider_connections", "ingestion_runs", "raw_payloads")
+CROSSWALK_TABLES = ("provider_identities", "identity_links", "identity_review_queue")
 ENUM_TYPES = (
     "provider_key",
     "league_season_status",
@@ -137,6 +138,9 @@ ENUM_TYPES = (
     "period_status",
     "manager_role",
     "run_status",
+    "provider_entity_kind",
+    "match_method",
+    "review_status",
 )
 #: The synced canonical tables that carry an ``ingestion_run_id`` lineage column.
 LINEAGE_TABLES = (
@@ -153,7 +157,7 @@ EXPECTED_PROVIDER_KEYS = {
 def test_migrations_apply_and_roll_back() -> None:
     url = _test_url()
     cfg = _config(url)
-    all_tables = IDENTITY_TABLES + FANTASY_TABLES + NBA_TABLES + INGESTION_TABLES
+    all_tables = IDENTITY_TABLES + FANTASY_TABLES + NBA_TABLES + INGESTION_TABLES + CROSSWALK_TABLES
     expected_keys = {c.key for c in NINE_CAT}
 
     command.upgrade(cfg, "head")
