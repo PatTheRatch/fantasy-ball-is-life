@@ -44,10 +44,14 @@ from backend.repos.matchups import LeagueSeasonRepository, MatchupRepository
 from backend.services.ingestion import NORMALIZER_VERSION, IngestionService
 
 #: domain ``Result`` → FCP ``matchup_result``, from the home side's perspective.
-_RESULT_MAP: dict[Result, str] = {
+#: ``None`` is an unknown outcome (a missing/NaN value) — the storage column is
+#: nullable, so an unknown is never collapsed into ``tie``. Total over ``Result``
+#: so a future member cannot be silently dropped.
+_RESULT_MAP: dict[Result, str | None] = {
     Result.WIN: "home",
     Result.LOSS: "away",
     Result.TIE: "tie",
+    Result.UNKNOWN: None,
 }
 
 
@@ -306,7 +310,7 @@ class MatchupSyncService:
 
         home_resolved = _resolved_stats(domain_cats, home_stats)
         away_resolved = _resolved_stats(domain_cats, away_stats)
-        home_wins, away_wins, _ = tally(domain_cats, home_resolved, away_resolved)
+        home_wins, away_wins, _, _ = tally(domain_cats, home_resolved, away_resolved)
         computed = (
             "home" if home_wins > away_wins else "away" if away_wins > home_wins else "tie"
         )

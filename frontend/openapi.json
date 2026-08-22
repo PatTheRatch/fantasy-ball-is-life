@@ -52,6 +52,10 @@
             "title": "Ties",
             "type": "integer"
           },
+          "unknown": {
+            "title": "Unknown",
+            "type": "integer"
+          },
           "win_pct": {
             "title": "Win Pct",
             "type": "number"
@@ -70,7 +74,8 @@
           "losses",
           "ties",
           "win_pct",
-          "played"
+          "played",
+          "unknown"
         ],
         "title": "StandingRowOut",
         "type": "object"
@@ -89,6 +94,10 @@
             ],
             "title": "As Of"
           },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
           "data": {
             "items": {
               "$ref": "#/components/schemas/StandingRowOut"
@@ -103,13 +112,19 @@
           "stale": {
             "title": "Stale",
             "type": "boolean"
+          },
+          "unknown_category_count": {
+            "title": "Unknown Category Count",
+            "type": "integer"
           }
         },
         "required": [
           "data",
           "as_of",
           "freshness",
-          "stale"
+          "stale",
+          "complete",
+          "unknown_category_count"
         ],
         "title": "StandingsResponse",
         "type": "object"

@@ -83,6 +83,8 @@ export interface components {
             team_name: string;
             /** Ties */
             ties: number;
+            /** Unknown */
+            unknown: number;
             /** Win Pct */
             win_pct: number;
             /** Wins */
@@ -92,12 +94,16 @@ export interface components {
         StandingsResponse: {
             /** As Of */
             as_of: string | null;
+            /** Complete */
+            complete: boolean;
             /** Data */
             data: components["schemas"]["StandingRowOut"][];
             /** Freshness */
             freshness: string;
             /** Stale */
             stale: boolean;
+            /** Unknown Category Count */
+            unknown_category_count: number;
         };
         /**
          * UserDTO

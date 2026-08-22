@@ -272,3 +272,53 @@ def test_ratio_rounding_keeps_result_and_category_consistent() -> None:
     assert r.result == "tie"  # compare() and tally() agree on the rounded value
     assert r.home_value == 0.5
     assert r.away_value == 0.5
+
+
+def test_missing_category_persists_result_none_not_tie() -> None:
+    # charter §10: absence of a result must be distinguishable from a result
+    cats = _model_cats()[:2]  # PTS, REB
+    teams = {"1": _team("1"), "2": _team("2")}
+    periods = [_period("p1", "7")]
+    matchups = _InMemoryMatchups()
+
+    # Home is missing REB entirely → REB is unknown, not a tie, not dropped.
+    home = {"PTS": 110.0}
+    away = {"PTS": 100.0, "REB": 50.0}
+    sb = ScoreboardDTO(
+        provider_period_id="7",
+        matchups=(_matchup("1", "2", home, away, "home"),),
+    )
+
+    svc, _, adapter = _service(cats, teams, periods, matchups, [sb])
+    svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+
+    (m,) = matchups.added
+    assert m.computed_result == "home"  # PTS decided → home wins 1-0
+    assert len(matchups.added_results) == 2  # both rows exist; REB absent-not-dropped
+    reb = next(r for r in matchups.added_results if r.category_id == cats[1].id)
+    assert reb.result is None  # unknown, never 'tie'
+
+
+def test_computed_result_ignores_unknown_categories() -> None:
+    # charter §10: a matchup result is decided by known categories only.
+    cats = _model_cats()[:3]  # PTS, REB, AST
+    teams = {"1": _team("1"), "2": _team("2")}
+    periods = [_period("p1", "7")]
+    matchups = _InMemoryMatchups()
+
+    # Home wins PTS, away wins REB, AST is missing on both sides.
+    home = {"PTS": 110.0, "REB": 40.0}
+    away = {"PTS": 100.0, "REB": 50.0}
+    sb = ScoreboardDTO(
+        provider_period_id="7",
+        matchups=(_matchup("1", "2", home, away, "home"),),
+    )
+
+    svc, _, adapter = _service(cats, teams, periods, matchups, [sb])
+    svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+
+    (m,) = matchups.added
+    # 1-1 decided (PTS home, REB away); the unknown AST must not tip it.
+    assert m.computed_result == "tie"
+    ast = next(r for r in matchups.added_results if r.category_id == cats[2].id)
+    assert ast.result is None

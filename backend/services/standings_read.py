@@ -39,16 +39,24 @@ class StandingTeamRow:
     ties: int
     win_pct: float
     played: int
+    unknown: int
 
 
 @dataclass(frozen=True, slots=True)
 class StandingsResult:
-    """The folded table plus its freshness envelope."""
+    """The folded table plus its freshness envelope.
+
+    ``complete`` is True only when every folded category was decided; an
+    ``unknown`` category is never a result, so its presence is surfaced rather
+    than silently dropped (charter §10).
+    """
 
     rows: tuple[StandingTeamRow, ...]
     as_of: date | None  # max end_date of included periods; None pre-season
     freshness: str  # always "final" — only final periods are folded
     stale: bool  # always False — final history never goes stale
+    complete: bool  # True iff no folded category outcome was unknown
+    unknown_category_count: int  # season total of undetermined category outcomes
 
 
 def _group_by_matchup(
@@ -98,10 +106,12 @@ class StandingsReadService:
                 continue
             category_rows = by_matchup.get(m.id, [])
             # ``result`` is the HOME side's perspective: 'home' is a home win,
-            # 'away' an away win, 'tie' a tie.
+            # 'away' an away win, 'tie' a tie. ``None`` is an undetermined
+            # outcome (a missing/NaN value) — never a tie (charter §10).
             home_wins = sum(1 for r in category_rows if r.result == "home")
             away_wins = sum(1 for r in category_rows if r.result == "away")
             ties = sum(1 for r in category_rows if r.result == "tie")
+            unknowns = sum(1 for r in category_rows if r.result is None)
             domain_results.append(
                 MatchupResult(
                     str(m.home_team_season_id),
@@ -109,6 +119,7 @@ class StandingsReadService:
                     home_wins,
                     away_wins,
                     ties,
+                    category_unknowns=unknowns,
                 )
             )
 
@@ -130,8 +141,17 @@ class StandingsReadService:
                     ties=row.ties,
                     win_pct=row.win_pct,
                     played=row.played,
+                    unknown=row.unknown,
                 )
             )
 
         as_of = max((p.end_date for p in periods), default=None)
-        return StandingsResult(tuple(rows), as_of, "final", False)
+        unknown_category_count = sum(dr.category_unknowns for dr in domain_results)
+        return StandingsResult(
+            rows=tuple(rows),
+            as_of=as_of,
+            freshness="final",
+            stale=False,
+            complete=unknown_category_count == 0,
+            unknown_category_count=unknown_category_count,
+        )
