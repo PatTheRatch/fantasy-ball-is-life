@@ -59,15 +59,15 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   *Charter: D2, D9, D12, D13, D26; non-negotiable #1.*
   *Schema: [`schema/01-identity.md`](schema/01-identity.md).*
 
-- [ ] **S1-06 · Fantasy core schema** — **NEXT** — depends on S1-03
-  `leagues`, `league_seasons`, `league_settings`, `categories`,
+- [x] **S1-06 · Fantasy core schema** — `cb97031` — depends on S1-03
+  `leagues`, `league_seasons`, `categories`,
   `league_season_categories`, `fantasy_teams`, `fantasy_team_seasons`,
   `matchup_periods` with `status` finality. Periods derived from the provider,
   never hand-typed.
   *Charter: D8, D11, D14, D15; non-negotiable "no hardcoded season calendars".*
   *Schema: [`schema/02-fantasy.md`](schema/02-fantasy.md).*
 
-- [ ] **S1-07 · ESPN adapter + DTOs** — depends on S1-02, S1-06
+- [ ] **S1-07 · ESPN adapter + DTOs** — **NEXT** — depends on S1-02, S1-06
   `fetch_settings`, `fetch_teams`, `fetch_periods` returning FCP DTOs.
   Provider objects must not escape the package, and **no subclassing of
   `espn_api.League`** — that is the §7 violation V1 built its domain on.
@@ -129,4 +129,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-05 merged.*
+*Claude updates this on approval. Last change: S1-06 merged.*
