@@ -109,13 +109,14 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   committed `openapi.json` snapshot, CI drift-gated); dev auth token shim; one
   real `/me` vertical slice. npm (not pnpm) + TS ^5.
 
-- [ ] **S1-11b · League page (standings)** — **NEXT** — depends on S1-11a
-  `/leagues/:league_season_id` rendering the standings table with honest
-  empty/stale/loading states (using the StateMessage vocabulary + freshness
-  envelope from S1-10b).
-  Scoped: [`docs/tickets/S1-11b-league-page-standings.md`](../tickets/S1-11b-league-page-standings.md).
+- [x] **S1-11b · League page (standings)** — `10f1a90` — depends on S1-11a
+  `/leagues/:leagueSeasonId` route rendering the standings table (server
+  order, no client-side re-sort) with the full state mapping (loading /
+  403-404 combined non-leaking copy / generic error / not-synced / empty /
+  rows + stale banner), basketball `win_pct` formatting, "Final through
+  {as_of}" footer. Frontend only.
 
-- [ ] **S1-11c · Periods endpoint + selector** — depends on S1-11b
+- [ ] **S1-11c · Periods endpoint + selector** — **NEXT** — depends on S1-11b
   Backend `GET /api/v1/leagues/{league_season_id}/periods` (`LEAGUE_SCOPED`) +
   a period selector on the page; this is what actually closes the slice.
 
@@ -159,4 +160,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-11b scoped and assigned.*
+*Claude updates this on approval. Last change: S1-11b merged.*
