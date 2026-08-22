@@ -11,7 +11,7 @@ import time
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, ForeignKey, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -59,4 +59,19 @@ class TimestampMixin:
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+
+class LineageMixin:
+    """``ingestion_run_id`` provenance column (S1-08; charter D17).
+
+    Records which ingestion run most recently wrote (or created) the row, so the
+    provenance of any canonical fact is one join away (04-provider-ingestion
+    "every canonical fact in 02 and 03 carries ``ingestion_run_id``"). Nullable:
+    reference/franchise rows populated outside the pipeline (seeds, user action)
+    simply leave it null.
+    """
+
+    ingestion_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("ingestion_runs.id"), nullable=True
     )

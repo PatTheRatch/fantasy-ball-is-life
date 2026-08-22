@@ -19,6 +19,12 @@ from backend.models.identity import (
     ManagerUserLink,
     User,
 )
+from backend.models.ingestion import (
+    IngestionRun,
+    Provider,
+    ProviderConnection,
+    RawPayload,
+)
 from backend.models.nba import NbaSeason
 
 __all__ = [
@@ -26,6 +32,7 @@ __all__ = [
     "FantasyTeam",
     "FantasyTeamSeason",
     "FantasyTeamSeasonManager",
+    "IngestionRun",
     "League",
     "LeagueSeason",
     "LeagueSeasonCategory",
@@ -33,5 +40,8 @@ __all__ = [
     "ManagerUserLink",
     "MatchupPeriod",
     "NbaSeason",
+    "Provider",
+    "ProviderConnection",
+    "RawPayload",
     "User",
 ]

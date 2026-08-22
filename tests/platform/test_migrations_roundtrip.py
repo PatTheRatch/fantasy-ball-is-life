@@ -89,6 +89,33 @@ def _category_keys(url: str) -> set[str]:
         engine.dispose()
 
 
+def _provider_keys(url: str) -> set[str]:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT key FROM providers"))
+            return {row[0] for row in result}
+    finally:
+        engine.dispose()
+
+
+def _column_exists(url: str, table: str, column: str) -> bool:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = :table "
+                    "AND column_name = :column"
+                ),
+                {"table": table, "column": column},
+            )
+            return result.scalar() is not None
+    finally:
+        engine.dispose()
+
+
 IDENTITY_TABLES = ("users", "managers", "manager_user_links")
 FANTASY_TABLES = (
     "leagues",
@@ -101,6 +128,7 @@ FANTASY_TABLES = (
     "fantasy_team_season_managers",
 )
 NBA_TABLES = ("nba_seasons",)
+INGESTION_TABLES = ("providers", "provider_connections", "ingestion_runs", "raw_payloads")
 ENUM_TYPES = (
     "provider_key",
     "league_season_status",
@@ -108,13 +136,24 @@ ENUM_TYPES = (
     "period_type",
     "period_status",
     "manager_role",
+    "run_status",
 )
+#: The synced canonical tables that carry an ``ingestion_run_id`` lineage column.
+LINEAGE_TABLES = (
+    "league_seasons",
+    "league_season_categories",
+    "fantasy_team_seasons",
+    "matchup_periods",
+)
+EXPECTED_PROVIDER_KEYS = {
+    "espn", "yahoo", "sleeper", "nba", "kaggle", "bbm", "hashtag", "manual",
+}
 
 
 def test_migrations_apply_and_roll_back() -> None:
     url = _test_url()
     cfg = _config(url)
-    all_tables = IDENTITY_TABLES + FANTASY_TABLES + NBA_TABLES
+    all_tables = IDENTITY_TABLES + FANTASY_TABLES + NBA_TABLES + INGESTION_TABLES
     expected_keys = {c.key for c in NINE_CAT}
 
     command.upgrade(cfg, "head")
@@ -124,6 +163,11 @@ def test_migrations_apply_and_roll_back() -> None:
     for enum in ENUM_TYPES:
         assert _enum_exists(url, enum), f"{enum} type should exist after upgrade"
     assert _category_keys(url) == expected_keys, "nine standard categories should be seeded"
+    assert _provider_keys(url) == EXPECTED_PROVIDER_KEYS, "eight providers should be seeded"
+    for table in LINEAGE_TABLES:
+        assert _column_exists(url, table, "ingestion_run_id"), (
+            f"{table} should carry an ingestion_run_id lineage column"
+        )
 
     command.downgrade(cfg, "base")
     assert not _extension_exists(url, "citext"), "citext should be gone after downgrade"
@@ -139,3 +183,6 @@ def test_migrations_apply_and_roll_back() -> None:
     for enum in ENUM_TYPES:
         assert _enum_exists(url, enum), f"{enum} type should exist after re-apply"
     assert _category_keys(url) == expected_keys, "categories should be re-seeded on re-apply"
+    assert (
+        _provider_keys(url) == EXPECTED_PROVIDER_KEYS
+    ), "providers should be re-seeded on re-apply"
