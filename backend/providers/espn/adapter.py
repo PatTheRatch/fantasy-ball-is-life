@@ -19,13 +19,17 @@ is the single seam where ``espn_api`` is touched; tests patch it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.domain.dto import LeagueSettingsDTO, MatchupPeriodDTO, PeriodType, TeamDTO
 from backend.providers.espn.client import install_espn_timeout_patch
 
 DEFAULT_TIMEZONE = "America/New_York"
+
+#: ESPN basketball leagues are ET-based; the schema's default ``timezone``.
+_DEFAULT_TZ = ZoneInfo(DEFAULT_TIMEZONE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,17 +60,23 @@ def _construct_league(conn: EspnConnection, season_year: int) -> Any:
 
 
 def map_settings(league: Any, conn: EspnConnection, season_year: int) -> LeagueSettingsDTO:
-    """Map ``league.settings`` into a :class:`LeagueSettingsDTO`."""
+    """Map ``league.settings`` into a :class:`LeagueSettingsDTO`.
+
+    Fields the SDK does not expose are left ``None`` — reported honestly, never
+    invented (D28). ``scoring_type`` in particular is load-bearing (category vs
+    points league), so a missing value stays ``None`` for the ingest pipeline to
+    fail visibly on, rather than being coerced to an empty string.
+    """
     s = league.settings
     return LeagueSettingsDTO(
         provider_league_id=str(conn.league_id),
         season_year=season_year,
-        scoring_type=s.scoring_type or "",
+        scoring_type=s.scoring_type,
         timezone=DEFAULT_TIMEZONE,
         team_count=s.team_count,
         playoff_team_count=s.playoff_team_count,
         regular_season_periods=s.reg_season_count,
-        acquisition_budget=s.acquisition_budget or None,
+        acquisition_budget=s.acquisition_budget,
         uses_faab=bool(s.faab) if s.faab is not None else None,
     )
 
@@ -85,7 +95,18 @@ def map_teams(league: Any) -> list[TeamDTO]:
     return sorted(dtos, key=lambda d: d.provider_team_id)
 
 
-def _scoring_period_dates(league: Any) -> dict[int, set[str]]:
+def _epoch_ms_to_date(epoch_ms: int) -> date:
+    """Convert ESPN's epoch-millisecond game timestamp to a calendar date.
+
+    ESPN's ``proGamesByScoringPeriod`` game ``date`` field is epoch milliseconds
+    (``espn_api/basketball/player.py``: ``datetime.fromtimestamp(game['date']/1000.0)``).
+    Conversion is in the league's timezone (ET by default) so a late-evening game
+    lands on its fantasy day rather than the next UTC day.
+    """
+    return datetime.fromtimestamp(epoch_ms / 1000.0, tz=_DEFAULT_TZ).date()
+
+
+def _scoring_period_dates(league: Any) -> dict[int, set[date]]:
     """Flatten ``proGamesByScoringPeriod`` into ``scoring_period_id → dates``.
 
     The pro schedule is per-team (``{pro_team_id: {scoring_period_id: [games]}}``)
@@ -93,15 +114,17 @@ def _scoring_period_dates(league: Any) -> dict[int, set[str]]:
     dates are the union across teams (deduped by set). Scoring periods with no
     games (the All-Star break ids) contribute no dates and are simply absent.
     """
-    dates: dict[int, set[str]] = {}
+    dates: dict[int, set[date]] = {}
     for team_schedule in league._get_all_pro_schedule().values():
         for period_id, games in team_schedule.items():
             if not games:
                 continue
             for game in games:
-                game_date = game.get("date")
-                if game_date:
-                    dates.setdefault(int(period_id), set()).add(game_date)
+                epoch_ms = game.get("date")
+                if epoch_ms:
+                    dates.setdefault(int(period_id), set()).add(
+                        _epoch_ms_to_date(int(epoch_ms))
+                    )
     return dates
 
 
@@ -124,20 +147,17 @@ def map_periods(league: Any) -> list[MatchupPeriodDTO]:
         ordinal = int(key)
         period_type = PeriodType.REGULAR if ordinal <= regular_count else PeriodType.PLAYOFF
 
-        all_dates: set[str] = set()
+        all_dates: set[date] = set()
         for scoring_period_id in scoring_period_ids:
             all_dates |= dates_by_period.get(scoring_period_id, set())
-
-        start_date = date.fromisoformat(min(all_dates)) if all_dates else None
-        end_date = date.fromisoformat(max(all_dates)) if all_dates else None
 
         dtos.append(
             MatchupPeriodDTO(
                 ordinal=ordinal,
                 type=period_type,
                 provider_period_id=key,
-                start_date=start_date,
-                end_date=end_date,
+                start_date=min(all_dates) if all_dates else None,
+                end_date=max(all_dates) if all_dates else None,
             )
         )
 

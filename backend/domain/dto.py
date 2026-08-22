@@ -42,7 +42,7 @@ class LeagueSettingsDTO:
 
     provider_league_id: str
     season_year: int
-    scoring_type: str
+    scoring_type: str | None
     timezone: str
     team_count: int | None = None
     roster_size: int | None = None
@@ -70,9 +70,11 @@ class MatchupPeriodDTO:
 
     ``start_date``/``end_date`` are derived from the provider's pro schedule, so
     they are ``None`` when the period has no games yet (a future period, or one
-    whose scoring periods are empty). The ingestion pipeline decides how to
-    treat an underivable period — the adapter reports it, never invents dates
-    (charter D28; S1-03 "derive dates from the pro schedule, never arithmetic").
+    whose scoring periods are empty). This is deliberate: the DTO reports the
+    truth, while ``matchup_periods.start_date``/``end_date`` are NOT NULL — the
+    ingestion pipeline (S1-08) must skip or reject an underivable period, never
+    invent a date range (charter D28; S1-03 "derive dates from the pro schedule,
+    never arithmetic").
     """
 
     ordinal: int

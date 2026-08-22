@@ -8,10 +8,11 @@ fixtures), so the real payload shape is locked without a network.
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.domain.dto import PeriodType
 from backend.providers.espn.adapter import (
@@ -24,6 +25,18 @@ from backend.providers.espn.adapter import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+_ET = ZoneInfo("America/New_York")
+
+
+def _ms(date_str: str) -> int:
+    """Epoch milliseconds for a date (midnight ET) — the real SDK date format.
+
+    ESPN's ``proGamesByScoringPeriod`` game ``date`` is epoch ms
+    (``espn_api/basketball/player.py``); the adapter converts it back to a date
+    in ET, so this helper round-trips through that conversion.
+    """
+    return int(datetime.fromisoformat(date_str).replace(tzinfo=_ET).timestamp() * 1000)
 
 
 def _load_schedule_settings() -> dict[str, dict[str, object]]:
@@ -100,7 +113,7 @@ def test_map_settings_maps_zero_budget_and_no_faab_to_none() -> None:
         2026,
     )
     assert dto.uses_faab is False
-    assert dto.acquisition_budget is None
+    assert dto.acquisition_budget == 0  # a real zero, not collapsed to None
 
 
 # --- map_teams --------------------------------------------------------------
@@ -127,13 +140,13 @@ def test_map_teams_sorts_by_provider_id() -> None:
 def test_map_periods_derives_type_and_dates() -> None:
     pro_schedule = {
         1: {  # one team's schedule; a second team duplicates dates (deduped)
-            "1": [{"date": "2025-10-21", "homeProTeamId": 1, "awayProTeamId": 2}],
-            "2": [{"date": "2025-10-28"}, {"date": "2025-10-30"}],
-            "18": [{"date": "2026-03-15"}],
+            "1": [{"date": _ms("2025-10-21"), "homeProTeamId": 1, "awayProTeamId": 2}],
+            "2": [{"date": _ms("2025-10-28")}, {"date": _ms("2025-10-30")}],
+            "18": [{"date": _ms("2026-03-15")}],
         },
         2: {
-            "1": [{"date": "2025-10-21"}],
-            "2": [{"date": "2025-10-28"}],
+            "1": [{"date": _ms("2025-10-21")}],
+            "2": [{"date": _ms("2025-10-28")}],
         },
     }
     settings = _fake_settings(matchup_periods={"1": [1], "2": [2], "18": [18]}, reg_season_count=2)
@@ -147,7 +160,7 @@ def test_map_periods_derives_type_and_dates() -> None:
 
 
 def test_map_periods_with_no_games_has_none_dates() -> None:
-    pro_schedule = {1: {"1": [{"date": "2025-10-21"}]}}
+    pro_schedule = {1: {"1": [{"date": _ms("2025-10-21")}]}}
     settings = _fake_settings(matchup_periods={"1": [1], "2": [2]}, reg_season_count=2)
     periods = map_periods(_fake_league(settings=settings, pro_schedule=pro_schedule))
 
@@ -184,16 +197,29 @@ def test_scoring_period_dates_handles_break_window() -> None:
     window = _load_break_window()
     per_team = {
         "0": {
-            pid: ([{"date": d} for d in dates] if dates else None)
+            pid: ([{"date": _ms(d)} for d in dates] if dates else None)
             for pid, dates in window.items()
         }
     }
     dates = _scoring_period_dates(_fake_league(pro_schedule=per_team))
 
-    assert dates[115] == {"2025-02-14"}
-    assert dates[121] == {"2025-02-20"}
+    assert dates[115] == {date(2025, 2, 14)}
+    assert dates[121] == {date(2025, 2, 20)}
     for missing in (116, 117, 118, 119, 120):
         assert missing not in dates
+
+
+def test_epoch_ms_converts_in_league_timezone() -> None:
+    """A late-evening ET game stays on its fantasy day, not the next UTC day.
+
+    Locks the confirmed SDK date format (epoch ms — espn_api/basketball/player.py)
+    and that conversion is in ET, matching the schema's default timezone.
+    """
+    from backend.providers.espn.adapter import _epoch_ms_to_date
+
+    # 2025-10-21 23:00 ET == 2025-10-22 03:00 UTC → ET date is Oct 21.
+    epoch_ms = int(datetime(2025, 10, 22, 3, 0, 0, tzinfo=UTC).timestamp() * 1000)
+    assert _epoch_ms_to_date(epoch_ms) == date(2025, 10, 21)
 
 
 # --- composition (no subclassing) ------------------------------------------
