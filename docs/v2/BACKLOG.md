@@ -103,9 +103,24 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   `teams`), `LeagueMembershipRepository.is_member`.
   *Charter: D10, D11, D20.*
 
-- [ ] **S1-11 · One shared league page** — **NEXT**
-  React + Vite + TS scaffold, generated API client, the league page rendering
-  standings and periods with honest empty and stale states. Closes the slice.
+- [x] **S1-11a · Frontend foundation** — `0ff1059`
+  `frontend/` scaffold (React 19 + Vite + TS + Tailwind + TanStack Query +
+  router); generated API client (`openapi-typescript` + `openapi-fetch` from a
+  committed `openapi.json` snapshot, CI drift-gated); dev auth token shim; one
+  real `/me` vertical slice. npm (not pnpm) + TS ^5.
+
+- [ ] **S1-11b · League page (standings)** — **NEXT** — depends on S1-11a
+  `/leagues/:league_season_id` rendering the standings table with honest
+  empty/stale/loading states (using the StateMessage vocabulary + freshness
+  envelope from S1-10b).
+
+- [ ] **S1-11c · Periods endpoint + selector** — depends on S1-11b
+  Backend `GET /api/v1/leagues/{league_season_id}/periods` (`LEAGUE_SCOPED`) +
+  a period selector on the page; this is what actually closes the slice.
+
+- [ ] **S1-11d · Reach a league (optional)** — depends on S1-11b
+  `GET /me/leagues` + a home route to list the user's memberships so a league
+  can be reached without an out-of-band ID.
 
 ---
 
@@ -140,4 +155,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-10b merged.*
+*Claude updates this on approval. Last change: S1-11a merged.*
