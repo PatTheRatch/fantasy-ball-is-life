@@ -149,7 +149,8 @@ Known to come, roughly in order:
 | # | Question | Blocks |
 |---|---|---|
 | 1 | Does `matchupPeriods` cover playoff/championship periods, and how does the All-Star break appear? — resolved S1-03 | S1-06 |
-| 2 | Roster fetch cost — one request per team per day, or one league-wide call? | Historical capture |
+| 2 | ~~Roster fetch cost — one request per team per day, or one league-wide call?~~ **Resolved: one league-wide call.** `mRoster` returns every team under `teams[].roster.entries[]`; V1 measured the whole 14-team league in a single request. Cost is per-league, not per-team. See [`research/ESPN_ROSTER_API.md`](research/ESPN_ROSTER_API.md). | ~~Historical capture~~ |
+| 6 | **Is historical lineup state actually recoverable?** Two candidate paths challenge the design's "a day not captured is gone permanently": (a) `rosterForCurrentScoringPeriod` inside the `mMatchupScore`/`mScoreboard` payload for a past period; (b) `mTransactions2` `FUTURE_ROSTER` records, which carry source/destination lineup slot + process date — V1 backfilled 21 weeks of them. If either works, daily capture is recoverable rather than capture-or-lose-forever, and historical capture does not have to lead Slice 2. **Live check, S1-03-shaped.** Until it answers, the daily-capture design stands unchanged — the asymmetry favours over-capturing. | Historical capture sequencing |
 | 3 | Story vocabulary: newsroom / recap / story / timeline. Pick one for tables, API and UI. | Newsroom slice |
 | 4 | Self-delivering recaps — absent from the charter by omission, not decision. Product call needed. | Newsroom slice |
 | 5 | Adjustment composition: does raising projected minutes scale dependent rate stats? | Projections slice |

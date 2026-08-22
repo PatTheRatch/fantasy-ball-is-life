@@ -226,6 +226,8 @@ Per-league job units on the Postgres queue, not one loop over every league.
 
 **Roster snapshots are the exception and must run daily from day one.** ESPN does not serve historical daily rosters, so a day not captured is gone permanently. Charter Decision 10 wants lineup state "when obtainable"; this is the only obtainable window. It also gates manager-performance analytics (charter §3), which needs to know what was available at decision time.
 
+> **The premise in that paragraph is under challenge and not yet re-verified.** Two candidate recovery paths have surfaced — `rosterForCurrentScoringPeriod` in the historical scoreboard payload, and `mTransactions2` `FUTURE_ROSTER` lineup-slot movements. See [`research/ESPN_ROSTER_API.md`](research/ESPN_ROSTER_API.md) §0 and backlog open question #6. **The daily-capture requirement stands until a live check says otherwise**: if we relax it and the premise was right, the lost days cannot be recovered. What the check changes is *sequencing urgency*, not the design.
+
 ---
 
 ## Replay
