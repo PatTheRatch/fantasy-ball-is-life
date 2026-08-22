@@ -112,5 +112,10 @@ class MatchupRepository:
         )
 
     def flush(self) -> None:
-        """Materialize pending UUIDv7 ids so a superseding link can be set."""
+        """Flush pending writes.
+
+        The sync uses this to control supersession ordering — the old row's
+        ``superseded_at`` must hit the database before the new live row is
+        inserted (else the partial unique index rejects the insert).
+        """
         self.session.flush()

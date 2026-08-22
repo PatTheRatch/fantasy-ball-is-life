@@ -83,7 +83,7 @@ class ProviderLineageMixin:
     ``ingestion_run_id`` is NOT NULL here (unlike :class:`LineageMixin`) because
     these tables are never seed- or user-populated — every row is derived from a
     provider payload, so provenance is mandatory. ``observed_at`` records when
-    the source reported the fact; ``normalizer_version`` records which parser
+    the pipeline observed the fact; ``normalizer_version`` records which parser
     produced the row (D17). The ``superseded_by_id``/``superseded_at`` self-FK is
     defined per-table (a mixin cannot reference its own table name).
     """

@@ -85,6 +85,16 @@ def _to_domain_category(c: Category) -> DomainCategory:
     )
 
 
+def _round3(value: float | None) -> float | None:
+    """Round a score value to the ``Numeric(10,3)`` column precision."""
+    return round(value, 3) if value is not None else None
+
+
+def _round2(value: float | None) -> float | None:
+    """Round a ratio component to the ``Numeric(10,2)`` column precision."""
+    return round(value, 2) if value is not None else None
+
+
 def _matchup_signature(
     matchup: Matchup, results: list[MatchupCategoryResult]
 ) -> tuple[object, ...]:
@@ -220,12 +230,21 @@ class MatchupSyncService:
         ):
             return "unchanged"
 
-        self.matchups.add(matchup)
-        self.matchups.flush()
-        existing.superseded_by_id = matchup.id
+        # Supersession, not mutation — and the order is load-bearing. The partial
+        # unique index (uq_matchups_live_slot) rejects a second live row the
+        # instant it is INSERTed, so the old row must leave the live set *before*
+        # the new one is flushed. Its ``superseded_at`` (no FK) is flipped first,
+        # then the new row is inserted, then ``superseded_by_id`` (a self-FK) can
+        # point at it. Setting ``superseded_by_id`` first would violate the FK
+        # (the new row doesn't exist yet); inserting first would violate the
+        # partial unique index (the old row is still live).
         existing.superseded_at = datetime.now(UTC)
+        self.matchups.flush()
+        self.matchups.add(matchup)
         for r in results:
             self.matchups.add_category_result(r)
+        self.matchups.flush()
+        existing.superseded_by_id = matchup.id
         return "superseded"
 
     def _normalize(
@@ -290,15 +309,15 @@ class MatchupSyncService:
         for cat in domain_cats:
             if cat.kind is CategoryKind.RATIO:
                 assert cat.numerator is not None and cat.denominator is not None
-                home_value = ratio_value(cat, home_stats)
-                away_value = ratio_value(cat, away_stats)
-                home_num = home_stats.get(cat.numerator)
-                home_den = home_stats.get(cat.denominator)
-                away_num = away_stats.get(cat.numerator)
-                away_den = away_stats.get(cat.denominator)
+                home_value = _round3(ratio_value(cat, home_stats))
+                away_value = _round3(ratio_value(cat, away_stats))
+                home_num = _round2(home_stats.get(cat.numerator))
+                home_den = _round2(home_stats.get(cat.denominator))
+                away_num = _round2(away_stats.get(cat.numerator))
+                away_den = _round2(away_stats.get(cat.denominator))
             else:
-                home_value = home_stats.get(cat.key)
-                away_value = away_stats.get(cat.key)
+                home_value = _round3(home_stats.get(cat.key))
+                away_value = _round3(away_stats.get(cat.key))
                 home_num = home_den = away_num = away_den = None
 
             home_result, _ = compare(cat, home_value, away_value)
