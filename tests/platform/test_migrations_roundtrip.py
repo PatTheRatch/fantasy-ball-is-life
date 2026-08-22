@@ -19,6 +19,8 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 
+from backend.domain.categories import NINE_CAT
+
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
@@ -64,24 +66,76 @@ def _table_exists(url: str, name: str) -> bool:
         engine.dispose()
 
 
+def _enum_exists(url: str, name: str) -> bool:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT 1 FROM pg_type WHERE typname = :name AND typtype = 'e'"),
+                {"name": name},
+            )
+            return result.scalar() is not None
+    finally:
+        engine.dispose()
+
+
+def _category_keys(url: str) -> set[str]:
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT key FROM categories"))
+            return {row[0] for row in result}
+    finally:
+        engine.dispose()
+
+
 IDENTITY_TABLES = ("users", "managers", "manager_user_links")
+FANTASY_TABLES = (
+    "leagues",
+    "league_seasons",
+    "categories",
+    "league_season_categories",
+    "fantasy_teams",
+    "fantasy_team_seasons",
+    "matchup_periods",
+    "fantasy_team_season_managers",
+)
+NBA_TABLES = ("nba_seasons",)
+ENUM_TYPES = (
+    "provider_key",
+    "league_season_status",
+    "category_kind",
+    "period_type",
+    "period_status",
+    "manager_role",
+)
 
 
 def test_migrations_apply_and_roll_back() -> None:
     url = _test_url()
     cfg = _config(url)
+    all_tables = IDENTITY_TABLES + FANTASY_TABLES + NBA_TABLES
+    expected_keys = {c.key for c in NINE_CAT}
 
     command.upgrade(cfg, "head")
     assert _extension_exists(url, "citext"), "citext should exist after upgrade"
-    for table in IDENTITY_TABLES:
+    for table in all_tables:
         assert _table_exists(url, table), f"{table} should exist after upgrade"
+    for enum in ENUM_TYPES:
+        assert _enum_exists(url, enum), f"{enum} type should exist after upgrade"
+    assert _category_keys(url) == expected_keys, "nine standard categories should be seeded"
 
     command.downgrade(cfg, "base")
     assert not _extension_exists(url, "citext"), "citext should be gone after downgrade"
-    for table in IDENTITY_TABLES:
+    for table in all_tables:
         assert not _table_exists(url, table), f"{table} should be gone after downgrade"
+    for enum in ENUM_TYPES:
+        assert not _enum_exists(url, enum), f"{enum} type should be gone after downgrade"
 
     command.upgrade(cfg, "head")
     assert _extension_exists(url, "citext"), "citext should exist after re-apply"
-    for table in IDENTITY_TABLES:
+    for table in all_tables:
         assert _table_exists(url, table), f"{table} should exist after re-apply"
+    for enum in ENUM_TYPES:
+        assert _enum_exists(url, enum), f"{enum} type should exist after re-apply"
+    assert _category_keys(url) == expected_keys, "categories should be re-seeded on re-apply"
