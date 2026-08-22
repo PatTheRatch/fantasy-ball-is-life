@@ -243,3 +243,32 @@ def test_differing_resync_supersedes() -> None:
     assert old.superseded_at is not None
     assert old.superseded_by_id == new.id
     assert new.computed_result == "away"
+
+
+def test_ratio_rounding_keeps_result_and_category_consistent() -> None:
+    # 0.500 (exact) vs 0.4996 → both round to 0.500 at Numeric(10,3), so this
+    # must read as a tie. Pre-fix, tally() derived from raw values (home win)
+    # while compare() saw rounded values (tie), so the category rows wouldn't
+    # sum to computed_result.
+    cats = [c for c in _model_cats() if c.key == "FG_PCT"]
+    teams = {"1": _team("1"), "2": _team("2")}
+    periods = [_period("p1", "7")]
+    matchups = _InMemoryMatchups()
+
+    sb = ScoreboardDTO(
+        provider_period_id="7",
+        matchups=(_matchup(
+            "1", "2", {"fgm": 40.0, "fga": 80.0},
+            {"fgm": 4996.0, "fga": 10000.0}, None,
+        ),),
+    )
+
+    svc, _, adapter = _service(cats, teams, periods, matchups, [sb])
+    svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+
+    (m,) = matchups.added
+    (r,) = matchups.added_results
+    assert m.computed_result == "tie"
+    assert r.result == "tie"  # compare() and tally() agree on the rounded value
+    assert r.home_value == 0.5
+    assert r.away_value == 0.5

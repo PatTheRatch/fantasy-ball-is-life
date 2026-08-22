@@ -15,6 +15,7 @@ a deterministic fold (S1-10b).
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -93,6 +94,27 @@ def _round3(value: float | None) -> float | None:
 def _round2(value: float | None) -> float | None:
     """Round a ratio component to the ``Numeric(10,2)`` column precision."""
     return round(value, 2) if value is not None else None
+
+
+def _resolved_stats(
+    cats: list[DomainCategory], stats: Mapping[str, float | None]
+) -> dict[str, float | None]:
+    """Return ``stats`` with each category's value derived and rounded to storage
+    precision, stored under its key.
+
+    ``compare`` (per-category result) and ``tally`` (computed_result) must see
+    *identical* values or the category rows can stop summing to the matchup
+    result at a 3-decimal boundary. Resolving once here — and rounding to the
+    ``Numeric(10,3)``/``Numeric(10,2)`` column precision — keeps both consistent
+    and makes the stored value equal the in-memory value on resync.
+    """
+    resolved = dict(stats)
+    for cat in cats:
+        if cat.kind is CategoryKind.RATIO:
+            resolved[cat.key] = _round3(ratio_value(cat, stats))
+        else:
+            resolved[cat.key] = _round3(stats.get(cat.key))
+    return resolved
 
 
 def _matchup_signature(
@@ -282,7 +304,9 @@ class MatchupSyncService:
             )
             return matchup, []
 
-        home_wins, away_wins, _ = tally(domain_cats, home_stats, away_stats)
+        home_resolved = _resolved_stats(domain_cats, home_stats)
+        away_resolved = _resolved_stats(domain_cats, away_stats)
+        home_wins, away_wins, _ = tally(domain_cats, home_resolved, away_resolved)
         computed = (
             "home" if home_wins > away_wins else "away" if away_wins > home_wins else "tie"
         )
@@ -309,17 +333,15 @@ class MatchupSyncService:
         for cat in domain_cats:
             if cat.kind is CategoryKind.RATIO:
                 assert cat.numerator is not None and cat.denominator is not None
-                home_value = _round3(ratio_value(cat, home_stats))
-                away_value = _round3(ratio_value(cat, away_stats))
-                home_num = _round2(home_stats.get(cat.numerator))
-                home_den = _round2(home_stats.get(cat.denominator))
-                away_num = _round2(away_stats.get(cat.numerator))
-                away_den = _round2(away_stats.get(cat.denominator))
+                home_num = _round2(home_resolved.get(cat.numerator))
+                home_den = _round2(home_resolved.get(cat.denominator))
+                away_num = _round2(away_resolved.get(cat.numerator))
+                away_den = _round2(away_resolved.get(cat.denominator))
             else:
-                home_value = _round3(home_stats.get(cat.key))
-                away_value = _round3(away_stats.get(cat.key))
                 home_num = home_den = away_num = away_den = None
 
+            home_value = home_resolved.get(cat.key)
+            away_value = away_resolved.get(cat.key)
             home_result, _ = compare(cat, home_value, away_value)
             results.append(
                 MatchupCategoryResult(
