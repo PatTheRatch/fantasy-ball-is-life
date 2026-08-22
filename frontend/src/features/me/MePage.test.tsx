@@ -33,6 +33,8 @@ describe("MePage", () => {
 
     expect(await screen.findByText("Pat")).toBeInTheDocument();
     expect(screen.getByText("pat@x.com")).toBeInTheDocument();
+    // Pin the exact contract call — the generated client must hit /api/v1/me.
+    expect(api.GET).toHaveBeenCalledWith("/api/v1/me");
   });
 
   it("renders an error state when the client fails", async () => {
