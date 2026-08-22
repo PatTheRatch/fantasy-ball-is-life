@@ -152,14 +152,17 @@ H-01 and H-02 are correctness bugs in shipped code.
   stays eligible. No migration, no confidence changes.
   *Charter: D18 (prefer unknown over confidently wrong).*
 
-- [ ] **H-03 · Runs must always reach a terminal state** — **NEXT**
-  Any exception after `start_run()` leaves the run `running` forever. Wrap
-  run-owning services in a lifecycle context manager that guarantees
-  `succeeded | partial | failed` on exit. Also stamp `partial` when a payload
-  is missing scoring categories (pairs with H-01).
+- [x] **H-03 · Runs must always reach a terminal state** — `b1c8a87`
+  Added IngestionService.run_scope, a lifecycle context manager that commits
+  the run 'running' at entry (durable immediately, survives rollback), stamps
+  'failed' with a bounded error and re-raises the original exception on
+  failure, and commits a terminal status on normal exit (backstopping to
+  'succeeded'). MatchupSyncService now drives sync through run_scope and
+  stamps 'partial' when any category outcome is NULL (a bye is never
+  partial). One run owner today; the next owner inherits the guarantee.
   *Charter: D28 — job outcomes are queryable data, not log lines.*
 
-- [ ] **H-04 · Make tenancy structural, not conventional**
+- [ ] **H-04 · Make tenancy structural, not conventional** — **NEXT**
   Two halves, both currently labels rather than gates: `MatchupRepository` and
   `LeagueSeasonRepository` take a bare `Session` while `LeagueScopedRepository`
   sits unused, and `@declare_policy` attaches no dependency while the matrix
@@ -258,4 +261,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-02 merged.*
+*Claude updates this on approval. Last change: H-03 merged.*
