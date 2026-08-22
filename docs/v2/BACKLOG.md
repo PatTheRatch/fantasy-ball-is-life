@@ -86,9 +86,18 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   counted, never dropped.
   *Charter: D18, D19; non-negotiable "no fuzzy-name identity".*
 
-- [ ] **S1-10 · Matchups + standings read path** — **NEXT** — depends on S1-06, S1-09
-  Sync one league's completed periods, fold standings from final periods, and
-  serve `GET /api/v1/leagues/{id}/standings` with freshness metadata on the
+- [x] **S1-10a · Matchups persistence + sync** — `86488de` — depends on S1-06, S1-09
+  `matchups` + `matchup_category_results` (`0008`) + `matchup_result` enum;
+  `ProviderLineageMixin` (full lineage); `ESPNAdapter.fetch_scoreboard` +
+  `ScoreboardDTO` family; `MatchupSyncService.sync_league_final_periods`
+  (fetch → normalize → supersede/persist, idempotent). Supersession via a
+  partial unique index (`uq_matchups_live_slot WHERE superseded_at IS NULL`);
+  `computed_result`/`provider_result` separate with `result_source`.
+  *Charter: D10, D11, D20.*
+
+- [ ] **S1-10b · Standings read path** — **NEXT** — depends on S1-10a
+  Fold standings from `final` matchups (`StandingsReadService`), serve
+  `GET /api/v1/leagues/{id}/standings` with freshness metadata on the
   response.
   *Charter: D10, D11, D20.*
 
@@ -129,4 +138,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-09 merged.*
+*Claude updates this on approval. Last change: S1-10a merged.*
