@@ -179,7 +179,7 @@ Notes:
 
 - **`manager_id`, not `user_id`** — co-managers share a team's strategy (charter Decision 9), and adjustments are strategy.
 - Edits supersede rather than update, so "I thought he'd play 34 minutes in October, 28 by January" is preserved. Charter §6: beliefs are time-dependent.
-- Field-level rather than row-level: a manager typically adjusts minutes and games, not fifteen stat lines. Composition applies the delta and lets dependent stats scale.
+- Field-level rather than row-level: a manager typically adjusts minutes and games, not fifteen stat lines. Composition applies the delta and lets dependent stats scale — **volume scales, efficiency does not**. See open question 1 for the exact rule; "let dependent stats scale" alone is under-specified and scaling a percentage is a bug.
 
 ### `projection_freezes` and `projection_freeze_rows`
 
@@ -304,7 +304,11 @@ Rules:
 
 ## Open questions
 
-1. **Adjustment composition semantics.** If a manager sets `minutes_per_game` to 34 on a player projected for 28, do dependent counting stats scale proportionally, or only the field named? Recommend: scale rate stats proportionally by default with an explicit opt-out, because "more minutes" is what a manager means. Needs a product decision before the domain function is written.
+1. **Adjustment composition semantics.** If a manager sets `minutes_per_game` to 34 on a player projected for 28, do dependent counting stats scale proportionally, or only the field named? Recommend: scale rate stats proportionally by default with an explicit opt-out, because "more minutes" is what a manager means. **Still needs Patrick's ratification, but the recommendation is now externally corroborated** — see [`../research/PROJECTION_ADJUSTMENTS.md`](../research/PROJECTION_ADJUSTMENTS.md). Research added three things this question did not previously state:
+
+   - **Volume scales, efficiency does not.** Scale `fga/fgm/fta/ftm/tpa/tpm` and the counting stats; percentages are *derived* from the scaled components and stay invariant (`10.5/18.3 = .573` → `13.125/22.875 = .573`). Scaling a percentage directly claims more minutes make a better shooter. This works only because `projection_rows` stores makes and attempts rather than bare percentages.
+   - **`games` and `minutes_per_game` compose differently.** `minutes_per_game` scales per-game volume; `games` scales season aggregates and must leave per-game rates alone. One rule applied to both double-scales season totals.
+   - **`absolute` is the right default mode** for minutes. The three modes diverge once the base moves (base 24→27 with a "30" belief yields 30 absolute / 33 delta / 33.75 multiplier), and a manager asserting "he plays 34" is asserting a value, not standing bullishness.
 2. **Cross-season adjustment carry-over.** Adjustments are season-scoped. Whether a preseason belief carries into the next season is a product question; recommend no, with an explicit copy action.
 3. **Set retention.** Frozen sets accumulate one per source per period per season. That is small; recommend no pruning.
 4. **FCP model output.** When the model ships (charter Decision 6, old spec's M-3), it writes a `projection_sets` row like any other source. No schema change anticipated — that is the point of this design.

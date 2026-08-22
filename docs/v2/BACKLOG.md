@@ -153,7 +153,7 @@ Known to come, roughly in order:
 | 6 | **Is historical lineup state actually recoverable?** Two candidate paths challenge the design's "a day not captured is gone permanently": (a) `rosterForCurrentScoringPeriod` inside the `mMatchupScore`/`mScoreboard` payload for a past period; (b) `mTransactions2` `FUTURE_ROSTER` records, which carry source/destination lineup slot + process date — V1 backfilled 21 weeks of them. If either works, daily capture is recoverable rather than capture-or-lose-forever, and historical capture does not have to lead Slice 2. **Live check, S1-03-shaped.** Until it answers, the daily-capture design stands unchanged — the asymmetry favours over-capturing. | Historical capture sequencing |
 | 3 | Story vocabulary: newsroom / recap / story / timeline. Pick one for tables, API and UI. | Newsroom slice |
 | 4 | Self-delivering recaps — absent from the charter by omission, not decision. Product call needed. | Newsroom slice |
-| 5 | Adjustment composition: does raising projected minutes scale dependent rate stats? | Projections slice |
+| 5 | Adjustment composition: does raising projected minutes scale dependent rate stats? **Researched — recommendation corroborated, awaiting Patrick's ratification.** Yes, scale volume; percentages are derived and stay invariant; `games` composes differently from `minutes_per_game`; `absolute` is the default mode. See [`research/PROJECTION_ADJUSTMENTS.md`](research/PROJECTION_ADJUSTMENTS.md) and [`schema/05-projections.md`](schema/05-projections.md) open question 1. | Projections slice |
 
 ---
 
