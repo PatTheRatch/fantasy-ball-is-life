@@ -45,7 +45,9 @@ class Provider(CreatedAtMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid7)
     key: Mapped[str] = mapped_column(enums.provider_key, unique=True, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    kind: Mapped[str] = mapped_column(Text, nullable=False)  # fantasy_platform|stats|projections
+    # fantasy_platform|stats|projections|manual — manual sources have no platform
+    # character, so "manual" is a fourth honest kind, not a bug.
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class ProviderConnection(TimestampMixin, Base):
