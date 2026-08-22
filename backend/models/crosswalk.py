@@ -146,7 +146,7 @@ class IdentityReviewQueue(CreatedAtMixin, Base):
     )
     reason: Mapped[str] = mapped_column(
         Text, nullable=False
-    )  # no_candidate|ambiguous|low_confidence|conflict
+    )  # empty_name|empty_pool|no_candidate|low_confidence|ambiguous|fuzzy_name
     candidates: Mapped[list[object]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'")
     )  # [{fcp_entity_id, score, evidence}]

@@ -50,6 +50,15 @@ class PlayerCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class QueueCandidate:
+    """One near-miss, with its entity id so a reviewer can act without re-deriving."""
+
+    fcp_entity_id: uuid.UUID | None
+    name: str
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
 class ResolutionDecision:
     """The ladder's verdict: auto-link to an entity, or queue for review."""
 
@@ -58,7 +67,7 @@ class ResolutionDecision:
     confidence: float | None
     fcp_entity_id: uuid.UUID | None
     reason: str | None  # queue reason: no_candidate|ambiguous|low_confidence|fuzzy_name|empty_name
-    candidates: tuple[tuple[str, float], ...]  # (name, score) for queue evidence
+    candidates: tuple[QueueCandidate, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +87,7 @@ def _auto_link(method: MatchMethod, fcp_entity_id: uuid.UUID) -> ResolutionDecis
     )
 
 
-def _queue(reason: str, candidates: tuple[tuple[str, float], ...] = ()) -> ResolutionDecision:
+def _queue(reason: str, candidates: tuple[QueueCandidate, ...] = ()) -> ResolutionDecision:
     """Build a queue decision with its reason and near-miss evidence."""
     return ResolutionDecision("queue", None, None, None, reason, candidates)
 
@@ -125,11 +134,23 @@ def resolve_identity(
     if len(exact) == 1:
         return _auto_link(MatchMethod.EXACT_NAME, exact[0].fcp_entity_id)
     if len(exact) > 1:
-        return _queue("ambiguous", tuple((c.normalized_name, 100.0) for c in exact))
+        evidence = tuple(
+            QueueCandidate(c.fcp_entity_id, c.normalized_name, 100.0) for c in exact
+        )
+        return _queue("ambiguous", evidence)
 
-    # fuzzy — always queued, even when unambiguous (policy step 5).
+    # fuzzy — always queued, even when unambiguous (policy step 5). Map the
+    # fuzzy-matched pool names back to their entity ids for actionable evidence.
     outcome = match_name(needle, [c.normalized_name for c in candidates])
-    evidence = tuple((c.key, c.score) for c in outcome.candidates)
+    by_name = {c.normalized_name: c for c in candidates}
+    evidence = tuple(
+        QueueCandidate(
+            by_name[m.key].fcp_entity_id if m.key in by_name else None,
+            m.key,
+            m.score,
+        )
+        for m in outcome.candidates
+    )
     if outcome.matched is None:
         return _queue(outcome.reason or "no_candidate", evidence)
     return _queue("fuzzy_name", evidence)
@@ -163,16 +184,22 @@ class IdentityResolutionService:
     ) -> ResolutionResult:
         """Resolve one provider record and record the outcome.
 
-        Idempotent: if an active link already exists for this provider identity,
-        it is returned unchanged (``provider_id`` method) rather than re-matched.
+        Idempotent: an active link for this identity is returned unchanged, and
+        an existing open review item is returned rather than re-added — so
+        re-running an ingest neither re-matches nor inflates the open queue.
         """
-        identity = self.identities.find(provider_id, entity_kind, provider_entity_id)
+        needle = normalize_name(raw_name)
+        identity = self.identities.find(
+            provider_id, entity_kind, provider_entity_id, needle
+        )
         if identity is None:
             identity = ProviderIdentity(
                 provider_id=provider_id,
                 entity_kind=entity_kind,
                 provider_entity_id=provider_entity_id,
-                raw_name=raw_name,
+                # Normalised form is the stable key for name-only sources (the
+                # truly-raw name is preserved in raw_payloads, D16).
+                raw_name=needle,
             )
             self.identities.add(identity)
 
@@ -207,11 +234,24 @@ class IdentityResolutionService:
             self.links.add(link)
             return ResolutionResult(identity, decision, link=link)
 
+        # Queue path — idempotent: return an existing open item for this identity
+        # rather than re-adding, so re-ingesting doesn't inflate the open queue.
+        existing_item = self.review.find_open(identity.id)
+        if existing_item is not None:
+            return ResolutionResult(identity, decision, queued=existing_item)
+
         queued = IdentityReviewQueue(
             provider_identity_id=identity.id,
             ingestion_run_id=ingestion_run_id,
             reason=decision.reason or "no_candidate",
-            candidates=[{"name": name, "score": score} for name, score in decision.candidates],
+            candidates=[
+                {
+                    "fcp_entity_id": str(c.fcp_entity_id) if c.fcp_entity_id else None,
+                    "name": c.name,
+                    "score": c.score,
+                }
+                for c in decision.candidates
+            ],
         )
         self.review.add(queued)
         return ResolutionResult(identity, decision, queued=queued)

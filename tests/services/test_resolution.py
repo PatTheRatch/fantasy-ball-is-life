@@ -83,13 +83,17 @@ def test_exact_name_normalises_accents_and_punctuation() -> None:
 # --- exact_name (ambiguous — two players share a name) ----------------------
 
 
-def test_duplicate_name_queues_as_ambiguous() -> None:
+def test_duplicate_name_queues_as_ambiguous_with_entity_ids() -> None:
     a = PlayerCandidate(uuid.uuid4(), "jalen williams", date(2001, 4, 14))
     b = PlayerCandidate(uuid.uuid4(), "jalen williams", date(2002, 1, 1))
     decision = _resolve("Jalen Williams", pool=[a, b])
     assert decision.action == "queue"
     assert decision.reason == "ambiguous"
     assert len(decision.candidates) == 2
+    # The two candidates are distinguishable by entity id, so a reviewer can
+    # act without re-deriving the match.
+    ids = {c.fcp_entity_id for c in decision.candidates}
+    assert ids == {a.fcp_entity_id, b.fcp_entity_id}
 
 
 # --- fuzzy → always queued --------------------------------------------------
