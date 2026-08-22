@@ -122,4 +122,18 @@ describe("LeaguePage", () => {
       "This league doesn't exist or you're not a member.",
     );
   });
+
+  it("renders generic error (not the membership copy) for other failures", async () => {
+    vi.mocked(api.GET).mockResolvedValue({
+      data: undefined,
+      error: { status: 500 },
+      response: new Response("", { status: 500 }),
+    } as never);
+
+    renderPage();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Something went wrong.");
+    expect(alert).not.toHaveTextContent("doesn't exist or you're not a member");
+  });
 });
