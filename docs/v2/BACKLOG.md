@@ -116,9 +116,11 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   rows + stale banner), basketball `win_pct` formatting, "Final through
   {as_of}" footer. Frontend only.
 
-- [ ] **S1-11c · Periods endpoint + selector** — **NEXT** — depends on S1-11b
+- [ ] **S1-11c · Periods endpoint + selector** — depends on S1-11b
   Backend `GET /api/v1/leagues/{league_season_id}/periods` (`LEAGUE_SCOPED`) +
   a period selector on the page; this is what actually closes the slice.
+  Also surface H-01's `complete` / `unknown_category_count` envelope fields —
+  H-01 makes the data honest, this is where a reader sees it.
 
 - [ ] **S1-11d · Reach a league (optional)** — depends on S1-11b
   `GET /me/leagues` + a home route to list the user's memberships so a league
@@ -133,7 +135,7 @@ thing. Source: [`research/REDTEAM_TRIAGE.md`](research/REDTEAM_TRIAGE.md),
 each verified against the code before landing here. Ordered by severity;
 H-01 and H-02 are correctness bugs in shipped code.
 
-- [ ] **H-01 · Unknown is not a tie** — the non-negotiable violation
+- [ ] **H-01 · Unknown is not a tie** — **NEXT** — the non-negotiable violation
   `compare()` returns `TIE` when either side is `None`/NaN; that persists as
   `result='tie'` and standings counts it as a real category tie. Charter §10:
   absence of a result must never be indistinguishable from a result. Add an
@@ -143,6 +145,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   null-vs-zero lesson to null-vs-tie.
   *Charter: D28, §10. Touches `domain/categories.py`, `services/matchups.py`,
   `services/standings_read.py`.*
+  Scoped: [`docs/tickets/H-01-unknown-is-not-a-tie.md`](../tickets/H-01-unknown-is-not-a-tie.md).
 
 - [ ] **H-02 · Conflicting birthdate must not auto-link**
   The ladder falls through from `exact_name_dob` to `exact_name` and auto-links
