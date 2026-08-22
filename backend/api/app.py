@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.api.routers import health, identity
+from backend.api.routers import health, identity, standings
 from backend.platform.auth import JwksKeyset
 
 
@@ -27,4 +27,5 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(identity.router)
+    app.include_router(standings.router)
     return app

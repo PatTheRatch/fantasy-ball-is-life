@@ -51,10 +51,12 @@ class _FakeAdapter:
         return self._scoreboards.pop(0)
 
 
-#: ``nba_seasons.season_year`` is unique and the ``db_session`` fixture does not
-#: truncate it (no user FK), so each seed uses a fresh monotonically-increasing
-#: year to avoid collisions across tests in the same run.
-_next_season_year = 3000
+def _fresh_season_year() -> int:
+    """A year that won't collide: ``nba_seasons.season_year`` is unique and the
+    ``db_session`` fixture does not truncate it (no user FK). Deriving from a
+    UUID keeps it import-order-independent (this module is also imported by the
+    standings read test, so a shared module counter would double-mint)."""
+    return 2000 + (uuid.uuid4().int % 7000)
 
 
 def _matchup(home: str, away: str, home_stats: dict, away_stats: dict, result: str):
@@ -68,9 +70,7 @@ def _matchup(home: str, away: str, home_stats: dict, away_stats: dict, result: s
 def _seed(db_session: Session) -> tuple[uuid.UUID, uuid.UUID]:
     """Seed a minimal league_season with two teams, one final period, and two
     scoring categories (PTS counting + FG_PCT ratio)."""
-    global _next_season_year
-    _next_season_year += 1
-    season_year = _next_season_year
+    season_year = _fresh_season_year()
     nba = NbaSeason(
         season_year=season_year, label=f"test {season_year}",
         start_date=date(season_year - 1, 10, 1), end_date=date(season_year, 6, 1),
