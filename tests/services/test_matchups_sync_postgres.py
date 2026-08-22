@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,8 +31,11 @@ from backend.models.fantasy import (
     League,
     LeagueSeason,
     LeagueSeasonCategory,
+    Matchup,
+    MatchupCategoryResult,
     MatchupPeriod,
 )
+from backend.models.ingestion import IngestionRun, RawPayload
 from backend.models.nba import NbaSeason
 from backend.repos.ingestion import (
     IngestionRunRepository,
@@ -193,3 +197,105 @@ def test_identical_resync_noops_with_ratio_rounding(db_session: Session) -> None
     assert first.created == 1
     assert second.unchanged == 1
     assert second.superseded == 0
+
+
+class _RaisingAdapter:
+    """An adapter that fails on fetch — the triage's adapter-timeout example."""
+
+    def fetch_scoreboard(self, connection, season_year, provider_period_id):
+        raise RuntimeError("adapter timeout")
+
+
+def test_failing_sync_leaves_durable_failed_run_and_no_orphans(
+    db_session: Session,
+) -> None:
+    # charter D28: a failed job is a queryable row, not a rolled-away nothing.
+    season_id, _home_id = _seed(db_session)
+
+    svc = _service(db_session)
+    with pytest.raises(RuntimeError, match="adapter timeout"):
+        svc.sync_league_final_periods(
+            season_id, connection=object(), adapter=_RaisingAdapter()
+        )
+
+    runs = db_session.scalars(
+        select(IngestionRun).where(IngestionRun.league_season_id == season_id)
+    ).all()
+    assert len(runs) == 1
+    assert runs[0].status == "failed"
+    assert runs[0].finished_at is not None
+    assert "adapter timeout" in (runs[0].error or "")
+
+    # The work rolled back; the run did not.
+    assert (
+        db_session.scalars(
+            select(Matchup).where(Matchup.league_season_id == season_id)
+        ).all()
+        == []
+    )
+    assert (
+        db_session.scalars(
+            select(RawPayload).where(RawPayload.ingestion_run_id == runs[0].id)
+        ).all()
+        == []
+    )
+
+
+def test_partial_sync_marks_run_partial_without_losing_result(db_session: Session) -> None:
+    # charter D28: partial is a first-class outcome, not a silent success.
+    season_id, _home_id = _seed(db_session)
+
+    # PTS present, FG_PCT missing on both sides → one unknown category outcome.
+    sb = ScoreboardDTO(provider_period_id="1", matchups=(
+        _matchup("1", "2", {"PTS": 110.0}, {"PTS": 100.0}, "home"),
+    ))
+
+    svc = _service(db_session)
+    summary = svc.sync_league_final_periods(
+        season_id, connection=object(), adapter=_FakeAdapter([sb])
+    )
+
+    assert summary.unknown_categories == 1
+
+    runs = db_session.scalars(
+        select(IngestionRun).where(IngestionRun.league_season_id == season_id)
+    ).all()
+    assert len(runs) == 1
+    assert runs[0].status == "partial"
+
+    # The matchup and its category rows survive; the missing one is stored NULL.
+    matchups = db_session.scalars(
+        select(Matchup).where(Matchup.league_season_id == season_id)
+    ).all()
+    assert len(matchups) == 1
+    null_results = db_session.scalars(
+        select(MatchupCategoryResult)
+        .join(Matchup, MatchupCategoryResult.matchup_id == Matchup.id)
+        .where(
+            Matchup.league_season_id == season_id,
+            MatchupCategoryResult.result.is_(None),
+        )
+    ).all()
+    assert len(null_results) == 1  # FG_PCT unknown; PTS intact
+
+
+def test_clean_sync_commits_succeeded_durably(db_session: Session) -> None:
+    # No explicit db_session.commit() here — run_scope owns the commit.
+    season_id, _home_id = _seed(db_session)
+
+    sb = ScoreboardDTO(provider_period_id="1", matchups=(
+        _matchup("1", "2", {"PTS": 110.0, "fgm": 40.0, "fga": 80.0},
+                 {"PTS": 100.0, "fgm": 38.0, "fga": 80.0}, "home"),
+    ))
+
+    svc = _service(db_session)
+    svc.sync_league_final_periods(
+        season_id, connection=object(), adapter=_FakeAdapter([sb])
+    )
+
+    runs = db_session.scalars(
+        select(IngestionRun).where(IngestionRun.league_season_id == season_id)
+    ).all()
+    assert len(runs) == 1
+    assert runs[0].status == "succeeded"
+    assert runs[0].finished_at is not None

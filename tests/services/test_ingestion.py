@@ -42,6 +42,35 @@ def _service(providers=None, runs=None, payloads=None) -> IngestionService:
     )
 
 
+class _RunStore:
+    """Fake ``IngestionRunRepository``: dict-backed, records commit/rollback order."""
+
+    def __init__(self) -> None:
+        self._store: dict[uuid.UUID, IngestionRun] = {}
+        self.log: list[str] = []
+
+    def add(self, run: IngestionRun) -> None:
+        if run.id is None:
+            run.id = uuid.uuid4()
+        self._store[run.id] = run
+
+    def get(self, run_id: uuid.UUID) -> IngestionRun | None:
+        return self._store.get(run_id)
+
+    def commit(self) -> None:
+        self.log.append("commit")
+
+    def rollback(self) -> None:
+        self.log.append("rollback")
+
+
+def _run_scope_service() -> tuple[IngestionService, _RunStore]:
+    providers = Mock()
+    providers.get_by_key.return_value = _provider()
+    store = _RunStore()
+    return IngestionService(providers, store, Mock()), store
+
+
 # --- content_hash -----------------------------------------------------------
 
 
@@ -121,3 +150,65 @@ def test_finish_run_rejects_invalid_status() -> None:
 
     with pytest.raises(ValueError, match="invalid run status"):
         service.finish_run(_run(), "bogus")
+
+
+# --- run_scope (the run-lifecycle guarantee) --------------------------------
+# charter D28: job outcomes are queryable data, not log lines
+
+
+def test_run_scope_defaults_to_succeeded() -> None:
+    svc, store = _run_scope_service()
+
+    with svc.run_scope("espn", "matchups") as run:
+        pass
+
+    assert run.status == "succeeded"
+    assert run.finished_at is not None
+    # entry commit ("running") + terminal commit
+    assert store.log == ["commit", "commit"]
+
+
+def test_run_scope_preserves_partial_status() -> None:
+    svc, _ = _run_scope_service()
+
+    with svc.run_scope("espn", "matchups") as run:
+        svc.finish_run(run, "partial", stats={"rows": 1})
+
+    # the backstop must not overwrite a status the body set
+    assert run.status == "partial"
+    assert run.stats == {"rows": 1}
+
+
+def test_run_scope_stamps_failed_and_reraises() -> None:
+    svc, store = _run_scope_service()
+
+    with pytest.raises(RuntimeError, match="boom"), svc.run_scope("espn", "matchups"):
+        raise RuntimeError("boom")
+
+    (run,) = store._store.values()
+    assert run.status == "failed"
+    assert run.finished_at is not None
+    assert run.error == "RuntimeError: boom"
+
+
+def test_run_scope_commits_running_before_yield() -> None:
+    svc, store = _run_scope_service()
+
+    with svc.run_scope("espn", "matchups") as run:
+        # inside the body: the run is already durable 'running' (a crash here
+        # would leave a queryable in-flight row, not nothing).
+        assert run.status == "running"
+        assert store.log == ["commit"]
+
+    assert run.status == "succeeded"  # backstop fires on normal exit
+
+
+def test_run_scope_rolls_back_before_failed_commit() -> None:
+    # The rollback must precede the failed write: committing into an aborted
+    # transaction raises PendingRollbackError and masks the real error.
+    svc, store = _run_scope_service()
+
+    with pytest.raises(RuntimeError, match="boom"), svc.run_scope("espn", "matchups"):
+        raise RuntimeError("boom")
+
+    assert store.log == ["commit", "rollback", "commit"]

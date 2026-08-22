@@ -40,6 +40,14 @@ class IngestionRunRepository:
     def add(self, run: IngestionRun) -> None:
         self.session.add(run)
 
+    def commit(self) -> None:
+        """Commit the session — the run lifecycle owns its transaction boundary."""
+        self.session.commit()
+
+    def rollback(self) -> None:
+        """Roll back the session, discarding partial work and clearing an aborted txn."""
+        self.session.rollback()
+
 
 class RawPayloadRepository:
     """Immutable raw evidence, keyed for change detection and dedupe."""

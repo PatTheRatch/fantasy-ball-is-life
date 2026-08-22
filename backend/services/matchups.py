@@ -41,7 +41,12 @@ from backend.models.fantasy import (
 )
 from backend.models.ingestion import IngestionRun
 from backend.repos.matchups import LeagueSeasonRepository, MatchupRepository
-from backend.services.ingestion import NORMALIZER_VERSION, IngestionService
+from backend.services.ingestion import (
+    NORMALIZER_VERSION,
+    RUN_PARTIAL,
+    RUN_SUCCEEDED,
+    IngestionService,
+)
 
 #: domain ``Result`` → FCP ``matchup_result``, from the home side's perspective.
 #: ``None`` is an unknown outcome (a missing/NaN value) — the storage column is
@@ -64,6 +69,7 @@ class SyncSummary:
     created: int
     superseded: int
     unchanged: int
+    unknown_categories: int
 
 
 class MatchupSyncError(Exception):
@@ -175,41 +181,44 @@ class MatchupSyncService:
         if season is None:
             raise MatchupSyncError(f"unknown league_season: {league_season_id!r}")
 
-        run = self.ingestion.start_run(
-            season.provider_key, kind="matchups", league_season_id=league_season_id
-        )
-
         model_cats = self.league_seasons.scoring_categories(league_season_id)
         domain_cats = [_to_domain_category(c) for c in model_cats]
         cat_id_by_key = {c.key: c.id for c in model_cats}
         teams_by_provider = self.league_seasons.teams_by_provider(league_season_id)
 
-        periods = matchups = created = superseded = unchanged = 0
-        for period in self.league_seasons.final_periods(league_season_id):
-            if period.provider_period_id is None:
-                continue
-            sb = adapter.fetch_scoreboard(
-                connection, season.season_year, period.provider_period_id
-            )
-            self.ingestion.record_payload(
-                run, f"scoreboard/{period.provider_period_id}", asdict(sb)
-            )
-            for m in sb.matchups:
-                outcome = self._persist_matchup(
-                    m, period, league_season_id, domain_cats, cat_id_by_key,
-                    teams_by_provider, run,
+        periods = matchups = created = superseded = unchanged = unknowns = 0
+        with self.ingestion.run_scope(
+            season.provider_key, kind="matchups", league_season_id=league_season_id
+        ) as run:
+            for period in self.league_seasons.final_periods(league_season_id):
+                if period.provider_period_id is None:
+                    continue
+                sb = adapter.fetch_scoreboard(
+                    connection, season.season_year, period.provider_period_id
                 )
-                matchups += 1
-                if outcome == "created":
-                    created += 1
-                elif outcome == "superseded":
-                    superseded += 1
-                else:
-                    unchanged += 1
-            periods += 1
+                self.ingestion.record_payload(
+                    run, f"scoreboard/{period.provider_period_id}", asdict(sb)
+                )
+                for m in sb.matchups:
+                    outcome, unknown_count = self._persist_matchup(
+                        m, period, league_season_id, domain_cats, cat_id_by_key,
+                        teams_by_provider, run,
+                    )
+                    matchups += 1
+                    unknowns += unknown_count
+                    if outcome == "created":
+                        created += 1
+                    elif outcome == "superseded":
+                        superseded += 1
+                    else:
+                        unchanged += 1
+                periods += 1
 
-        summary = SyncSummary(periods, matchups, created, superseded, unchanged)
-        self.ingestion.finish_run(run, "succeeded", stats=asdict(summary))
+            summary = SyncSummary(
+                periods, matchups, created, superseded, unchanged, unknowns
+            )
+            status = RUN_PARTIAL if unknowns else RUN_SUCCEEDED
+            self.ingestion.finish_run(run, status, stats=asdict(summary))
         return summary
 
     def _persist_matchup(
@@ -221,7 +230,14 @@ class MatchupSyncService:
         cat_id_by_key: dict[str, uuid.UUID],
         teams_by_provider: dict[str, FantasyTeamSeason],
         run: IngestionRun,
-    ) -> str:
+    ) -> tuple[str, int]:
+        """Persist one matchup; return ``(outcome, unknown_category_count)``.
+
+        ``outcome`` is ``created | superseded | unchanged``. ``unknown_category_count``
+        is the number of category outcomes that resolved to ``NULL`` (missing/NaN
+        values, charter §10) — reported on every path so an identical resync of
+        already-partial data is still reported partial.
+        """
         home_pid = m.home.provider_team_id
         if home_pid is None:
             raise MatchupSyncError("scoreboard home side has no provider_team_id")
@@ -243,18 +259,19 @@ class MatchupSyncService:
             away.id if away is not None else None,
             domain_cats, cat_id_by_key, run,
         )
+        unknown_count = sum(1 for r in results if r.result is None)
 
         existing = self.matchups.find_live(period.id, home.id)
         if existing is None:
             self.matchups.add(matchup)
             for r in results:
                 self.matchups.add_category_result(r)
-            return "created"
+            return "created", unknown_count
 
         if _matchup_signature(existing, self.matchups.category_results(existing.id)) == (
             _matchup_signature(matchup, results)
         ):
-            return "unchanged"
+            return "unchanged", unknown_count
 
         # Supersession, not mutation — and the order is load-bearing. The partial
         # unique index (uq_matchups_live_slot) rejects a second live row the
@@ -271,7 +288,7 @@ class MatchupSyncService:
             self.matchups.add_category_result(r)
         self.matchups.flush()
         existing.superseded_by_id = matchup.id
-        return "superseded"
+        return "superseded", unknown_count
 
     def _normalize(
         self,

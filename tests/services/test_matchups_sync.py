@@ -9,6 +9,7 @@ without Postgres.
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 from unittest.mock import Mock
 
 from backend.domain.categories import NINE_CAT
@@ -74,6 +75,14 @@ def _model_cats():
     return cats
 
 
+@contextmanager
+def _fake_run_scope(provider_key: str, kind: str, **kwargs):
+    """A context manager that yields a fake run, so the sync's happy path works."""
+    run = Mock(id=uuid.uuid4(), provider_id=uuid.uuid4())
+    run.status = "running"
+    yield run
+
+
 def _service(cats, teams, periods, matchups, scoreboards):
     league_seasons = Mock(spec=LeagueSeasonRepository)
     season = Mock()
@@ -85,7 +94,7 @@ def _service(cats, teams, periods, matchups, scoreboards):
     league_seasons.final_periods.return_value = periods
 
     ingestion = Mock(spec=IngestionService)
-    ingestion.start_run.return_value = Mock(id=uuid.uuid4(), provider_id=uuid.uuid4())
+    ingestion.run_scope.side_effect = _fake_run_scope
 
     adapter = Mock()
     adapter.fetch_scoreboard.side_effect = scoreboards
@@ -146,6 +155,8 @@ def test_normalizes_matchup_and_category_results() -> None:
     assert fg.home_value == 0.5
 
     ingestion.finish_run.assert_called_once()
+    # a fully-populated scoreboard stamps the run 'succeeded'
+    assert ingestion.finish_run.call_args.args[1] == "succeeded"
 
 
 def test_provider_tiebreak_when_computed_ties() -> None:
@@ -322,3 +333,64 @@ def test_computed_result_ignores_unknown_categories() -> None:
     assert m.computed_result == "tie"
     ast = next(r for r in matchups.added_results if r.category_id == cats[2].id)
     assert ast.result is None
+
+
+def test_missing_category_stamps_run_partial() -> None:
+    # charter D28: a run that got the matchups but not every category says so.
+    cats = _model_cats()[:2]  # PTS, REB
+    teams = {"1": _team("1"), "2": _team("2")}
+    periods = [_period("p1", "7")]
+    matchups = _InMemoryMatchups()
+
+    home = {"PTS": 110.0}  # missing REB → one unknown category outcome
+    away = {"PTS": 100.0, "REB": 50.0}
+    sb = ScoreboardDTO(
+        provider_period_id="7",
+        matchups=(_matchup("1", "2", home, away, "home"),),
+    )
+
+    svc, ingestion, adapter = _service(cats, teams, periods, matchups, [sb])
+    summary = svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+
+    assert summary.unknown_categories == 1
+    assert ingestion.finish_run.call_args.args[1] == "partial"
+
+
+def test_complete_scoreboard_stamps_run_succeeded() -> None:
+    cats = _model_cats()[:2]
+    teams = {"1": _team("1"), "2": _team("2")}
+    periods = [_period("p1", "7")]
+    matchups = _InMemoryMatchups()
+
+    home = {"PTS": 110.0, "REB": 50.0}
+    away = {"PTS": 100.0, "REB": 45.0}
+    sb = ScoreboardDTO(
+        provider_period_id="7",
+        matchups=(_matchup("1", "2", home, away, "home"),),
+    )
+
+    svc, ingestion, adapter = _service(cats, teams, periods, matchups, [sb])
+    summary = svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+
+    assert summary.unknown_categories == 0
+    assert ingestion.finish_run.call_args.args[1] == "succeeded"
+
+
+def test_bye_stamps_run_succeeded_not_partial() -> None:
+    # A bye has zero category rows — that is "nothing to resolve", not "missing
+    # categories", so it must never be stamped partial.
+    cats = _model_cats()
+    teams = {"1": _team("1")}
+    periods = [_period("p1", "8")]
+    matchups = _InMemoryMatchups()
+
+    sb = ScoreboardDTO(
+        provider_period_id="8",
+        matchups=(_matchup("1", None, {"PTS": 90.0}, {}, "home"),),
+    )
+
+    svc, ingestion, adapter = _service(cats, teams, periods, matchups, [sb])
+    summary = svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+
+    assert summary.unknown_categories == 0
+    assert ingestion.finish_run.call_args.args[1] == "succeeded"
