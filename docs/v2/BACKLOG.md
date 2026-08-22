@@ -143,16 +143,16 @@ H-01 and H-02 are correctness bugs in shipped code.
   complete + unknown_category_count. Completeness is derived, not a status.
   *Charter: D28, §10.*
 
-- [ ] **H-02 · Conflicting birthdate must not auto-link** — **NEXT**
-  The ladder falls through from `exact_name_dob` to `exact_name` and auto-links
-  at 0.850 even when the candidate's birthdate contradicts the provider's.
-  Treat a two-sided birthdate disagreement as a conflict and queue it. Add the
-  test that was missing — `tests/services/test_resolution.py` covers matching
-  and absent DOB, never contradictory.
+- [x] **H-02 · Conflicting birthdate must not auto-link** — `471c7ff`
+  exact is now partitioned into exact_ok (eligible) and exact_conflict (a
+  two-sided birthdate disagreement). exact_ok==1 auto-links; exact_ok>1 queues
+  ambiguous; an empty exact_ok with a non-empty exact_conflict queues
+  dob_conflict carrying the conflicting candidate's entity id as evidence. A
+  candidate with birthdate=None is missing evidence, not contradiction, and
+  stays eligible. No migration, no confidence changes.
   *Charter: D18 (prefer unknown over confidently wrong).*
-  Scoped: [`docs/tickets/H-02-conflicting-birthdate-must-not-auto-link.md`](../tickets/H-02-conflicting-birthdate-must-not-auto-link.md).
 
-- [ ] **H-03 · Runs must always reach a terminal state**
+- [ ] **H-03 · Runs must always reach a terminal state** — **NEXT**
   Any exception after `start_run()` leaves the run `running` forever. Wrap
   run-owning services in a lifecycle context manager that guarantees
   `succeeded | partial | failed` on exit. Also stamp `partial` when a payload
@@ -258,5 +258,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-02 scoped and assigned;
-H-10 added — the other half of H-02, repairing links already written.*
+*Claude updates this on approval. Last change: H-02 merged.*
