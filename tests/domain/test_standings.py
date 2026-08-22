@@ -95,3 +95,24 @@ def test_matchup_from_stats_handles_a_bye() -> None:
     result = matchup_from_stats("a", None, {}, {}, NINE_CAT)
     assert result.away_team_id is None
     assert (result.home_category_wins, result.away_category_wins) == (0, 0)
+
+
+def test_unknown_categories_fold_wlt_from_decided_only() -> None:
+    # charter §10: absence of a result must be distinguishable from a result
+    # 4 home wins, 3 away wins, 0 ties, 2 unknowns → neither side accrues a tie.
+    result = MatchupResult("a", "b", 4, 3, 0, category_unknowns=2)
+    rows = {r.team_id: r for r in standings_through([result])}
+    assert (rows["a"].wins, rows["a"].losses, rows["a"].ties, rows["a"].unknown) == (4, 3, 0, 2)
+    assert (rows["b"].wins, rows["b"].losses, rows["b"].ties, rows["b"].unknown) == (3, 4, 0, 2)
+
+
+def test_win_pct_denominator_excludes_unknowns() -> None:
+    # charter §10: an unknown category must never dilute or inflate a win %.
+    with_unknown = MatchupResult("a", "b", 4, 3, 0, category_unknowns=2)
+    without = MatchupResult("a", "b", 4, 3, 0)
+    a_with = {r.team_id: r for r in standings_through([with_unknown])}["a"]
+    a_without = {r.team_id: r for r in standings_through([without])}["a"]
+    # 4-3 over 7 decided categories, not 4-3-2 over 9.
+    assert a_with.win_pct == 57.1
+    assert a_with.win_pct == a_without.win_pct
+    assert a_with.played == 7  # unknown does not inflate games played

@@ -28,7 +28,9 @@ class MatchupResult:
 
     ``away_team_id`` is None for a bye — the home side simply did not play an
     opponent, and neither side accrues a record. Byes are represented, never
-    zero-filled.
+    zero-filled. ``category_unknowns`` counts categories whose outcome could
+    not be determined (missing/NaN values); an unknown is not a tie (charter
+    §10).
     """
 
     home_team_id: str
@@ -36,6 +38,7 @@ class MatchupResult:
     home_category_wins: int
     away_category_wins: int
     category_ties: int
+    category_unknowns: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +49,7 @@ class StandingRow:
     ties: int
     win_pct: float
     rank: int
+    unknown: int
 
     @property
     def played(self) -> int:
@@ -62,8 +66,8 @@ def matchup_from_stats(
     """Build a :class:`MatchupResult` by tallying two teams' category values."""
     if away_team_id is None:
         return MatchupResult(home_team_id, None, 0, 0, 0)
-    hw, aw, ties = tally(categories, home_values, away_values)
-    return MatchupResult(home_team_id, away_team_id, hw, aw, ties)
+    hw, aw, ties, unknowns = tally(categories, home_values, away_values)
+    return MatchupResult(home_team_id, away_team_id, hw, aw, ties, unknowns)
 
 
 def standings_through(
@@ -81,7 +85,7 @@ def standings_through(
     records: dict[str, list[int]] = {}
 
     def acc(team_id: str) -> list[int]:
-        return records.setdefault(team_id, [0, 0, 0])
+        return records.setdefault(team_id, [0, 0, 0, 0])
 
     for r in results:
         if r.away_team_id is None:
@@ -93,24 +97,36 @@ def standings_through(
         home[0] += r.home_category_wins
         home[1] += r.away_category_wins
         home[2] += r.category_ties
+        home[3] += r.category_unknowns
 
         away = acc(r.away_team_id)
         away[0] += r.away_category_wins
         away[1] += r.home_category_wins
         away[2] += r.category_ties
+        away[3] += r.category_unknowns
 
-    rows: list[tuple[str, int, int, int, float]] = []
-    for team_id, (w, losses, t) in records.items():
+    rows: list[tuple[str, int, int, int, int, float]] = []
+    for team_id, (w, losses, t, unknown) in records.items():
+        # ``total`` is decided categories only — an unknown must never dilute
+        # or inflate a win percentage (charter §10).
         total = w + losses + t
         pct = ((w + 0.5 * t) / total * 100) if total > 0 else 0.0
-        rows.append((team_id, w, losses, t, round(pct, 1)))
+        rows.append((team_id, w, losses, t, unknown, round(pct, 1)))
 
     # Deterministic: win% desc, then wins desc, then team id for a stable tie
     # break. V1 sorted on the first two only, so equal teams could reorder
     # between renders.
-    rows.sort(key=lambda r: (-r[4], -r[1], r[0]))
+    rows.sort(key=lambda r: (-r[5], -r[1], r[0]))
 
     return [
-        StandingRow(team_id=tid, wins=w, losses=losses, ties=t, win_pct=pct, rank=i + 1)
-        for i, (tid, w, losses, t, pct) in enumerate(rows)
+        StandingRow(
+            team_id=tid,
+            wins=w,
+            losses=losses,
+            ties=t,
+            unknown=unknown,
+            win_pct=pct,
+            rank=i + 1,
+        )
+        for i, (tid, w, losses, t, unknown, pct) in enumerate(rows)
     ]

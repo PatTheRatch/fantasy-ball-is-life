@@ -32,6 +32,7 @@ class Result(StrEnum):
     WIN = "W"
     LOSS = "L"
     TIE = "T"
+    UNKNOWN = "U"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +75,8 @@ def _comparable(value: float | None) -> bool:
     ``None`` and NaN both mean "we do not know", which is distinct from zero.
     V1 relied on NaN's comparison semantics making every branch fall through to
     a tie; making it explicit means a missing value can never be mistaken for a
-    genuine zero.
+    genuine zero. Unknown is its own outcome, not a tie (charter §10: absence
+    of a result must be distinguishable from a result).
     """
     return value is not None and not math.isnan(value)
 
@@ -82,11 +84,13 @@ def _comparable(value: float | None) -> bool:
 def compare(category: Category, home: float | None, away: float | None) -> tuple[Result, Result]:
     """Return ``(home_result, away_result)`` for one category.
 
-    Non-comparable values on either side tie. Direction comes from the
-    category, so turnovers need no special case at the call site.
+    A non-comparable value on either side yields ``UNKNOWN`` on both — a
+    missing stat is not a tie and must never be recorded as one (charter §10).
+    Direction comes from the category, so turnovers need no special case at the
+    call site.
     """
     if not _comparable(home) or not _comparable(away):
-        return Result.TIE, Result.TIE
+        return Result.UNKNOWN, Result.UNKNOWN
 
     assert home is not None and away is not None  # narrowed by _comparable
     if home == away:
@@ -123,14 +127,15 @@ def tally(
     categories: Sequence[Category],
     home: Mapping[str, float | None],
     away: Mapping[str, float | None],
-) -> tuple[int, int, int]:
-    """Category record for one matchup as ``(home_wins, away_wins, ties)``.
+) -> tuple[int, int, int, int]:
+    """Category record for one matchup as ``(home_wins, away_wins, ties, unknowns)``.
 
     Ratio categories are derived from their components when present, so a
     caller may supply either the ratio directly or the makes/attempts it is
-    built from.
+    built from. Unknown categories are counted separately and never fall into
+    the tie count (charter §10).
     """
-    home_wins = away_wins = ties = 0
+    home_wins = away_wins = ties = unknowns = 0
     for cat in categories:
         if cat.kind is CategoryKind.RATIO:
             h = home.get(cat.key)
@@ -148,6 +153,8 @@ def tally(
             home_wins += 1
         elif result is Result.LOSS:
             away_wins += 1
-        else:
+        elif result is Result.TIE:
             ties += 1
-    return home_wins, away_wins, ties
+        else:
+            unknowns += 1
+    return home_wins, away_wins, ties, unknowns

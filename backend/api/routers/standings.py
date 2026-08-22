@@ -31,6 +31,7 @@ class StandingRowOut(BaseModel):
     ties: int
     win_pct: float
     played: int
+    unknown: int
 
 
 class StandingsResponse(BaseModel):
@@ -38,6 +39,8 @@ class StandingsResponse(BaseModel):
     as_of: date | None
     freshness: str
     stale: bool
+    complete: bool
+    unknown_category_count: int
 
 
 @router.get("/leagues/{league_season_id}/standings")
@@ -60,10 +63,13 @@ def standings(
                 ties=r.ties,
                 win_pct=r.win_pct,
                 played=r.played,
+                unknown=r.unknown,
             )
             for r in result.rows
         ],
         as_of=result.as_of,
         freshness=result.freshness,
         stale=result.stale,
+        complete=result.complete,
+        unknown_category_count=result.unknown_category_count,
     )

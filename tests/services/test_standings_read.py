@@ -30,7 +30,7 @@ def _matchup(home_id: uuid.UUID, away_id: uuid.UUID | None) -> SimpleNamespace:
     )
 
 
-def _cat_result(matchup_id: uuid.UUID, result: str) -> SimpleNamespace:
+def _cat_result(matchup_id: uuid.UUID, result: str | None) -> SimpleNamespace:
     return SimpleNamespace(matchup_id=matchup_id, result=result)
 
 
@@ -128,3 +128,46 @@ def test_through_period_filters_periods_and_scopes_as_of() -> None:
     # the service delegates the period filter to the repo as a period_ids set.
     _, kwargs = matchups_repo.live_for_season.call_args
     assert kwargs["period_ids"] == [p1.id]
+
+
+def test_null_category_result_does_not_increment_ties() -> None:
+    # charter §10: absence of a result must be distinguishable from a result
+    a = uuid.uuid4()
+    b = uuid.uuid4()
+    period = _period(1, date(2026, 1, 11))
+    m = _matchup(a, b)
+    # 6 home wins, 2 away wins, 1 tie, and 1 unknown (a stored NULL result).
+    results = (
+        [_cat_result(m.id, "home")] * 6
+        + [_cat_result(m.id, "away")] * 2
+        + [_cat_result(m.id, "tie")]
+        + [_cat_result(m.id, None)]
+    )
+
+    svc = _service([period], [_team(a, "A"), _team(b, "B")], [m], results)
+    out = svc.standings(uuid.uuid4())
+
+    first = out.rows[0]
+    # The unknown category must NOT become a tie: home stays 6-2-1, not 6-2-2.
+    assert (first.wins, first.losses, first.ties) == (6, 2, 1)
+    assert first.unknown == 1
+
+
+def test_complete_and_unknown_category_count_reflect_unknowns() -> None:
+    # charter §10: the envelope reports whether the fold used complete data.
+    a = uuid.uuid4()
+    b = uuid.uuid4()
+    period = _period(1, date(2026, 1, 11))
+    m = _matchup(a, b)
+
+    partial = [_cat_result(m.id, "home"), _cat_result(m.id, None)]
+    svc = _service([period], [_team(a, "A"), _team(b, "B")], [m], partial)
+    out = svc.standings(uuid.uuid4())
+    assert out.complete is False
+    assert out.unknown_category_count == 1
+
+    known = [_cat_result(m.id, "home"), _cat_result(m.id, "away")]
+    svc2 = _service([period], [_team(a, "A"), _team(b, "B")], [m], known)
+    out2 = svc2.standings(uuid.uuid4())
+    assert out2.complete is True
+    assert out2.unknown_category_count == 0

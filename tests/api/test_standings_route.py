@@ -160,6 +160,9 @@ def test_200_member_gets_envelope(client) -> None:
     assert body["stale"] is False
     assert body["as_of"] is None  # no final periods seeded
     assert body["data"] == []
+    # The H-01 honesty fields are present on the envelope (charter §10).
+    assert body["complete"] is True  # no matchups → nothing undetermined
+    assert body["unknown_category_count"] == 0
 
 
 def test_422_invalid_through_period(client) -> None:

@@ -45,21 +45,21 @@ def test_equal_values_tie() -> None:
     assert compare(TO, 9, 9) == (Result.TIE, Result.TIE)
 
 
-# V1: test_category_result_ties_and_nan
+# charter §10: absence of a result must be distinguishable from a result
 @pytest.mark.parametrize("bad", [None, math.nan])
-def test_unknown_values_tie_and_never_raise(bad: float | None) -> None:
-    assert compare(PTS, bad, 100) == (Result.TIE, Result.TIE)
-    assert compare(PTS, 100, bad) == (Result.TIE, Result.TIE)
-    assert compare(TO, bad, bad) == (Result.TIE, Result.TIE)
+def test_unknown_values_are_unknown_not_tie(bad: float | None) -> None:
+    assert compare(PTS, bad, 100) == (Result.UNKNOWN, Result.UNKNOWN)
+    assert compare(PTS, 100, bad) == (Result.UNKNOWN, Result.UNKNOWN)
+    assert compare(TO, bad, bad) == (Result.UNKNOWN, Result.UNKNOWN)
 
 
-def test_unknown_is_not_zero() -> None:
-    """A missing value must not be treated as a real zero.
+def test_unknown_is_not_zero_and_not_tie() -> None:
+    """A missing value is neither a real zero nor a tie.
 
-    Zero turnovers would *win* the category; unknown must tie. V1's
-    season-stats bug was exactly this conflation.
+    Zero turnovers would *win* the category; unknown must be its own outcome.
+    V1's season-stats bug was exactly this conflation (charter §10).
     """
-    assert compare(TO, None, 5) == (Result.TIE, Result.TIE)
+    assert compare(TO, None, 5) == (Result.UNKNOWN, Result.UNKNOWN)
     assert compare(TO, 0, 5) == (Result.WIN, Result.LOSS)
 
 
@@ -84,20 +84,29 @@ def test_ratio_category_rejects_missing_components_at_construction() -> None:
         Category("FG_PCT", "FG%", CategoryKind.RATIO, True)
 
 
-def test_tally_counts_wins_losses_and_ties() -> None:
+def test_tally_counts_wins_losses_ties_and_unknowns() -> None:
     home = {"PTS": 500, "REB": 200, "AST": 100, "STL": 40, "BLK": 20,
             "TPM": 60, "TO": 80, "fgm": 45.0, "fga": 90.0, "ftm": 40.0, "fta": 50.0}
     away = {"PTS": 480, "REB": 210, "AST": 100, "STL": 30, "BLK": 25,
             "TPM": 55, "TO": 70, "fgm": 40.0, "fga": 100.0, "ftm": 45.0, "fta": 50.0}
-    hw, aw, ties = tally(NINE_CAT, home, away)
-    assert hw + aw + ties == len(NINE_CAT)
+    hw, aw, ties, unknowns = tally(NINE_CAT, home, away)
+    assert hw + aw + ties + unknowns == len(NINE_CAT)
     assert ties == 1    # AST equal
+    assert unknowns == 0  # every category present → nothing undetermined
     assert hw == 4      # PTS, STL, TPM, FG% (.500 vs .400)
     assert aw == 4      # REB, BLK, TO (fewer wins: 70 < 80), FT% (.900 vs .800)
+
+
+def test_tally_counts_unknowns_separately_and_does_not_inflate_ties() -> None:
+    # charter §10: absence of a result must be distinguishable from a result
+    home = {"PTS": 500.0, "REB": None}
+    away = {"PTS": 480.0, "REB": None}
+    hw, aw, ties, unknowns = tally([PTS, next(c for c in NINE_CAT if c.key == "REB")], home, away)
+    assert (hw, aw, ties, unknowns) == (1, 0, 0, 1)
 
 
 def test_tally_prefers_a_directly_supplied_ratio() -> None:
     home = {"FG_PCT": 0.60, "fgm": 1.0, "fga": 100.0}
     away = {"FG_PCT": 0.40, "fgm": 99.0, "fga": 100.0}
-    hw, aw, _ = tally([FG], home, away)
+    hw, aw, _, _ = tally([FG], home, away)
     assert (hw, aw) == (1, 0)
