@@ -226,6 +226,20 @@ that is a second, explicit opinion layered above the opportunity one.
 Ratified by Patrick 22 August 2026; corroborated by external research in
 docs/v2/research/PROJECTION_ADJUSTMENTS.md.
 
+Decision 30: Story vocabulary. Four words were in circulation for one
+area --- story, newsroom, recap, timeline --- and section 21 asks that a
+new agent be able to answer "where does X live" without archaeology.
+They are a hierarchy, not synonyms, and each now names exactly one
+thing. Story is the domain: the module, the tables (story_facts,
+story_editions) and the API namespace. Newsroom is the user-facing
+surface and appears only in UI copy and product language. Recap is the
+weekly published artifact, not the domain --- league records and
+rivalries are not recaps, which is why current FCP's recap_facts is
+already too narrow for what it holds. Timeline is the chronological
+feature and its table, not a name for the whole area. The binding rule
+is directional: never use "newsroom" for the domain, and never use
+"story" in UI copy. Ratified by Patrick 22 August 2026.
+
 ## 5. Core Domain Model Direction
 
 The following is the conceptual V2 map. It is not yet a final SQL

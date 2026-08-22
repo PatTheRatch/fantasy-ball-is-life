@@ -48,6 +48,21 @@ Seven domain files plus this index. The split follows the charter's §5 domain m
 
 Charter Decision 19 is the binding rule here: FCP owns identity; external IDs are mappings.
 
+### Domain vocabulary
+
+One word per concept, across tables, API paths and UI copy alike (charter
+Decision 30, §21). Where a domain has both an internal name and a product name,
+the split is directional and must not blur:
+
+| Word | Names | Appears in |
+|---|---|---|
+| **Story** | the domain | `story_*` tables, `backend/story/`, `/api/v1/.../story/...` |
+| **Newsroom** | the user-facing surface | UI copy and product language only |
+| **Recap** | the weekly published artifact | a `story_edition` for a period |
+| **Timeline** | the chronological feature | `timeline_entries` |
+
+Never use "newsroom" for the domain; never use "story" in UI copy.
+
 ### Timestamps
 
 - `timestamptz` always. Never `timestamp`. Never a naive datetime anywhere in the stack.

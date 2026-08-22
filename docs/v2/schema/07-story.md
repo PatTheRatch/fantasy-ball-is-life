@@ -2,7 +2,7 @@
 
 **Domain:** league timeline, records, rivalries, power rankings, recap facts and published editions.
 **Depends on:** 01, 02, 06.
-**Charter:** Decisions 8 (identity across seasons), 13 (the Newsroom is a real pillar — LLM never authoritative), 20 (events + snapshots), 21 (versioned derived metrics), 28 (no silent degradation).
+**Charter:** Decisions 8 (identity across seasons), 13 (the Newsroom is a real pillar — LLM never authoritative), 20 (events + snapshots), 21 (versioned derived metrics), 28 (no silent degradation), 30 (story vocabulary).
 
 > Read [`README.md`](README.md) first. Conventions there are binding.
 > References `metric_definitions` and `computation_status` from [`06-intelligence.md`](06-intelligence.md).
@@ -242,15 +242,26 @@ Multi-season history (charter Decision 13's closing requirement) is a query acro
 
 ## Naming note
 
-Current FCP calls these `recap_facts` / `recap_editions`, and the UI calls the surface the *Newsroom*. The charter uses *story engine*, *timeline* and *newsroom* in different places.
+**Settled — charter Decision 30** (ratified 22 August 2026). The four words are a
+hierarchy, not synonyms, and each names exactly one thing:
 
-Proposed here: `story_facts` / `story_editions` for the tables, because the domain is broader than weekly recaps — the timeline, records and rivalries are the same engine. **Pick one vocabulary before implementation and use it in tables, API paths and UI copy alike**; charter §21 asks that a new agent be able to answer "where does X live" without archaeology, and three names for one concept is exactly how that fails.
+| Word | Names | Appears in |
+|---|---|---|
+| **Story** | the domain | `story_facts`, `story_editions`, `backend/story/`, `/api/v1/leagues/{id}/story/...` |
+| **Newsroom** | the user-facing surface | UI copy and product language only |
+| **Recap** | the weekly published artifact | a `story_edition` for a period; UI "Week 12 Recap" |
+| **Timeline** | the chronological feature | `timeline_entries`; UI "Timeline" |
+
+The rule is directional and that is what makes it hold: **never use "newsroom"
+for the domain, never use "story" in UI copy.** Current FCP calls the tables
+`recap_facts` / `recap_editions`, which is already too narrow for what they
+hold — records and rivalries are not recaps. `story_*` is the rename.
 
 ---
 
 ## Open questions
 
-1. **Vocabulary (blocking, above).** Newsroom, recap, story, timeline — settle it now, it touches every layer.
+1. ~~**Vocabulary (blocking, above).**~~ **Resolved — charter Decision 30.** Story = domain, Newsroom = surface, Recap = weekly artifact, Timeline = the chronological feature. See the naming note above.
 2. **Timeline generation cadence.** Recompute on period finalization, or continuously during a live period? Recommend on finalization for V1: it is cheap, deterministic, and avoids narrating a game that has not finished. Live in-period narration is a later feature.
 3. **Records backfill.** Records are derived, so they can be computed for any imported history — but only for seasons actually ingested. With V2 starting empty (charter Decision 25), records begin at whatever history is imported. Worth deciding how many prior seasons to import for the first real league, since it determines whether the records surface is interesting on day one.
 4. **Significance model.** `significance` drives what surfaces in the timeline, and a bad model makes the product boring rather than wrong. It should be a versioned `metric_definition` from the start so it can be tuned against real reader response without rewriting history.

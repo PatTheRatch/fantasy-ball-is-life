@@ -142,7 +142,8 @@ Known to come, roughly in order:
 - The gated port: optimizer, plan diversity, MC targets, Forge Value —
   **only behind a committed synthetic fixture and characterization tests**
   (classification §6).
-- Newsroom: story facts, editions, publishing (D13).
+- Story domain: story facts, editions, timeline, records, rivalries (D13, D30).
+  Surfaces to users as the **Newsroom** — see D30 for which word goes where.
 - FCP projection model (D6).
 
 ---
@@ -154,7 +155,7 @@ Known to come, roughly in order:
 | 1 | Does `matchupPeriods` cover playoff/championship periods, and how does the All-Star break appear? — resolved S1-03 | S1-06 |
 | 2 | ~~Roster fetch cost — one request per team per day, or one league-wide call?~~ **Resolved: one league-wide call.** `mRoster` returns every team under `teams[].roster.entries[]`; V1 measured the whole 14-team league in a single request. Cost is per-league, not per-team. See [`research/ESPN_ROSTER_API.md`](research/ESPN_ROSTER_API.md). | ~~Historical capture~~ |
 | 6 | **Is historical lineup state actually recoverable?** Two candidate paths challenge the design's "a day not captured is gone permanently": (a) `rosterForCurrentScoringPeriod` inside the `mMatchupScore`/`mScoreboard` payload for a past period; (b) `mTransactions2` `FUTURE_ROSTER` records, which carry source/destination lineup slot + process date — V1 backfilled 21 weeks of them. If either works, daily capture is recoverable rather than capture-or-lose-forever, and historical capture does not have to lead Slice 2. **Live check, S1-03-shaped.** Until it answers, the daily-capture design stands unchanged — the asymmetry favours over-capturing. | Historical capture sequencing |
-| 3 | Story vocabulary: newsroom / recap / story / timeline. Pick one for tables, API and UI. | Newsroom slice |
+| 3 | ~~Story vocabulary: newsroom / recap / story / timeline. Pick one for tables, API and UI.~~ **Resolved — charter Decision 30**, ratified 22 Aug 2026. They are a hierarchy: Story = domain, Newsroom = surface, Recap = weekly artifact, Timeline = the feature. Never "newsroom" for the domain, never "story" in UI copy. | ~~Newsroom slice~~ |
 | 4 | Self-delivering recaps — absent from the charter by omission, not decision. Product call needed. | Newsroom slice |
 | 5 | ~~Adjustment composition: does raising projected minutes scale dependent rate stats?~~ **Resolved — charter Decision 29**, ratified 22 Aug 2026. Volume scales, efficiency does not; `games` and `minutes_per_game` compose at different levels; `absolute` is the default mode. Normative rule in [`schema/05-projections.md`](schema/05-projections.md) §Composition rule. | ~~Projections slice~~ |
 
