@@ -67,13 +67,13 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   *Charter: D8, D11, D14, D15; non-negotiable "no hardcoded season calendars".*
   *Schema: [`schema/02-fantasy.md`](schema/02-fantasy.md).*
 
-- [ ] **S1-07 · ESPN adapter + DTOs** — **NEXT** — depends on S1-02, S1-06
+- [x] **S1-07 · ESPN adapter + DTOs** — `5b51c44` — depends on S1-02, S1-06
   `fetch_settings`, `fetch_teams`, `fetch_periods` returning FCP DTOs.
   Provider objects must not escape the package, and **no subclassing of
   `espn_api.League`** — that is the §7 violation V1 built its domain on.
   *Schema: [`schema/04-provider-ingestion.md`](schema/04-provider-ingestion.md).*
 
-- [ ] **S1-08 · Ingestion pipeline** — depends on S1-07
+- [ ] **S1-08 · Ingestion pipeline** — **NEXT** — depends on S1-07
   `ingestion_runs`, `raw_payloads` with `content_hash` dedupe, normalizer
   versioning, lineage columns on canonical rows, `partial` as a real run
   outcome. Persist before interpret, so replay works.
@@ -129,4 +129,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-06 merged.*
+*Claude updates this on approval. Last change: S1-07 merged.*
