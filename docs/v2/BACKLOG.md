@@ -95,13 +95,15 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   `computed_result`/`provider_result` separate with `result_source`.
   *Charter: D10, D11, D20.*
 
-- [ ] **S1-10b · Standings read path** — **NEXT** — depends on S1-10a
-  Fold standings from `final` matchups (`StandingsReadService`), serve
-  `GET /api/v1/leagues/{id}/standings` with freshness metadata on the
-  response.
+- [x] **S1-10b · Standings read path** — `90cfc0f` — depends on S1-10a
+  `StandingsReadService.standings` (fold `final` matchups + category rows, no
+  re-tally), freshness envelope `{data, as_of, freshness="final", stale}`,
+  `GET /api/v1/leagues/{league_season_id}/standings` (`LEAGUE_SCOPED` +
+  membership), read repos (`live_for_season`, `category_results_for`,
+  `teams`), `LeagueMembershipRepository.is_member`.
   *Charter: D10, D11, D20.*
 
-- [ ] **S1-11 · One shared league page**
+- [ ] **S1-11 · One shared league page** — **NEXT**
   React + Vite + TS scaffold, generated API client, the league page rendering
   standings and periods with honest empty and stale states. Closes the slice.
 
@@ -138,4 +140,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-10a merged.*
+*Claude updates this on approval. Last change: S1-10b merged.*
