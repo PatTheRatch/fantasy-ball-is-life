@@ -135,19 +135,15 @@ thing. Source: [`research/REDTEAM_TRIAGE.md`](research/REDTEAM_TRIAGE.md),
 each verified against the code before landing here. Ordered by severity;
 H-01 and H-02 are correctness bugs in shipped code.
 
-- [ ] **H-01 · Unknown is not a tie** — **NEXT** — the non-negotiable violation
-  `compare()` returns `TIE` when either side is `None`/NaN; that persists as
-  `result='tie'` and standings counts it as a real category tie. Charter §10:
-  absence of a result must never be indistinguishable from a result. Add an
-  explicit unknown to the domain result vocabulary, persist `NULL` (the column
-  is *already* nullable), exclude unknown categories from the fold, and mark
-  the matchup partial rather than final. Ports the invariant register's
-  null-vs-zero lesson to null-vs-tie.
-  *Charter: D28, §10. Touches `domain/categories.py`, `services/matchups.py`,
-  `services/standings_read.py`.*
-  Scoped: [`docs/tickets/H-01-unknown-is-not-a-tie.md`](../tickets/H-01-unknown-is-not-a-tie.md).
+- [x] **H-01 · Unknown is not a tie** — `37c4236` — the non-negotiable violation
+  Added an explicit UNKNOWN to the domain result vocabulary; compare() returns
+  UNKNOWN (not TIE) for None/NaN; tally() returns a 4-tuple; sync persists
+  result=NULL (the column was already nullable); the standings fold excludes
+  unknown categories from W/L/T and win_pct; the API envelope surfaces
+  complete + unknown_category_count. Completeness is derived, not a status.
+  *Charter: D28, §10.*
 
-- [ ] **H-02 · Conflicting birthdate must not auto-link**
+- [ ] **H-02 · Conflicting birthdate must not auto-link** — **NEXT**
   The ladder falls through from `exact_name_dob` to `exact_name` and auto-links
   at 0.850 even when the candidate's birthdate contradicts the provider's.
   Treat a two-sided birthdate disagreement as a conflict and queue it. Add the
@@ -206,6 +202,13 @@ H-01 and H-02 are correctness bugs in shipped code.
   the scheduler lands — the race is unreachable today because nothing
   schedules the sync.
 
+- [ ] **H-09 · All-play scoring still conflates unknown with a tie**
+  domain/scoring.py all_play_week funnels Result.UNKNOWN into its else -> ties
+  branch. No live caller today (test-only domain module), so latent, but it is
+  the same null->tie shape H-01 killed in standings. Fix before any all-play
+  surface is wired.
+  *Charter: §10.*
+
 ---
 
 ## Slice 2 and beyond — not yet cut
@@ -243,4 +246,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-11b merged.*
+*Claude updates this on approval. Last change: H-01 merged.*
