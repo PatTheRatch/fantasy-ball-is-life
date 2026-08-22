@@ -18,6 +18,10 @@ EXPECTED_TABLES = {
     "fantasy_team_seasons",
     "matchup_periods",
     "fantasy_team_season_managers",
+    "providers",
+    "provider_connections",
+    "ingestion_runs",
+    "raw_payloads",
 }
 
 #: (table, column) -> expected native Postgres enum type name.
@@ -28,7 +32,17 @@ ENUM_COLUMNS = {
     ("matchup_periods", "type"): "period_type",
     ("matchup_periods", "status"): "period_status",
     ("fantasy_team_season_managers", "role"): "manager_role",
+    ("providers", "key"): "provider_key",
+    ("ingestion_runs", "status"): "run_status",
 }
+
+#: The synced canonical tables that must carry a lineage column.
+LINEAGE_TABLES = (
+    "league_seasons",
+    "league_season_categories",
+    "fantasy_team_seasons",
+    "matchup_periods",
+)
 
 
 def test_fantasy_tables_are_registered() -> None:
@@ -40,3 +54,9 @@ def test_enum_columns_carry_expected_types() -> None:
     for (table, column), expected in ENUM_COLUMNS.items():
         col = Base.metadata.tables[table].columns[column]
         assert col.type.name == expected, f"{table}.{column} is {col.type.name}, not {expected}"
+
+
+def test_synced_tables_carry_lineage_column() -> None:
+    for table in LINEAGE_TABLES:
+        cols = Base.metadata.tables[table].columns
+        assert "ingestion_run_id" in cols, f"{table} is missing its lineage column"

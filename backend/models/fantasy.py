@@ -36,7 +36,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models import enums
-from backend.models.base import CreatedAtMixin, TimestampMixin, uuid7
+from backend.models.base import CreatedAtMixin, LineageMixin, TimestampMixin, uuid7
 from backend.platform.db import Base
 
 
@@ -61,7 +61,7 @@ class League(TimestampMixin, Base):
     __table_args__ = (CheckConstraint("slug = lower(slug)", name="slug_lowercase"),)
 
 
-class LeagueSeason(TimestampMixin, Base):
+class LeagueSeason(LineageMixin, TimestampMixin, Base):
     """One league's one season. Scope: ``league_season`` · Freshness: ``synced``
     while active, ``final`` when complete.
 
@@ -141,7 +141,7 @@ class Category(CreatedAtMixin, Base):
     )
 
 
-class LeagueSeasonCategory(CreatedAtMixin, Base):
+class LeagueSeasonCategory(LineageMixin, CreatedAtMixin, Base):
     """Which categories a season scores, in order. Scope: ``league_season`` ·
     Freshness: ``synced``.
 
@@ -189,7 +189,7 @@ class FantasyTeam(CreatedAtMixin, Base):
     )
 
 
-class FantasyTeamSeason(TimestampMixin, Base):
+class FantasyTeamSeason(LineageMixin, TimestampMixin, Base):
     """One team's one season. Scope: ``league_season`` · Freshness: ``synced``.
 
     Carries the name (which changes almost every year), logo and provider id.
@@ -224,7 +224,7 @@ class FantasyTeamSeason(TimestampMixin, Base):
     )
 
 
-class MatchupPeriod(TimestampMixin, Base):
+class MatchupPeriod(LineageMixin, TimestampMixin, Base):
     """A matchup period (week). Scope: ``league_season`` · Freshness: ``synced``
     → ``final``.
 

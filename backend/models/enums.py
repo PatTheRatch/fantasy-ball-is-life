@@ -35,3 +35,7 @@ period_status = ENUM(
 )
 
 manager_role = ENUM("owner", "co_manager", name="manager_role", create_type=False)
+
+run_status = ENUM(
+    "running", "succeeded", "partial", "failed", name="run_status", create_type=False
+)
