@@ -27,6 +27,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     Text,
     UniqueConstraint,
     Uuid,
@@ -36,8 +37,19 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models import enums
-from backend.models.base import CreatedAtMixin, LineageMixin, TimestampMixin, uuid7
+from backend.models.base import (
+    CreatedAtMixin,
+    LineageMixin,
+    ProviderLineageMixin,
+    TimestampMixin,
+    uuid7,
+)
 from backend.platform.db import Base
+
+#: Score value precision (10,3) and ratio-component precision (10,2), as floats
+#: (``asdecimal=False``) to match the rest of the codebase.
+_score_value = Numeric(10, 3, asdecimal=False)
+_component_value = Numeric(10, 2, asdecimal=False)
 
 
 class League(TimestampMixin, Base):
@@ -259,4 +271,99 @@ class MatchupPeriod(LineageMixin, TimestampMixin, Base):
         UniqueConstraint("league_season_id", "ordinal", name="uq_matchup_periods_season_ordinal"),
         CheckConstraint("end_date >= start_date", name="dates_ordered"),
         Index("matchup_periods_dates_idx", "league_season_id", "start_date", "end_date"),
+    )
+
+
+class Matchup(ProviderLineageMixin, CreatedAtMixin, Base):
+    """One matchup in one period. Scope: ``league_season`` · Freshness: ``synced``
+    → ``final``.
+
+    ``computed_result`` and ``provider_result`` are stored separately
+    (02-fantasy.md: a 4-4 playoff with a tied category read as an undecided tie
+    because the code only kept its own tally and never consulted ESPN's
+    ``winner``). ``result_source`` records which was used. ``away_team_season_id``
+    is null for a bye — never zero-filled (the V1 playoff all-play bug came from
+    zero-filling missing matchups).
+    """
+
+    __tablename__ = "matchups"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid7)
+    league_season_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("league_seasons.id"), nullable=False
+    )
+    matchup_period_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("matchup_periods.id"), nullable=False
+    )
+    home_team_season_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("fantasy_team_seasons.id"), nullable=False
+    )
+    away_team_season_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("fantasy_team_seasons.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        enums.period_status, nullable=False, server_default=text("'scheduled'")
+    )
+    computed_result: Mapped[str | None] = mapped_column(enums.matchup_result, nullable=True)
+    provider_result: Mapped[str | None] = mapped_column(enums.matchup_result, nullable=True)
+    result_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("matchups.id"), nullable=True
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        # One live row per (period, home) — the schema's ``unique (..., superseded_at)``
+        # does not enforce this (Postgres treats NULLs as distinct), so the live-row
+        # invariant is a partial unique index instead.
+        Index(
+            "uq_matchups_live_slot",
+            "matchup_period_id",
+            "home_team_season_id",
+            unique=True,
+            postgresql_where=text("superseded_at IS NULL"),
+        ),
+        Index(
+            "ix_matchups_ls_period_live",
+            "league_season_id",
+            "matchup_period_id",
+            postgresql_where=text("superseded_at IS NULL"),
+        ),
+    )
+
+
+class MatchupCategoryResult(Base):
+    """One category's outcome within a matchup. Scope: ``league_season`` ·
+    Freshness: ``final`` with its matchup.
+
+    Ratio categories keep their components (numerator/denominator) so season-to-
+    date aggregation stays correct (team FG% = Σfgm/Σfga, never a mean of
+    percentages). Provenance is inherited from the parent ``Matchup``, so this
+    table deliberately carries no lineage columns of its own.
+    """
+
+    __tablename__ = "matchup_category_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid7)
+    matchup_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("matchups.id"), nullable=False
+    )
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("categories.id"), nullable=False
+    )
+    home_value: Mapped[float | None] = mapped_column(_score_value, nullable=True)
+    away_value: Mapped[float | None] = mapped_column(_score_value, nullable=True)
+    home_numerator: Mapped[float | None] = mapped_column(_component_value, nullable=True)
+    home_denominator: Mapped[float | None] = mapped_column(_component_value, nullable=True)
+    away_numerator: Mapped[float | None] = mapped_column(_component_value, nullable=True)
+    away_denominator: Mapped[float | None] = mapped_column(_component_value, nullable=True)
+    result: Mapped[str | None] = mapped_column(enums.matchup_result, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "matchup_id", "category_id",
+            name="uq_matchup_category_results_matchup_category",
+        ),
     )

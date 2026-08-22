@@ -23,13 +23,44 @@ from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.domain.dto import LeagueSettingsDTO, MatchupPeriodDTO, PeriodType, TeamDTO
+from backend.domain.dto import (
+    LeagueSettingsDTO,
+    MatchupPeriodDTO,
+    PeriodType,
+    ScoreboardDTO,
+    ScoreboardMatchupDTO,
+    ScoreboardTeamStatsDTO,
+    TeamDTO,
+)
 from backend.providers.espn.client import install_espn_timeout_patch
 
 DEFAULT_TIMEZONE = "America/New_York"
 
 #: ESPN basketball leagues are ET-based; the schema's default ``timezone``.
 _DEFAULT_TZ = ZoneInfo(DEFAULT_TIMEZONE)
+
+#: ESPN stat abbreviation → FCP canonical stat key. The sync service reads a
+#: league's ``Category`` rows by their FCP key (``TPM``, ``fgm``, ``fga`` …) with
+#: no provider knowledge (D11); this map is the provider-specific translation.
+#: Ratio components are passed through (``FGM``/``FGA``/``FTM``/``FTA``) so the
+#: sync service derives FG%/FT% itself and aggregation stays correct — ESPN's
+#: precomputed ``FG%``/``FT%`` are deliberately dropped.
+ESPN_STAT_KEY_MAP: dict[str, str] = {
+    "PTS": "PTS",
+    "REB": "REB",
+    "AST": "AST",
+    "STL": "STL",
+    "BLK": "BLK",
+    "3PM": "TPM",
+    "TO": "TO",
+    "FGM": "fgm",
+    "FGA": "fga",
+    "FTM": "ftm",
+    "FTA": "fta",
+}
+
+#: ESPN ``winner`` → FCP ``matchup_result``. ``UNDECIDED``/unknown → None.
+_WINNER_MAP: dict[str, str] = {"HOME": "home", "AWAY": "away", "TIE": "tie"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +195,49 @@ def map_periods(league: Any) -> list[MatchupPeriodDTO]:
     return sorted(dtos, key=lambda p: p.ordinal)
 
 
+def _map_team_stats(
+    team: Any, team_cats: dict[str, dict[str, float | str]] | None
+) -> ScoreboardTeamStatsDTO:
+    """Map one side's raw stats into a :class:`ScoreboardTeamStatsDTO`.
+
+    ``team`` is an ``espn_api`` Team (with ``.team_id``) for a real opponent, or
+    ``0``/falsy for a bye. ``team_cats`` is ESPN's ``{abbrev: {'score', 'result'}}``;
+    keys are translated to FCP canonical stat keys via :data:`ESPN_STAT_KEY_MAP`.
+    """
+    provider_team_id = str(team.team_id) if hasattr(team, "team_id") else None
+    stats: dict[str, float | None] = {}
+    if team_cats:
+        for abbrev, cell in team_cats.items():
+            key = ESPN_STAT_KEY_MAP.get(abbrev)
+            if key is not None:
+                raw = cell.get("score")
+                stats[key] = float(raw) if raw is not None else None
+    return ScoreboardTeamStatsDTO(provider_team_id=provider_team_id, stats=stats)
+
+
+def map_scoreboard(league: Any, provider_period_id: str) -> ScoreboardDTO:
+    """Map a period's ``box_scores`` into a :class:`ScoreboardDTO`.
+
+    A matchup with no away team (``away_team`` stays ``0`` from the SDK) is a
+    bye: ``away`` is ``None`` rather than a zero-filled ghost team (02-fantasy:
+    the V1 playoff all-play bug came from zero-filling missing matchups).
+    """
+    boxes = league.box_scores(matchup_period=int(provider_period_id))
+    matchups = tuple(
+        ScoreboardMatchupDTO(
+            home=_map_team_stats(box.home_team, box.home_team_cats),
+            away=(
+                _map_team_stats(box.away_team, box.away_team_cats)
+                if hasattr(box.away_team, "team_id")
+                else None
+            ),
+            provider_result=_WINNER_MAP.get(box.winner),
+        )
+        for box in boxes
+    )
+    return ScoreboardDTO(provider_period_id=provider_period_id, matchups=matchups)
+
+
 class ESPNAdapter:
     """Fetches ESPN league data and returns FCP DTOs."""
 
@@ -178,3 +252,8 @@ class ESPNAdapter:
 
     def fetch_periods(self, conn: EspnConnection, season_year: int) -> list[MatchupPeriodDTO]:
         return map_periods(_construct_league(conn, season_year))
+
+    def fetch_scoreboard(
+        self, conn: EspnConnection, season_year: int, provider_period_id: str
+    ) -> ScoreboardDTO:
+        return map_scoreboard(_construct_league(conn, season_year), provider_period_id)

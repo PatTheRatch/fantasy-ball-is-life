@@ -16,6 +16,7 @@ maps 1:1 onto a fantasy-core table from ``02-fantasy.md``:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -83,3 +84,35 @@ class MatchupPeriodDTO:
     start_date: date | None
     end_date: date | None
     label: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScoreboardTeamStatsDTO:
+    """One side of one matchup's raw stats (→ ``matchup_category_results``).
+
+    ``stats`` is keyed by FCP canonical stat keys (``PTS``, ``TPM``, ``fgm``,
+    ``fga`` …) — the adapter maps the provider's abbreviations onto them, so the
+    sync service reads a league's ``Category`` rows without provider knowledge
+    (D11). Ratio components (``fgm``/``fga``/``ftm``/``fta``) are included
+    alongside the counting stats so aggregation stays correct.
+    """
+
+    provider_team_id: str | None  # None = bye (no opponent)
+    stats: Mapping[str, float | None]
+
+
+@dataclass(frozen=True, slots=True)
+class ScoreboardMatchupDTO:
+    """One matchup in a period. ``away`` is ``None`` for a bye."""
+
+    home: ScoreboardTeamStatsDTO
+    away: ScoreboardTeamStatsDTO | None
+    provider_result: str | None  # 'home' | 'away' | 'tie' | None
+
+
+@dataclass(frozen=True, slots=True)
+class ScoreboardDTO:
+    """A period's scoreboard: every matchup with raw stats + provider verdict."""
+
+    provider_period_id: str
+    matchups: tuple[ScoreboardMatchupDTO, ...]

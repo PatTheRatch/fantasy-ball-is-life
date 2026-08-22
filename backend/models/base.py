@@ -11,7 +11,7 @@ import time
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -75,3 +75,23 @@ class LineageMixin:
     ingestion_run_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("ingestion_runs.id"), nullable=True
     )
+
+
+class ProviderLineageMixin:
+    """Full lineage (README §Lineage) for pipeline-only facts.
+
+    ``ingestion_run_id`` is NOT NULL here (unlike :class:`LineageMixin`) because
+    these tables are never seed- or user-populated — every row is derived from a
+    provider payload, so provenance is mandatory. ``observed_at`` records when
+    the pipeline observed the fact; ``normalizer_version`` records which parser
+    produced the row (D17). The ``superseded_by_id``/``superseded_at`` self-FK is
+    defined per-table (a mixin cannot reference its own table name).
+    """
+
+    ingestion_run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("ingestion_runs.id"), nullable=False
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    normalizer_version: Mapped[str] = mapped_column(Text, nullable=False)

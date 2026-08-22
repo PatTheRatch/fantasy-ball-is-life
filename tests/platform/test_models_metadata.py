@@ -18,6 +18,8 @@ EXPECTED_TABLES = {
     "fantasy_teams",
     "fantasy_team_seasons",
     "matchup_periods",
+    "matchups",
+    "matchup_category_results",
     "fantasy_team_season_managers",
     "providers",
     "provider_connections",
@@ -42,6 +44,10 @@ ENUM_COLUMNS = {
     ("identity_links", "fcp_entity_kind"): "provider_entity_kind",
     ("identity_links", "match_method"): "match_method",
     ("identity_review_queue", "status"): "review_status",
+    ("matchups", "status"): "period_status",
+    ("matchups", "computed_result"): "matchup_result",
+    ("matchups", "provider_result"): "matchup_result",
+    ("matchup_category_results", "result"): "matchup_result",
 }
 
 #: The synced canonical tables that must carry a lineage column.
@@ -50,6 +56,7 @@ LINEAGE_TABLES = (
     "league_season_categories",
     "fantasy_team_seasons",
     "matchup_periods",
+    "matchups",
 )
 
 

@@ -16,6 +16,8 @@ from backend.models.fantasy import (
     League,
     LeagueSeason,
     LeagueSeasonCategory,
+    Matchup,
+    MatchupCategoryResult,
     MatchupPeriod,
 )
 from backend.models.identity import (
@@ -45,6 +47,8 @@ __all__ = [
     "LeagueSeasonCategory",
     "Manager",
     "ManagerUserLink",
+    "Matchup",
+    "MatchupCategoryResult",
     "MatchupPeriod",
     "NbaSeason",
     "Player",

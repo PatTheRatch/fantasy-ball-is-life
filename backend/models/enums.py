@@ -52,3 +52,5 @@ match_method = ENUM(
 review_status = ENUM(
     "open", "resolved", "rejected", "ignored", name="review_status", create_type=False
 )
+
+matchup_result = ENUM("home", "away", "tie", name="matchup_result", create_type=False)
