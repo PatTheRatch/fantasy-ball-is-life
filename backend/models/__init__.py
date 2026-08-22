@@ -4,6 +4,11 @@ Models import SQLAlchemy, so they live here rather than in ``backend.domain``,
 which the architecture test keeps free of I/O and infrastructure imports.
 """
 
+from backend.models.crosswalk import (
+    IdentityLink,
+    IdentityReviewQueue,
+    ProviderIdentity,
+)
 from backend.models.fantasy import (
     Category,
     FantasyTeam,
@@ -25,13 +30,15 @@ from backend.models.ingestion import (
     ProviderConnection,
     RawPayload,
 )
-from backend.models.nba import NbaSeason
+from backend.models.nba import NbaSeason, Player
 
 __all__ = [
     "Category",
     "FantasyTeam",
     "FantasyTeamSeason",
     "FantasyTeamSeasonManager",
+    "IdentityLink",
+    "IdentityReviewQueue",
     "IngestionRun",
     "League",
     "LeagueSeason",
@@ -40,8 +47,10 @@ __all__ = [
     "ManagerUserLink",
     "MatchupPeriod",
     "NbaSeason",
+    "Player",
     "Provider",
     "ProviderConnection",
+    "ProviderIdentity",
     "RawPayload",
     "User",
 ]

@@ -10,6 +10,7 @@ from backend.platform.db import Base
 
 EXPECTED_TABLES = {
     "nba_seasons",
+    "players",
     "leagues",
     "league_seasons",
     "categories",
@@ -22,6 +23,9 @@ EXPECTED_TABLES = {
     "provider_connections",
     "ingestion_runs",
     "raw_payloads",
+    "provider_identities",
+    "identity_links",
+    "identity_review_queue",
 }
 
 #: (table, column) -> expected native Postgres enum type name.
@@ -34,6 +38,10 @@ ENUM_COLUMNS = {
     ("fantasy_team_season_managers", "role"): "manager_role",
     ("providers", "key"): "provider_key",
     ("ingestion_runs", "status"): "run_status",
+    ("provider_identities", "entity_kind"): "provider_entity_kind",
+    ("identity_links", "fcp_entity_kind"): "provider_entity_kind",
+    ("identity_links", "match_method"): "match_method",
+    ("identity_review_queue", "status"): "review_status",
 }
 
 #: The synced canonical tables that must carry a lineage column.

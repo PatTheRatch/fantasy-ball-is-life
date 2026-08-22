@@ -39,3 +39,16 @@ manager_role = ENUM("owner", "co_manager", name="manager_role", create_type=Fals
 run_status = ENUM(
     "running", "succeeded", "partial", "failed", name="run_status", create_type=False
 )
+
+provider_entity_kind = ENUM(
+    "player", "team", "league", "manager", "game", name="provider_entity_kind", create_type=False
+)
+
+match_method = ENUM(
+    "provider_id", "nba_anchor", "exact_name_dob", "exact_name", "fuzzy_name", "manual",
+    name="match_method", create_type=False,
+)
+
+review_status = ENUM(
+    "open", "resolved", "rejected", "ignored", name="review_status", create_type=False
+)
