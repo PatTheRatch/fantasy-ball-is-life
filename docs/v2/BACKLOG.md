@@ -113,6 +113,7 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   `/leagues/:league_season_id` rendering the standings table with honest
   empty/stale/loading states (using the StateMessage vocabulary + freshness
   envelope from S1-10b).
+  Scoped: [`docs/tickets/S1-11b-league-page-standings.md`](../tickets/S1-11b-league-page-standings.md).
 
 - [ ] **S1-11c · Periods endpoint + selector** — depends on S1-11b
   Backend `GET /api/v1/leagues/{league_season_id}/periods` (`LEAGUE_SCOPED`) +
@@ -155,4 +156,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-11a merged.*
+*Claude updates this on approval. Last change: S1-11b scoped and assigned.*
