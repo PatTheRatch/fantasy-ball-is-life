@@ -10,6 +10,7 @@ facts with supersession semantics (a resync supersedes, never deletes).
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -76,6 +77,16 @@ class LeagueSeasonRepository:
             )
         )
 
+    def teams(self, league_season_id: uuid.UUID) -> list[FantasyTeamSeason]:
+        """All teams in a season, for name/abbreviation enrichment on read."""
+        return list(
+            self.session.scalars(
+                select(FantasyTeamSeason).where(
+                    FantasyTeamSeason.league_season_id == league_season_id
+                )
+            )
+        )
+
 
 class MatchupRepository:
     """Reads/writes matchups + category results (supersession, never deletion)."""
@@ -107,6 +118,39 @@ class MatchupRepository:
             self.session.scalars(
                 select(MatchupCategoryResult).where(
                     MatchupCategoryResult.matchup_id == matchup_id
+                )
+            )
+        )
+
+    def live_for_season(
+        self,
+        league_season_id: uuid.UUID,
+        *,
+        period_ids: Sequence[uuid.UUID] | None = None,
+    ) -> list[Matchup]:
+        """Non-superseded matchups for a season, optionally limited to periods.
+
+        The standings read path calls this with the ``final`` periods it wants
+        folded, so a superseded row is excluded here rather than post-filtered.
+        """
+        stmt = select(Matchup).where(
+            Matchup.league_season_id == league_season_id,
+            Matchup.superseded_at.is_(None),
+        )
+        if period_ids is not None:
+            stmt = stmt.where(Matchup.matchup_period_id.in_(period_ids))
+        return list(self.session.scalars(stmt))
+
+    def category_results_for(
+        self, matchup_ids: Sequence[uuid.UUID]
+    ) -> list[MatchupCategoryResult]:
+        """Batch category rows for many matchups (avoids an N+1 on read)."""
+        if not matchup_ids:
+            return []
+        return list(
+            self.session.scalars(
+                select(MatchupCategoryResult).where(
+                    MatchupCategoryResult.matchup_id.in_(matchup_ids)
                 )
             )
         )
