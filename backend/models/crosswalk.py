@@ -149,7 +149,7 @@ class IdentityReviewQueue(CreatedAtMixin, Base):
     )  # empty_name|empty_pool|no_candidate|low_confidence|ambiguous|fuzzy_name
     candidates: Mapped[list[object]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'")
-    )  # [{fcp_entity_id, score, evidence}]
+    )  # [{fcp_entity_id, name, score}]
     status: Mapped[str] = mapped_column(
         enums.review_status, nullable=False, server_default=text("'open'")
     )

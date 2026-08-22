@@ -66,7 +66,7 @@ class ResolutionDecision:
     match_method: MatchMethod | None
     confidence: float | None
     fcp_entity_id: uuid.UUID | None
-    reason: str | None  # queue reason: no_candidate|ambiguous|low_confidence|fuzzy_name|empty_name
+    reason: str | None  # queue reason: empty_name|empty_pool|no_candidate|ambiguous|low_confidence|fuzzy_name
     candidates: tuple[QueueCandidate, ...]
 
 
