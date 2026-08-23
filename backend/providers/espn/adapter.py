@@ -31,6 +31,7 @@ from backend.domain.dto import (
     ScoreboardMatchupDTO,
     ScoreboardTeamStatsDTO,
     TeamDTO,
+    TeamOwnerDTO,
 )
 from backend.providers.espn.client import install_espn_timeout_patch
 
@@ -62,6 +63,23 @@ ESPN_STAT_KEY_MAP: dict[str, str] = {
 #: ESPN ``winner`` → FCP ``matchup_result``. ``UNDECIDED``/unknown → None.
 _WINNER_MAP: dict[str, str] = {"HOME": "home", "AWAY": "away", "TIE": "tie"}
 
+#: ESPN scoring-item ``statId`` → FCP ``categories.key`` (D11 — the mapping to
+#: the rows seeded by 0004, by key). Stat ids come from ESPN's own STATS_MAP
+#: (espn_api/basketball/constant.py): 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB,
+#: 11=TO, 17=3PM, 19=FG%, 20=FT%. Ratio categories map to their seeded key
+#: (FG_PCT/FT_PCT), never to the component stats (FGM/FGA/FTM/FTA).
+ESPN_SCORING_ITEM_KEY_MAP: dict[int, str] = {
+    0: "PTS",
+    1: "BLK",
+    2: "STL",
+    3: "AST",
+    6: "REB",
+    11: "TO",
+    17: "TPM",
+    19: "FG_PCT",
+    20: "FT_PCT",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class EspnConnection:
@@ -90,6 +108,36 @@ def _construct_league(conn: EspnConnection, season_year: int) -> Any:
     )
 
 
+def _scoring_categories(s: Any) -> tuple[str, ...]:
+    """Derive the season's scoring-category keys from ``scoringItems``.
+
+    The basketball SDK exposes ``scoringItems`` only on the raw settings dict
+    (``BaseSettings._raw_scoring_settings``), not as a parsed attribute. Each item
+    carries a ``statId``; the ones mapping to a seeded category key are kept, in
+    provider order. A stat id outside the map is surfaced as a sentinel key
+    (``espn:stat:<id>``) rather than dropped — the count the season declares must
+    not be silently reduced at this boundary; the *service* resolves keys to
+    seeded ``Category`` rows and marks the run ``partial`` for any it cannot
+    (D11).
+    """
+    raw = getattr(s, "_raw_scoring_settings", None) or {}
+    if not isinstance(raw, dict):
+        return ()
+    keys: list[str] = []
+    for item in raw.get("scoringItems", []) or []:
+        if not isinstance(item, dict):
+            continue
+        stat_id = item.get("statId")
+        if stat_id is None:
+            continue
+        stat_id = int(stat_id)
+        key = ESPN_SCORING_ITEM_KEY_MAP.get(stat_id)
+        if key is None:
+            key = f"espn:stat:{stat_id}"
+        keys.append(key)
+    return tuple(keys)
+
+
 def map_settings(league: Any, conn: EspnConnection, season_year: int) -> LeagueSettingsDTO:
     """Map ``league.settings`` into a :class:`LeagueSettingsDTO`.
 
@@ -101,6 +149,7 @@ def map_settings(league: Any, conn: EspnConnection, season_year: int) -> LeagueS
     s = league.settings
     return LeagueSettingsDTO(
         provider_league_id=str(conn.league_id),
+        name=s.name,
         season_year=season_year,
         scoring_type=s.scoring_type,
         timezone=DEFAULT_TIMEZONE,
@@ -109,7 +158,25 @@ def map_settings(league: Any, conn: EspnConnection, season_year: int) -> LeagueS
         regular_season_periods=s.reg_season_count,
         acquisition_budget=s.acquisition_budget,
         uses_faab=bool(s.faab) if s.faab is not None else None,
+        categories=_scoring_categories(s),
     )
+
+
+def _map_owner(member: Any) -> TeamOwnerDTO:
+    """Map one ESPN owner member (a raw dict from ``members``) into a DTO.
+
+    ``id`` is the stable ESPN member GUID — the key managers are matched on,
+    never the display name (the S1-09 lesson).
+    """
+    provider_owner_id = str(member.get("id"))
+    display_name = (
+        member.get("displayName")
+        or " ".join(
+            part for part in (member.get("firstName"), member.get("lastName")) if part
+        ).strip()
+        or provider_owner_id
+    )
+    return TeamOwnerDTO(provider_owner_id=provider_owner_id, display_name=display_name)
 
 
 def map_teams(league: Any) -> list[TeamDTO]:
@@ -120,6 +187,7 @@ def map_teams(league: Any) -> list[TeamDTO]:
             name=t.team_name,
             abbreviation=t.team_abbrev,
             logo_url=t.logo_url or None,
+            owners=tuple(_map_owner(o) for o in getattr(t, "owners", ())),
         )
         for t in league.teams
     ]

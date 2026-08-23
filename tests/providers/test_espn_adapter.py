@@ -47,8 +47,17 @@ def _load_break_window() -> dict[str, list[str] | None]:
     return json.loads((FIXTURES / "espn_pro_schedule_break_window.json").read_text())
 
 
+def _nine_cat_scoring_items() -> list[dict[str, int]]:
+    """The nine standard category stat ids (ESPN STATS_MAP ids)."""
+    return [
+        {"statId": sid}
+        for sid in (0, 1, 2, 3, 6, 11, 17, 19, 20)  # PTS BLK STL AST REB TO 3PM FG% FT%
+    ]
+
+
 def _fake_settings(**overrides: Any) -> SimpleNamespace:
     defaults: dict[str, Any] = dict(
+        name="Patriot Games",
         scoring_type="H2H_CAT",
         team_count=12,
         playoff_team_count=6,
@@ -56,13 +65,26 @@ def _fake_settings(**overrides: Any) -> SimpleNamespace:
         acquisition_budget=0,
         faab=False,
         matchup_periods={"1": [1], "2": [2], "18": [18]},
+        _raw_scoring_settings={"scoringItems": _nine_cat_scoring_items()},
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 
 
-def _fake_team(team_id: int, name: str, abbrev: str, logo: str | None = None) -> SimpleNamespace:
-    return SimpleNamespace(team_id=team_id, team_name=name, team_abbrev=abbrev, logo_url=logo or "")
+def _fake_team(
+    team_id: int,
+    name: str,
+    abbrev: str,
+    logo: str | None = None,
+    owners: list[dict[str, str]] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        team_id=team_id,
+        team_name=name,
+        team_abbrev=abbrev,
+        logo_url=logo or "",
+        owners=owners or [],
+    )
 
 
 def _fake_league(
@@ -94,6 +116,7 @@ def test_map_settings_maps_espn_surface() -> None:
         2026,
     )
     assert dto.provider_league_id == "3853870"
+    assert dto.name == "Patriot Games"
     assert dto.season_year == 2026
     assert dto.scoring_type == "H2H_CAT"
     assert dto.team_count == 12
@@ -104,6 +127,9 @@ def test_map_settings_maps_espn_surface() -> None:
     assert dto.timezone == "America/New_York"
     assert dto.roster_size is None
     assert dto.roster_slots is None
+    assert dto.categories == (
+        "PTS", "BLK", "STL", "AST", "REB", "TO", "TPM", "FG_PCT", "FT_PCT",
+    )
 
 
 def test_map_settings_maps_zero_budget_and_no_faab_to_none() -> None:
@@ -132,6 +158,53 @@ def test_map_teams_sorts_by_provider_id() -> None:
     assert dtos[0].logo_url == "http://logo/a.png"
     assert dtos[1].logo_url is None  # empty logo -> None
     assert dtos[0].draft_position is None
+
+
+def test_map_teams_maps_owners_by_id() -> None:
+    teams = [
+        _fake_team(
+            1,
+            "Team A",
+            "TA",
+            owners=[
+                {"id": "{GUID-1}", "displayName": "Patrick Owner"},
+                {"id": "{GUID-2}", "displayName": "Co Manager"},
+            ],
+        ),
+    ]
+    (dto,) = map_teams(_fake_league(teams=teams))
+    assert [o.provider_owner_id for o in dto.owners] == ["{GUID-1}", "{GUID-2}"]
+    assert [o.display_name for o in dto.owners] == ["Patrick Owner", "Co Manager"]
+
+
+def test_map_owner_falls_back_to_first_last_then_id() -> None:
+    teams = [
+        _fake_team(
+            1,
+            "Team A",
+            "TA",
+            owners=[
+                {"id": "{GUID-3}", "firstName": "Mike", "lastName": "Smith"},
+                {"id": "{GUID-4}"},
+            ],
+        ),
+    ]
+    (dto,) = map_teams(_fake_league(teams=teams))
+    assert dto.owners[0].display_name == "Mike Smith"
+    assert dto.owners[1].display_name == "{GUID-4}"
+
+
+def test_map_settings_surfaces_unknown_scoring_items_as_sentinels() -> None:
+    # A stat id outside the category map (e.g. 18 = 3PA, 40 = MIN) is surfaced
+    # as a sentinel key so the service can mark the run partial (D11) — never
+    # silently dropped, so the season's declared count is not reduced here.
+    items = _nine_cat_scoring_items() + [{"statId": 18}, {"statId": 40}]
+    settings = _fake_settings(_raw_scoring_settings={"scoringItems": items})
+    dto = map_settings(_fake_league(settings=settings), CONN, 2026)
+    assert dto.categories == (
+        "PTS", "BLK", "STL", "AST", "REB", "TO", "TPM", "FG_PCT", "FT_PCT",
+        "espn:stat:18", "espn:stat:40",
+    )
 
 
 # --- map_periods ------------------------------------------------------------
