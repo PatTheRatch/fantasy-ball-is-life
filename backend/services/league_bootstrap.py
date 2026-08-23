@@ -149,17 +149,21 @@ class LeagueBootstrapService:
         self.team_season_managers = team_season_managers
         self.periods = periods
 
-    def bootstrap(
-        self, connection: object, provider_league_id: str, season_year: int
-    ) -> BootstrapSummary:
-        """Fetch + persist the league. Idempotent on re-run (zero new rows)."""
+    def bootstrap(self, connection: object, season_year: int) -> BootstrapSummary:
+        """Fetch + persist the league. Idempotent on re-run (zero new rows).
+
+        The provider league id is taken from ``settings.provider_league_id`` (what
+        the adapter actually reported and what the raw-payload ledger records) —
+        a single source of truth, so the idempotency anchor and the persisted
+        column cannot drift from the payload.
+        """
         with self.ingestion.run_scope(PROVIDER_KEY, kind="league_bootstrap") as run:
             settings = self.adapter.fetch_settings(connection, season_year)
             teams = self.adapter.fetch_teams(connection, season_year)
             periods = self.adapter.fetch_periods(connection, season_year)
             self._record_payloads(run, settings, teams, periods)
 
-            summary = self._persist(run, settings, teams, periods, provider_league_id)
+            summary = self._persist(run, settings, teams, periods)
 
             status = RUN_PARTIAL if summary.unmapped_categories else RUN_SUCCEEDED
             stats = asdict(summary)
@@ -186,7 +190,6 @@ class LeagueBootstrapService:
         settings: LeagueSettingsDTO,
         teams: Sequence[TeamDTO],
         periods: Sequence[MatchupPeriodDTO],
-        provider_league_id: str,
     ) -> BootstrapSummary:
         if settings.scoring_type is None:
             raise BootstrapError("league has no scoring_type; cannot persist a season")
@@ -196,7 +199,7 @@ class LeagueBootstrapService:
             raise BootstrapError(f"no nba_seasons row for season_year {settings.season_year}")
 
         season = self.league_seasons.find_by_provider(
-            PROVIDER_KEY, provider_league_id, settings.season_year
+            PROVIDER_KEY, settings.provider_league_id, settings.season_year
         )
         if season is not None:
             # Idempotent: a prior run created everything in one transaction.
@@ -230,7 +233,7 @@ class LeagueBootstrapService:
             nba_season_id=nba_season.id,
             season_year=settings.season_year,
             provider_key=PROVIDER_KEY,
-            provider_league_id=provider_league_id,
+            provider_league_id=settings.provider_league_id,
             scoring_type=settings.scoring_type,
             team_count=settings.team_count,
             roster_size=settings.roster_size,

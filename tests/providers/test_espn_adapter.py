@@ -194,14 +194,16 @@ def test_map_owner_falls_back_to_first_last_then_id() -> None:
     assert dto.owners[1].display_name == "{GUID-4}"
 
 
-def test_map_settings_drops_unknown_scoring_items() -> None:
-    # A stat id outside the category map (e.g. 18 = 3PA, 40 = MIN) is not a
-    # category the platform scores; it is dropped, not mapped to a made-up key.
+def test_map_settings_surfaces_unknown_scoring_items_as_sentinels() -> None:
+    # A stat id outside the category map (e.g. 18 = 3PA, 40 = MIN) is surfaced
+    # as a sentinel key so the service can mark the run partial (D11) — never
+    # silently dropped, so the season's declared count is not reduced here.
     items = _nine_cat_scoring_items() + [{"statId": 18}, {"statId": 40}]
     settings = _fake_settings(_raw_scoring_settings={"scoringItems": items})
     dto = map_settings(_fake_league(settings=settings), CONN, 2026)
     assert dto.categories == (
         "PTS", "BLK", "STL", "AST", "REB", "TO", "TPM", "FG_PCT", "FT_PCT",
+        "espn:stat:18", "espn:stat:40",
     )
 
 

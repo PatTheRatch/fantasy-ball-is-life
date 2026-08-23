@@ -114,9 +114,11 @@ def _scoring_categories(s: Any) -> tuple[str, ...]:
     The basketball SDK exposes ``scoringItems`` only on the raw settings dict
     (``BaseSettings._raw_scoring_settings``), not as a parsed attribute. Each item
     carries a ``statId``; the ones mapping to a seeded category key are kept, in
-    provider order. Stat ids outside the map are dropped at this boundary — the
-    adapter recognises the categories the platform supports; an unmapped
-    *declared* category is the service's job to surface as ``partial`` (D11).
+    provider order. A stat id outside the map is surfaced as a sentinel key
+    (``espn:stat:<id>``) rather than dropped — the count the season declares must
+    not be silently reduced at this boundary; the *service* resolves keys to
+    seeded ``Category`` rows and marks the run ``partial`` for any it cannot
+    (D11).
     """
     raw = getattr(s, "_raw_scoring_settings", None) or {}
     if not isinstance(raw, dict):
@@ -128,9 +130,11 @@ def _scoring_categories(s: Any) -> tuple[str, ...]:
         stat_id = item.get("statId")
         if stat_id is None:
             continue
-        key = ESPN_SCORING_ITEM_KEY_MAP.get(int(stat_id))
-        if key is not None:
-            keys.append(key)
+        stat_id = int(stat_id)
+        key = ESPN_SCORING_ITEM_KEY_MAP.get(stat_id)
+        if key is None:
+            key = f"espn:stat:{stat_id}"
+        keys.append(key)
     return tuple(keys)
 
 

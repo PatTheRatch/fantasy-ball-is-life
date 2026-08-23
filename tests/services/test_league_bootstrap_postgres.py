@@ -204,7 +204,7 @@ def test_bootstrap_creates_the_full_chain(db_session: Session) -> None:
     adapter = _FakeAdapter(_settings(), _teams(), _periods())
     service = _service(db_session, adapter)
 
-    summary = service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    summary = service.bootstrap(object(), SEASON_YEAR)
 
     assert summary.season_created is True
     assert summary.league_created is True
@@ -230,10 +230,10 @@ def test_re_running_creates_zero_new_rows(db_session: Session) -> None:
     adapter = _FakeAdapter(_settings(), _teams(), _periods())
     service = _service(db_session, adapter)
 
-    service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    service.bootstrap(object(), SEASON_YEAR)
     before = _table_counts(db_session)
 
-    second = service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    second = service.bootstrap(object(), SEASON_YEAR)
     after = _table_counts(db_session)
 
     assert second.season_created is False
@@ -248,7 +248,7 @@ def test_no_period_is_written_final(db_session: Session) -> None:
     _clean(db_session)
     _seed_nba_season(db_session)
     service = _service(db_session, _FakeAdapter(_settings(), _teams(), _periods()))
-    service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    service.bootstrap(object(), SEASON_YEAR)
 
     statuses = set(db_session.scalars(select(MatchupPeriod.status)))
     assert statuses == {"scheduled"}
@@ -262,7 +262,7 @@ def test_unmapped_category_finishes_partial(db_session: Session) -> None:
     )
     service = _service(db_session, adapter)
 
-    summary = service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    summary = service.bootstrap(object(), SEASON_YEAR)
 
     assert summary.unmapped_categories == ("NOT_A_CATEGORY",)
     assert summary.categories_created == 9  # the nine mapped ones, not ten
@@ -274,7 +274,7 @@ def test_co_managed_team_gets_owner_and_co_manager(db_session: Session) -> None:
     _clean(db_session)
     _seed_nba_season(db_session)
     service = _service(db_session, _FakeAdapter(_settings(), _teams(), _periods()))
-    service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    service.bootstrap(object(), SEASON_YEAR)
 
     scorers = db_session.scalars(
         select(FantasyTeamSeason).where(FantasyTeamSeason.provider_team_id == "2")
@@ -293,7 +293,7 @@ def test_managers_created_unclaimed(db_session: Session) -> None:
     _clean(db_session)
     _seed_nba_season(db_session)
     service = _service(db_session, _FakeAdapter(_settings(), _teams(), _periods()))
-    service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    service.bootstrap(object(), SEASON_YEAR)
 
     assert _count(db_session, Manager) == 3
     assert _count(db_session, ManagerUserLink) == 0  # claiming is D-03
@@ -308,7 +308,7 @@ def test_same_owner_id_is_one_manager(db_session: Session) -> None:
         TeamDTO(provider_team_id="2", name="B", owners=(shared,)),
     ]
     service = _service(db_session, _FakeAdapter(_settings(), teams, _periods()))
-    summary = service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    summary = service.bootstrap(object(), SEASON_YEAR)
 
     assert summary.managers_created == 1
     assert _count(db_session, Manager) == 1
@@ -322,7 +322,7 @@ def test_linked_user_passes_is_member_and_unlinked_does_not(db_session: Session)
     _clean(db_session)
     _seed_nba_season(db_session)
     service = _service(db_session, _FakeAdapter(_settings(), _teams(), _periods()))
-    service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+    service.bootstrap(object(), SEASON_YEAR)
 
     season_id = db_session.scalar(select(LeagueSeason.id))
     manager = db_session.scalars(select(Manager)).first()
@@ -355,7 +355,7 @@ def test_adapter_failure_leaves_run_failed(db_session: Session) -> None:
     )
 
     with pytest.raises(RuntimeError):
-        service.bootstrap(object(), PROVIDER_LEAGUE_ID, SEASON_YEAR)
+        service.bootstrap(object(), SEASON_YEAR)
 
     run = db_session.scalars(select(IngestionRun)).one()
     assert run.status == "failed"
