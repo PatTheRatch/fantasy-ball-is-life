@@ -186,14 +186,36 @@ H-01 and H-02 are correctness bugs in shipped code.
   Test-and-docstring only — no route or API change.
   *Charter: D26 — which names a test as the mechanism; non-negotiable #1.*
 
-- [ ] **H-05 · Constrain what the schema claims** — **NEXT**
-  Database-level gaps behind stated invariants: matchups can reference a
-  period and teams from other leagues (composite keys); nothing ties
-  `status='final'` to `finalized_at`; name-only `provider_identities` are not
-  unique (partial unique index on `raw_name WHERE provider_entity_id IS NULL`);
-  `identity_review_open_idx` is not unique; `identity_links.confidence` has no
-  `0..1` bound and `fcp_entity_id` is polymorphic with no FK. Check #12 —
-  `fantasy_team_seasons` likely has the same cross-league binding gap.
+- [ ] **H-05a · Additive schema constraints** — **NEXT**
+  Four constraints behind guarantees the prose already makes: a partial unique
+  index for name-only `provider_identities` (Postgres treats NULL
+  `provider_entity_id` as distinct, so BBM/Hashtag identities have no
+  uniqueness at all); a partial unique index for one open
+  `identity_review_queue` row per identity (added alongside the listing index,
+  not replacing it); `0 <= confidence <= 1`; and
+  `(status='final') = (finalized_at IS NOT NULL)` as an equivalence.
+  **Not migration-only:** the first two turn a silent double-insert into an
+  `IntegrityError`, so `resolve_and_link` needs `begin_nested()` + re-read —
+  otherwise the bite trades a data bug for an availability bug. Four test
+  seeds will break on the finality constraint; fixing them is the point.
+  Scoped: [`docs/tickets/H-05a-additive-schema-constraints.md`](../tickets/H-05a-additive-schema-constraints.md).
+
+- [ ] **H-05b · Cross-league composite keys** — depends on H-05a
+  `matchups` carries four independent FKs with nothing tying the period and
+  both team-seasons to the claimed `league_season_id`, so one row can span
+  three leagues with every FK valid. `fantasy_team_seasons` has the same gap
+  (confirmed): a League-A franchise can bind to a League-B season. Fix with
+  composite keys — unique `(id, league_season_id)` on the parents, referenced
+  as a pair from the children. Structural: it rewrites existing FKs, which is
+  why it is not in H-05a.
+
+- [ ] **H-05c · Polymorphic identity-link target** — depends on H-05b
+  `identity_links.fcp_entity_id` has no FK at all: a link can name
+  `fcp_entity_kind='player'` and point at any UUID, or at a manager or team.
+  **This needs a design decision before it is a bite** — typed link tables per
+  entity kind, or a canonical-entity supertable every identity-bearing table
+  references. Not a constraint that can simply be added, which is why it is
+  carved out of H-05 rather than buried in it.
 
 - [ ] **H-06 · Wire payload dedupe, or delete the claim**
   `find_by_hash` and `latest_for` have zero callers; `record_payload` always
@@ -274,9 +296,6 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-11c merged (`46f67c9`),
-closing Slice 1. The reason S1-11c took priority over H-05 — H-04 jumping the
-queue because S1-11c would have built on the unenforced pattern — is now
-discharged, so H-05 returns to **NEXT**. S1-11d stays optional and unscoped;
-it is UX polish, not a blocker, and nothing in Slice 1 hardening depends on
-it.*
+*Claude updates this on approval. Last change: H-05 split into H-05a/b/c and
+H-05a scoped. Slice 1 closed at S1-11c; S1-11d stays optional and unscoped —
+UX polish, not a blocker, and nothing in hardening depends on it.*
