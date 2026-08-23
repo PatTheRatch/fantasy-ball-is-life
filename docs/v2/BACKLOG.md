@@ -171,20 +171,16 @@ H-01 and H-02 are correctness bugs in shipped code.
   kept for franchise-level fantasy_teams. No API contract change, no migration.
   *Charter: D26, non-negotiable #1.*
 
-- [ ] **H-04b · Make route policy executable** — **NEXT** — depends on H-04a
-  `@declare_policy` only sets an attribute, and the matrix test only asserts
-  the attribute exists — so a route can declare `LEAGUE_SCOPED`, skip
-  `require_league_member`, and pass CI. Make the matrix test walk each route's
-  dependency graph (transitively — `get_standings_service` now supplies the
-  gate for the standings route) and fail when a policy's required dependency
-  is absent. The policy→dependency map must be **total over `RoutePolicy`**:
-  `MANAGER_PRIVATE` has no gate yet, and declaring a policy the harness cannot
-  enforce must fail CI rather than ship a label. Map lives in the test, not
-  `policy.py`, which stays a pure declaration module.
+- [x] **H-04b · Make route policy executable** — `6db6b7f`
+  The matrix test now walks each route's transitive dependency graph and
+  fails when a policy's required dependency is absent; the policy→dependency
+  map is total over RoutePolicy (MANAGER_PRIVATE → a no-enforcement sentinel,
+  so a policy the harness cannot enforce fails CI rather than shipping a
+  label). Map lives in the test; policy.py stays a pure declaration module.
+  Test-and-docstring only — no route or API change.
   *Charter: D26 — which names a test as the mechanism; non-negotiable #1.*
-  Scoped: [`docs/tickets/H-04b-make-route-policy-executable.md`](../tickets/H-04b-make-route-policy-executable.md).
 
-- [ ] **H-05 · Constrain what the schema claims**
+- [ ] **H-05 · Constrain what the schema claims** — **NEXT**
   Database-level gaps behind stated invariants: matchups can reference a
   period and teams from other leagues (composite keys); nothing ties
   `status='final'` to `finalized_at`; name-only `provider_identities` are not
@@ -272,5 +268,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-04b scoped and assigned —
-it closes the tenancy split, and S1-11c closes Slice 1 after it.*
+*Claude updates this on approval. Last change: H-04b merged.*
