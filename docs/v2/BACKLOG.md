@@ -22,6 +22,10 @@ day one** (Decision 26).
 
 Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
 
+**Slice 1 is closed as of S1-11c** (charter work-plan item 6). S1-11d remains
+optional and unscoped — the last UX gap (reaching a league without an
+out-of-band ID), not required for the slice to stand.
+
 - [x] **S1-01 · Pure domain layer** — `244c750`
   Categories, all-play scoring, standings fold, name normalisation. 53 domain
   tests + 5 architecture tests. Ports classification §9 items 2, 3, 4, 6, 7, 9.
@@ -116,18 +120,13 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   rows + stale banner), basketball `win_pct` formatting, "Final through
   {as_of}" footer. Frontend only.
 
-- [ ] **S1-11c · Periods endpoint + selector** — **NEXT** — depends on S1-11b
-  Backend `GET /api/v1/leagues/{league_season_id}/periods` (`LEAGUE_SCOPED`) +
-  a period selector on the page; **this closes Slice 1** and charter work-plan
-  item 6. Returns every period with its `status` (the season's real shape),
-  but only `final` ones are selectable — `through_period` filters final
-  periods, so offering an in-progress week labels older data with a newer
-  heading. Also surfaces H-01's `complete` / `unknown_category_count`, which
-  H-01 deferred here: a silent `complete: false` is the failure the field
-  exists to end.
-  First new read path written against the H-04a/b tenancy foundation.
+- [x] **S1-11c · Periods endpoint + selector** — `46f67c9`
+  Backend GET .../periods (LEAGUE_SCOPED) returns every period ordinal-ordered
+  (provider_period_id and finalized_at excluded); a selector offers only final
+  periods (non-final disabled) + "Full season" default; through_period joins
+  the standings query key; H-01's complete/unknown_category_count are now
+  rendered. Slice 1 is closed.
   *Charter: §11.6, §10, D26.*
-  Scoped: [`docs/tickets/S1-11c-periods-endpoint-and-selector.md`](../tickets/S1-11c-periods-endpoint-and-selector.md).
 
 - [ ] **S1-11d · Reach a league (optional)** — depends on S1-11b
   `GET /me/leagues` + a home route to list the user's memberships so a league
@@ -187,7 +186,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   Test-and-docstring only — no route or API change.
   *Charter: D26 — which names a test as the mechanism; non-negotiable #1.*
 
-- [ ] **H-05 · Constrain what the schema claims**
+- [ ] **H-05 · Constrain what the schema claims** — **NEXT**
   Database-level gaps behind stated invariants: matchups can reference a
   period and teams from other leagues (composite keys); nothing ties
   `status='final'` to `finalized_at`; name-only `provider_identities` are not
@@ -275,8 +274,9 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: S1-11c scoped and assigned.
-It takes priority over H-05: H-04 jumped the queue because S1-11c would have
-built on the unenforced pattern, and that reason is now discharged — the
-remaining H items add no debt by waiting, and Slice 1 has been one bite from
-done since S1-11b.*
+*Claude updates this on approval. Last change: S1-11c merged (`46f67c9`),
+closing Slice 1. The reason S1-11c took priority over H-05 — H-04 jumping the
+queue because S1-11c would have built on the unenforced pattern — is now
+discharged, so H-05 returns to **NEXT**. S1-11d stays optional and unscoped;
+it is UX polish, not a blocker, and nothing in Slice 1 hardening depends on
+it.*
