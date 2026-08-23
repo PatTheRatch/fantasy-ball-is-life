@@ -213,13 +213,23 @@ how it was verified, and anything deliberately left out.
 ## Environment
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 
 pytest                        # full suite
-ruff check backend tests
+ruff check backend tests scripts
 mypy
 ```
+
+The app is a FastAPI *factory* — there is no `backend/api/main.py` and no
+module-level `app`. Run it with:
+
+```bash
+uvicorn backend.api.app:create_app --factory --reload
+```
+
+The full clone-to-running-app sequence (database, migrations, auth, frontend,
+sync) lives in [`docs/v2/RUNBOOK.md`](docs/v2/RUNBOOK.md).
 
 Secrets live in `.env`, which is gitignored and **never** committed or pasted
 into a document. `tests/conftest.py` scrubs deployment secrets from the

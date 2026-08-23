@@ -1,0 +1,28 @@
+# Local development database for FCP V2.
+#
+# V1's production stack is not described here — this is the V2 local Postgres.
+# Postgres 16 to match CI (.github/workflows/ci.yml) and the existing dev
+# container. The `fcp` superuser matches the dev/test convention so the
+# `postgresql+psycopg://fcp:fcp@localhost:5432/fcp` DATABASE_URL works unchanged.
+#
+#   docker compose up -d db
+#
+# Migration 0001 runs `CREATE EXTENSION citext`. citext is a trusted extension,
+# so a database-owning role could install it too; `fcp` is a superuser here to
+# match the dev/test convention and keep one less thing to get wrong locally
+# (this is a local database, not a production one).
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: fcp
+      POSTGRES_PASSWORD: fcp
+      POSTGRES_DB: fcp
+    ports:
+      - "5432:5432"
+    volumes:
+      - fcp_pgdata:/var/lib/postgresql/data
+
+volumes:
+  fcp_pgdata:
