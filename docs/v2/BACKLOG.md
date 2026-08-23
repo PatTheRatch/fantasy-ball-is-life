@@ -134,6 +134,51 @@ out-of-band ID), not required for the slice to stand.
 
 ---
 
+## Demo path — getting a real league on screen
+
+**The write path does not exist.** Four GET endpoints, zero writes, and nothing
+in `backend/` has ever created a league, team or period — every row so far came
+from a test fixture. Slice 1 proved the read path; this section builds the
+half that feeds it, so Patrick can look at his own league.
+
+Prioritised over the remaining hardening by Patrick, 23 Aug. H-05b/c, H-06 and
+H-09/H-10 are structural with no live holes, so nothing degrades while they
+wait.
+
+- [ ] **D-01 · League bootstrap service** — **NEXT**
+  Persist what the adapter already fetches: settings → league + league_season +
+  `league_season_categories`, teams → franchises + team-seasons **+ managers**,
+  periods → `matchup_periods`. Extends the adapter for the three things it
+  cannot yet supply (league name, scoring categories, team owners).
+  **The trap:** `require_league_member` walks users → manager_user_links →
+  managers → fantasy_team_season_managers, and nothing creates the middle
+  rows — so without managers the bootstrap succeeds and Patrick gets a **403
+  on his own league**. Managers are created *unclaimed* (D13); linking a user
+  is D-03's explicit act.
+  *Charter: D9, D11, D13, D16, D17, D28.*
+  Scoped: [`docs/tickets/D-01-league-bootstrap-service.md`](../tickets/D-01-league-bootstrap-service.md).
+
+- [ ] **D-02 · Period finality producer** — depends on D-01 — *this is H-07*
+  Nothing writes `matchup_periods.status='final'`, so standings has no input
+  and every league reads "not synced". Build `finalize_period` as the single
+  transactional owner of the transition: last authoritative fetch → persist →
+  supersede → set `status` + `finalized_at` together (H-05a's constraint makes
+  them inseparable). Then rename `sync_league_final_periods`, whose docstring
+  claims to be the sync while behaving as a backfill.
+  *Charter: D10, D20, D28.*
+
+- [ ] **D-03 · Sync CLI + claim** — depends on D-01, D-02
+  `scripts/sync_league.py` taking a league id, season year and
+  `espn_s2`/`SWID`: bootstrap → finalize → matchup sync against a local
+  Postgres, plus an explicit `--claim-team` step creating the
+  `manager_user_links` row that makes a real user a member (the auditable act
+  D-01 deliberately leaves undone). After this, `npm run dev` + a dev token
+  shows a real league.
+  **Doubles as the open question #6 live check** — running the real pipeline
+  against a real league is exactly that investigation.
+
+---
+
 ## Slice 1 hardening — from the red-team triage
 
 Confirmed implementation gaps against a design that already says the right
@@ -195,7 +240,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   for an availability bug. Migration applies and rolls back; four test seeds
   were fixed (not weakened) to seed finalized_at.
 
-- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — **NEXT**
+- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — *waits on the demo path*
   `matchups` carries four independent FKs with nothing tying the period and
   both team-seasons to the claimed `league_season_id`, so one row can span
   three leagues with every FK valid. `fantasy_team_seasons` has the same gap
@@ -220,7 +265,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   remove the methods and their docstrings. A documented guarantee nothing
   calls is worse than an absent one.
 
-- [ ] **H-07 · Finality needs a producer** — depends on H-01, H-03
+- [ ] **H-07 · Finality needs a producer** — **moved to the demo path as D-02**
   Nothing in the codebase writes `matchup_periods.status = 'final'`. The
   design makes finality the linchpin of sync cost and standings correctness,
   and it is currently an input nobody produces. Build `finalize_period` as the
@@ -291,6 +336,6 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-05a merged. Slice 1 closed
-at S1-11c; S1-11d stays optional and unscoped — UX polish, not a blocker, and
-nothing in hardening depends on it.*
+*Claude updates this on approval. Last change: demo path opened (D-01/02/03)
+and prioritised over the remaining hardening at Patrick's direction; D-01
+scoped and assigned. H-07 moved into that path as D-02. H-05a merged.*
