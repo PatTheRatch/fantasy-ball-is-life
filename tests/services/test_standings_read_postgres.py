@@ -38,8 +38,8 @@ def test_folds_live_matchups_and_excludes_superseded(db_session: Session) -> Non
     ))
 
     sync = _service(db_session, season_id)
-    sync.sync_league_final_periods(season_id, connection=object(), adapter=_FakeAdapter([sb1]))
-    sync.sync_league_final_periods(season_id, connection=object(), adapter=_FakeAdapter([sb2]))
+    sync.resync_final_periods(connection=object(), adapter=_FakeAdapter([sb1]))
+    sync.resync_final_periods(connection=object(), adapter=_FakeAdapter([sb2]))
     db_session.commit()
 
     scope = LeagueSeasonScope(season_id)
@@ -76,7 +76,7 @@ def test_repositories_are_scope_isolated_across_seasons(db_session: Session) -> 
                  {"PTS": 100.0, "fgm": 38.0, "fga": 80.0}, "home"),
     ))
     svc = _service(db_session, season_a)
-    svc.sync_league_final_periods(season_a, connection=object(), adapter=_FakeAdapter([sb]))
+    svc.resync_final_periods(connection=object(), adapter=_FakeAdapter([sb]))
     db_session.commit()
 
     repo_a = MatchupRepository(LeagueSeasonScope(season_a), db_session)

@@ -161,11 +161,11 @@ def test_differing_resync_supersedes_without_unique_violation(db_session: Sessio
     ))
 
     svc = _service(db_session, season_id)
-    first = svc.sync_league_final_periods(
-        season_id, connection=object(), adapter=_FakeAdapter([sb1])
+    first = svc.resync_final_periods(
+        connection=object(), adapter=_FakeAdapter([sb1])
     )
-    second = svc.sync_league_final_periods(
-        season_id, connection=object(), adapter=_FakeAdapter([sb2])
+    second = svc.resync_final_periods(
+        connection=object(), adapter=_FakeAdapter([sb2])
     )
     db_session.commit()
 
@@ -189,11 +189,11 @@ def test_identical_resync_noops_with_ratio_rounding(db_session: Session) -> None
     ))
 
     svc = _service(db_session, season_id)
-    first = svc.sync_league_final_periods(
-        season_id, connection=object(), adapter=_FakeAdapter([sb])
+    first = svc.resync_final_periods(
+        connection=object(), adapter=_FakeAdapter([sb])
     )
-    second = svc.sync_league_final_periods(
-        season_id, connection=object(), adapter=_FakeAdapter([sb])
+    second = svc.resync_final_periods(
+        connection=object(), adapter=_FakeAdapter([sb])
     )
     db_session.commit()
 
@@ -217,8 +217,8 @@ def test_failing_sync_leaves_durable_failed_run_and_no_orphans(
 
     svc = _service(db_session, season_id)
     with pytest.raises(RuntimeError, match="adapter timeout"):
-        svc.sync_league_final_periods(
-            season_id, connection=object(), adapter=_RaisingAdapter()
+        svc.resync_final_periods(
+            connection=object(), adapter=_RaisingAdapter()
         )
 
     runs = db_session.scalars(
@@ -254,8 +254,8 @@ def test_partial_sync_marks_run_partial_without_losing_result(db_session: Sessio
     ))
 
     svc = _service(db_session, season_id)
-    summary = svc.sync_league_final_periods(
-        season_id, connection=object(), adapter=_FakeAdapter([sb])
+    summary = svc.resync_final_periods(
+        connection=object(), adapter=_FakeAdapter([sb])
     )
 
     assert summary.unknown_categories == 1
@@ -292,8 +292,8 @@ def test_clean_sync_commits_succeeded_durably(db_session: Session) -> None:
     ))
 
     svc = _service(db_session, season_id)
-    svc.sync_league_final_periods(
-        season_id, connection=object(), adapter=_FakeAdapter([sb])
+    svc.resync_final_periods(
+        connection=object(), adapter=_FakeAdapter([sb])
     )
 
     runs = db_session.scalars(
