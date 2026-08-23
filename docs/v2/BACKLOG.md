@@ -116,11 +116,18 @@ Port list source: [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §9.
   rows + stale banner), basketball `win_pct` formatting, "Final through
   {as_of}" footer. Frontend only.
 
-- [ ] **S1-11c · Periods endpoint + selector** — depends on S1-11b
+- [ ] **S1-11c · Periods endpoint + selector** — **NEXT** — depends on S1-11b
   Backend `GET /api/v1/leagues/{league_season_id}/periods` (`LEAGUE_SCOPED`) +
-  a period selector on the page; this is what actually closes the slice.
-  Also surface H-01's `complete` / `unknown_category_count` envelope fields —
-  H-01 makes the data honest, this is where a reader sees it.
+  a period selector on the page; **this closes Slice 1** and charter work-plan
+  item 6. Returns every period with its `status` (the season's real shape),
+  but only `final` ones are selectable — `through_period` filters final
+  periods, so offering an in-progress week labels older data with a newer
+  heading. Also surfaces H-01's `complete` / `unknown_category_count`, which
+  H-01 deferred here: a silent `complete: false` is the failure the field
+  exists to end.
+  First new read path written against the H-04a/b tenancy foundation.
+  *Charter: §11.6, §10, D26.*
+  Scoped: [`docs/tickets/S1-11c-periods-endpoint-and-selector.md`](../tickets/S1-11c-periods-endpoint-and-selector.md).
 
 - [ ] **S1-11d · Reach a league (optional)** — depends on S1-11b
   `GET /me/leagues` + a home route to list the user's memberships so a league
@@ -180,7 +187,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   Test-and-docstring only — no route or API change.
   *Charter: D26 — which names a test as the mechanism; non-negotiable #1.*
 
-- [ ] **H-05 · Constrain what the schema claims** — **NEXT**
+- [ ] **H-05 · Constrain what the schema claims**
   Database-level gaps behind stated invariants: matchups can reference a
   period and teams from other leagues (composite keys); nothing ties
   `status='final'` to `finalized_at`; name-only `provider_identities` are not
@@ -268,4 +275,8 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-04b merged.*
+*Claude updates this on approval. Last change: S1-11c scoped and assigned.
+It takes priority over H-05: H-04 jumped the queue because S1-11c would have
+built on the unenforced pattern, and that reason is now discharged — the
+remaining H items add no debt by waiting, and Slice 1 has been one bite from
+done since S1-11b.*
