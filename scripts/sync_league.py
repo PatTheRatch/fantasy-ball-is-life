@@ -125,6 +125,19 @@ def load_config(environ: dict[str, str]) -> tuple[EspnConnection, str]:
     return conn, require("DATABASE_URL")
 
 
+def _scrub(message: str, secrets: tuple[str, ...]) -> str:
+    """Redact credential values from an error message (defense-in-depth).
+
+    A failed ESPN call must never echo the live session cookies, so any
+    exception message is scrubbed of ``swid``/``espn_s2`` before it reaches
+    stderr — even if a future adapter f-string happens to interpolate one.
+    """
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, "[redacted]")
+    return message
+
+
 def _build_services(session: Session, adapter: object):
     """Wire the bootstrap + sync services (the composition root's job)."""
     ingestion = IngestionService(
@@ -289,7 +302,8 @@ def main(argv: Sequence[str] | None = None, environ: dict[str, str] | None = Non
                 skip_finalize=args.skip_finalize,
             )
         except Exception as e:  # noqa: BLE001 — report honestly, never a credential
-            print(f"sync failed: {type(e).__name__}: {e}", file=sys.stderr)
+            msg = _scrub(str(e), (conn.swid, conn.espn_s2))
+            print(f"sync failed: {type(e).__name__}: {msg}", file=sys.stderr)
             return 1
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from backend.platform.settings import SettingsError
-from scripts.sync_league import build_parser, load_config, main
+from scripts.sync_league import _scrub, build_parser, load_config, main
 
 
 def test_parser_has_no_credential_flags() -> None:
@@ -73,3 +73,18 @@ def test_main_missing_credential_exits_nonzero(capsys) -> None:
     captured = capsys.readouterr()
     assert code == 2
     assert "required setting" in captured.err  # names a variable, never a value
+
+
+def test_error_messages_are_scrubbed_of_credentials() -> None:
+    # A future adapter f-string that interpolates a cookie must not leak it.
+    msg = _scrub(
+        "request failed with swid={SUPER_SWID} espn_s2={SUPER_S2}",
+        ("{SUPER_SWID}", "{SUPER_S2}"),
+    )
+    assert "{SUPER_SWID}" not in msg
+    assert "{SUPER_S2}" not in msg
+    assert "[redacted]" in msg
+
+
+def test_scrub_leaves_clean_messages_untouched() -> None:
+    assert _scrub("adapter timeout", ("{SWID}",)) == "adapter timeout"
