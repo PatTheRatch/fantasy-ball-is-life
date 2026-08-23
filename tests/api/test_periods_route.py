@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
@@ -139,7 +139,7 @@ def _period_ids(
 def _period(
     ordinal: int, *, label: str, status: str, provider_period_id: str
 ) -> dict:
-    return {
+    spec = {
         "ordinal": ordinal,
         "label": label,
         "status": status,
@@ -147,6 +147,10 @@ def _period(
         "end_date": date(2026, 1, 11 + 7 * (ordinal - 1)),
         "provider_period_id": provider_period_id,
     }
+    if status == "final":
+        # The finality constraint ties status to finalized_at (H-05a); seed it.
+        spec["finalized_at"] = datetime(2026, 1, 11 + 7 * (ordinal - 1), 12, 0, 0)
+    return spec
 
 
 def test_401_anonymous(client) -> None:

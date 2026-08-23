@@ -270,6 +270,13 @@ class MatchupPeriod(LineageMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("league_season_id", "ordinal", name="uq_matchup_periods_season_ordinal"),
         CheckConstraint("end_date >= start_date", name="dates_ordered"),
+        # Finality and its timestamp agree — an equivalence, not an implication:
+        # a scheduled period carrying a finalized_at is as wrong as a final one
+        # without one.
+        CheckConstraint(
+            "(status = 'final') = (finalized_at IS NOT NULL)",
+            name="finality",
+        ),
         Index("matchup_periods_dates_idx", "league_season_id", "start_date", "end_date"),
     )
 

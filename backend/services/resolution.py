@@ -18,6 +18,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 
+from sqlalchemy.exc import IntegrityError
+
 from backend.domain.names import CONFIDENCE, MatchMethod, match_name, normalize_name
 from backend.models.crosswalk import (
     IdentityLink,
@@ -218,19 +220,9 @@ class IdentityResolutionService:
         re-running an ingest neither re-matches nor inflates the open queue.
         """
         needle = normalize_name(raw_name)
-        identity = self.identities.find(
+        identity = self._get_or_create_identity(
             provider_id, entity_kind, provider_entity_id, needle
         )
-        if identity is None:
-            identity = ProviderIdentity(
-                provider_id=provider_id,
-                entity_kind=entity_kind,
-                provider_entity_id=provider_entity_id,
-                # Normalised form is the stable key for name-only sources (the
-                # truly-raw name is preserved in raw_payloads, D16).
-                raw_name=needle,
-            )
-            self.identities.add(identity)
 
         existing = self.links.find_active(identity.id)
         if existing is not None:
@@ -265,22 +257,89 @@ class IdentityResolutionService:
 
         # Queue path — idempotent: return an existing open item for this identity
         # rather than re-adding, so re-ingesting doesn't inflate the open queue.
+        queued = self._enqueue(identity, ingestion_run_id, decision)
+        return ResolutionResult(identity, decision, queued=queued)
+
+    def _get_or_create_identity(
+        self,
+        provider_id: uuid.UUID,
+        entity_kind: str,
+        provider_entity_id: str | None,
+        needle: str | None,
+    ) -> ProviderIdentity:
+        """Get-or-create the provider identity, converging under the name-only
+        unique index when two resolutions race.
+
+        The check-then-insert was idempotent only without concurrency; the index
+        makes it correct by turning a concurrent double-insert into an
+        ``IntegrityError``. The insert runs in a SAVEPOINT so the losing
+        transaction can roll back just that insert and re-read the winner —
+        without the savepoint the whole session is poisoned and the run dies.
+        """
+        identity = self.identities.find(
+            provider_id, entity_kind, provider_entity_id, needle
+        )
+        if identity is not None:
+            return identity
+
+        try:
+            with self.identities.session.begin_nested():
+                identity = ProviderIdentity(
+                    provider_id=provider_id,
+                    entity_kind=entity_kind,
+                    provider_entity_id=provider_entity_id,
+                    # Normalised form is the stable key for name-only sources (the
+                    # truly-raw name is preserved in raw_payloads, D16).
+                    raw_name=needle,
+                )
+                self.identities.add(identity)
+                self.identities.session.flush()
+                return identity
+        except IntegrityError:
+            # Another transaction inserted the same identity first; read the row
+            # it won rather than forking a second durable identity.
+            winner = self.identities.find(
+                provider_id, entity_kind, provider_entity_id, needle
+            )
+            if winner is None:
+                # Not the race this handles — some other constraint fired.
+                raise
+            return winner
+
+    def _enqueue(
+        self,
+        identity: ProviderIdentity,
+        ingestion_run_id: uuid.UUID,
+        decision: ResolutionDecision,
+    ) -> IdentityReviewQueue:
+        """Queue an unresolved identity, converging on one open item under
+        concurrency (same savepoint/retry pattern as ``_get_or_create_identity``)."""
         existing_item = self.review.find_open(identity.id)
         if existing_item is not None:
-            return ResolutionResult(identity, decision, queued=existing_item)
+            return existing_item
 
-        queued = IdentityReviewQueue(
-            provider_identity_id=identity.id,
-            ingestion_run_id=ingestion_run_id,
-            reason=decision.reason or "no_candidate",
-            candidates=[
-                {
-                    "fcp_entity_id": str(c.fcp_entity_id) if c.fcp_entity_id else None,
-                    "name": c.name,
-                    "score": c.score,
-                }
-                for c in decision.candidates
-            ],
-        )
-        self.review.add(queued)
-        return ResolutionResult(identity, decision, queued=queued)
+        try:
+            with self.identities.session.begin_nested():
+                queued = IdentityReviewQueue(
+                    provider_identity_id=identity.id,
+                    ingestion_run_id=ingestion_run_id,
+                    reason=decision.reason or "no_candidate",
+                    candidates=[
+                        {
+                            "fcp_entity_id": str(c.fcp_entity_id) if c.fcp_entity_id else None,
+                            "name": c.name,
+                            "score": c.score,
+                        }
+                        for c in decision.candidates
+                    ],
+                )
+                self.review.add(queued)
+                self.identities.session.flush()
+                return queued
+        except IntegrityError:
+            # Another transaction enqueued this identity first; return its item.
+            winner = self.review.find_open(identity.id)
+            if winner is None:
+                # Not the race this handles — some other constraint fired.
+                raise
+            return winner

@@ -69,6 +69,18 @@ class ProviderIdentity(Base):
             "provider_entity_id IS NOT NULL OR raw_name IS NOT NULL",
             name="ck_provider_identities_id_or_name",
         ),
+        # Name-only sources (provider_entity_id IS NULL) had no uniqueness at
+        # all — Postgres treats NULLs as distinct, so two concurrent resolutions
+        # forked one external identity into two durable ones. raw_name already
+        # stores the normalised form, so it is the stable key for name-only rows.
+        Index(
+            "uq_provider_identities_name_only",
+            "provider_id",
+            "entity_kind",
+            "raw_name",
+            unique=True,
+            postgresql_where=text("provider_entity_id IS NULL"),
+        ),
     )
 
 
@@ -118,6 +130,12 @@ class IdentityLink(CreatedAtMixin, Base):
             postgresql_where=text("superseded_at IS NULL"),
         ),
         Index("identity_links_entity_idx", "fcp_entity_kind", "fcp_entity_id"),
+        # confidence is a probability — bounded 0..1 inclusive (numeric(4,3)
+        # otherwise happily accepts 9.999).
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="confidence_range",
+        ),
     )
 
 
@@ -168,6 +186,15 @@ class IdentityReviewQueue(CreatedAtMixin, Base):
             "identity_review_open_idx",
             "status",
             "created_at",
+            postgresql_where=text("status = 'open'"),
+        ),
+        # One open review item per identity — resolve_and_link's check-then-insert
+        # is idempotent only without concurrency. This turns a concurrent
+        # double-queue into a violation the savepoint/retry then converges on.
+        Index(
+            "uq_identity_review_open_per_identity",
+            "provider_identity_id",
+            unique=True,
             postgresql_where=text("status = 'open'"),
         ),
     )
