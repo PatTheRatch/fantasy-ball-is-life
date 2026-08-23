@@ -2,8 +2,10 @@
 
 Every route declares a :class:`RoutePolicy` via :func:`declare_policy`. The
 matrix test (``tests/api/test_route_policy_matrix.py``) enumerates every route
-on ``create_app()`` and fails CI if any lacks a declared policy — the structural
-half of charter D26 / non-negotiable #1.
+on ``create_app()`` and enforces charter D26 / non-negotiable #1 in two ways:
+it fails CI if any route lacks a declared policy, and it walks each route's
+transitive dependency graph to verify the policy's required dependency is
+actually present — a declared policy is a promise, not a label.
 """
 
 from __future__ import annotations
