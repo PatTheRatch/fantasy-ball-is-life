@@ -145,20 +145,17 @@ Prioritised over the remaining hardening by Patrick, 23 Aug. H-05b/c, H-06 and
 H-09/H-10 are structural with no live holes, so nothing degrades while they
 wait.
 
-- [ ] **D-01 · League bootstrap service** — **NEXT**
-  Persist what the adapter already fetches: settings → league + league_season +
-  `league_season_categories`, teams → franchises + team-seasons **+ managers**,
-  periods → `matchup_periods`. Extends the adapter for the three things it
-  cannot yet supply (league name, scoring categories, team owners).
-  **The trap:** `require_league_member` walks users → manager_user_links →
-  managers → fantasy_team_season_managers, and nothing creates the middle
-  rows — so without managers the bootstrap succeeds and Patrick gets a **403
-  on his own league**. Managers are created *unclaimed* (D13); linking a user
-  is D-03's explicit act.
+- [x] **D-01 · League bootstrap service** — `f89fda1`
+  The first write path: settings → league + league_season +
+  `league_season_categories`, teams → franchises + team-seasons + managers
+  (unclaimed — D13; the require_league_member chain now has its middle rows),
+  periods → matchup_periods (scheduled-only). Adapter extended for league name
+  (lowercase slug), scoring categories (D11 — no NINE_CAT default), and team
+  owners (matched by provider owner id, never name). Wrapped in run_scope (H-03),
+  idempotent by natural key; an unmapped category finishes the run partial.
   *Charter: D9, D11, D13, D16, D17, D28.*
-  Scoped: [`docs/tickets/D-01-league-bootstrap-service.md`](../tickets/D-01-league-bootstrap-service.md).
 
-- [ ] **D-02 · Period finality producer** — depends on D-01 — *this is H-07*
+- [ ] **D-02 · Period finality producer** — **NEXT** — depends on D-01 — *this is H-07*
   Nothing writes `matchup_periods.status='final'`, so standings has no input
   and every league reads "not synced". Build `finalize_period` as the single
   transactional owner of the transition: last authoritative fetch → persist →
@@ -336,6 +333,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: demo path opened (D-01/02/03)
-and prioritised over the remaining hardening at Patrick's direction; D-01
-scoped and assigned. H-07 moved into that path as D-02. H-05a merged.*
+*Claude updates this on approval. Last change: D-01 merged.*
