@@ -13,7 +13,7 @@ blockers that the hermetic suite masked:
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from sqlalchemy import select
@@ -127,6 +127,7 @@ def _seed(db_session: Session) -> tuple[uuid.UUID, uuid.UUID]:
         league_season_id=season.id, ordinal=1, status="final",
         start_date=date(2098, 10, 1), end_date=date(2098, 10, 7),
         provider_period_id="1",
+        finalized_at=datetime(2098, 10, 7, 12, 0, 0),
     )
     db_session.add(period)
     db_session.commit()
