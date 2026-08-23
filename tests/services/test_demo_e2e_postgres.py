@@ -25,6 +25,7 @@ from backend.repos.matchups import LeagueSeasonRepository, MatchupRepository
 from backend.repos.scope import LeagueSeasonScope
 from backend.services.standings_read import StandingsReadService
 from tests.services.test_league_bootstrap_postgres import (
+    _clean,
     _seed_nba_season,
 )
 from tests.services.test_league_bootstrap_postgres import (
@@ -72,6 +73,7 @@ class _BootstrapAdapter:
 
 
 def test_bootstrap_finalize_standings_populated(db_session: Session) -> None:
+    _clean(db_session)
     _seed_nba_season(db_session, season_year=2026)
 
     # D-01: bootstrap creates the league (periods scheduled, managers unclaimed).
