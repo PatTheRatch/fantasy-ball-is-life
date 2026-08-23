@@ -162,23 +162,16 @@ H-01 and H-02 are correctness bugs in shipped code.
   partial). One run owner today; the next owner inherits the guarantee.
   *Charter: D28 — job outcomes are queryable data, not log lines.*
 
-- [ ] **H-04a · Bind league repositories to a scope** — **NEXT**
-  `LeagueSeasonRepository` and `MatchupRepository` take a bare `Session` while
-  `LeagueScopedRepository` sits unused — not from laziness: its
-  `scope_column = "league_id"` never matched the tables S1-06 landed, which
-  key on `league_season_id`. Add `LeagueSeasonScope` + a matching base, bind
-  both repos, and wire `get_standings_service` behind `require_league_member`
-  so the service cannot be built without passing the gate. Keep `LeagueScope`
-  (`fantasy_teams` is league-keyed, so it has a real future home).
-  **No live hole** — the route is gated — but D26 claims structure and
-  structure is what is missing.
-  **Ahead of S1-11c on purpose:** S1-11c adds a periods repo and another
-  LEAGUE_SCOPED route; fixing the foundation first means it is written
-  against the enforced shape instead of being retrofitted.
+- [x] **H-04a · Bind league repositories to a scope** — `8127b84`
+  Added LeagueSeasonScope + LeagueSeasonScopedRepository; bound both league
+  repos to (scope, session) with every read scope-filtered (category_results_for
+  joins through matchups rather than trusting ids). get_standings_service now
+  depends on require_league_member — the one commented cross-scope exception —
+  so the service cannot be wired without passing the membership gate. LeagueScope
+  kept for franchise-level fantasy_teams. No API contract change, no migration.
   *Charter: D26, non-negotiable #1.*
-  Scoped: [`docs/tickets/H-04a-bind-league-repos-to-a-scope.md`](../tickets/H-04a-bind-league-repos-to-a-scope.md).
 
-- [ ] **H-04b · Make route policy executable** — depends on H-04a
+- [ ] **H-04b · Make route policy executable** — **NEXT** — depends on H-04a
   `@declare_policy` only sets an attribute, and the matrix test only asserts
   the attribute exists — so a route can declare `LEAGUE_SCOPED`, skip
   `require_league_member`, and pass CI. Make the matrix test walk each route's
@@ -276,5 +269,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-04 split into H-04a
-(repositories) and H-04b (route policy); H-04a scoped and assigned.*
+*Claude updates this on approval. Last change: H-04a merged.*
