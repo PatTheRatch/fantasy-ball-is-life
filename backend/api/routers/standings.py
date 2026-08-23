@@ -50,7 +50,7 @@ def standings(
     through_period: int | None = Query(default=None, ge=1),
     svc: StandingsReadService = Depends(get_standings_service),
 ) -> StandingsResponse:
-    result = svc.standings(league_season_id, through_period=through_period)
+    result = svc.standings(through_period=through_period)
     return StandingsResponse(
         data=[
             StandingRowOut(

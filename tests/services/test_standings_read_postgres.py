@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from backend.domain.dto import ScoreboardDTO
 from backend.repos.matchups import LeagueSeasonRepository, MatchupRepository
+from backend.repos.scope import LeagueSeasonScope
 from backend.services.standings_read import StandingsReadService
 from tests.services.test_matchups_sync_postgres import (
     _FakeAdapter,
@@ -36,15 +37,16 @@ def test_folds_live_matchups_and_excludes_superseded(db_session: Session) -> Non
                  {"PTS": 105.0, "fgm": 40.0, "fga": 80.0}, "away"),
     ))
 
-    sync = _service(db_session)
+    sync = _service(db_session, season_id)
     sync.sync_league_final_periods(season_id, connection=object(), adapter=_FakeAdapter([sb1]))
     sync.sync_league_final_periods(season_id, connection=object(), adapter=_FakeAdapter([sb2]))
     db_session.commit()
 
+    scope = LeagueSeasonScope(season_id)
     read = StandingsReadService(
-        LeagueSeasonRepository(db_session), MatchupRepository(db_session)
+        LeagueSeasonRepository(scope, db_session), MatchupRepository(scope, db_session)
     )
-    out = read.standings(season_id)
+    out = read.standings()
 
     assert out.as_of == date(2098, 10, 7)  # the seeded final period's end_date
     assert out.freshness == "final"
@@ -61,3 +63,30 @@ def test_folds_live_matchups_and_excludes_superseded(db_session: Session) -> Non
     away_row = next(r for r in out.rows if r.team_id != home_id)
     assert (away_row.wins, away_row.losses) == (2, 0)
     assert away_row.rank == 1
+
+
+def test_repositories_are_scope_isolated_across_seasons(db_session: Session) -> None:
+    # charter D26: a repo scoped to season A must not see season B's rows. This
+    # is the test that fails if category_results_for is left unscoped.
+    season_a, _ = _seed(db_session)
+    season_b, _ = _seed(db_session)
+
+    sb = ScoreboardDTO(provider_period_id="1", matchups=(
+        _matchup("1", "2", {"PTS": 110.0, "fgm": 40.0, "fga": 80.0},
+                 {"PTS": 100.0, "fgm": 38.0, "fga": 80.0}, "home"),
+    ))
+    svc = _service(db_session, season_a)
+    svc.sync_league_final_periods(season_a, connection=object(), adapter=_FakeAdapter([sb]))
+    db_session.commit()
+
+    repo_a = MatchupRepository(LeagueSeasonScope(season_a), db_session)
+    repo_b = MatchupRepository(LeagueSeasonScope(season_b), db_session)
+
+    a_matchups = repo_a.live_for_season()
+    assert len(a_matchups) == 1
+    assert repo_b.live_for_season() == []
+
+    # category_results_for must be scope-isolated through the matchups join.
+    a_ids = [m.id for m in a_matchups]
+    assert repo_a.category_results_for(a_ids) != []
+    assert repo_b.category_results_for(a_ids) == []

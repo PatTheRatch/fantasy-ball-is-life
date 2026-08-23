@@ -177,20 +177,22 @@ class MatchupSyncService:
         adapter: ScoreboardAdapter,
     ) -> SyncSummary:
         """Fetch + persist every ``final`` period for one league_season."""
-        season = self.league_seasons.get(league_season_id)
+        season = self.league_seasons.get()
         if season is None:
-            raise MatchupSyncError(f"unknown league_season: {league_season_id!r}")
+            raise MatchupSyncError(
+                f"unknown league_season: {self.league_seasons.scope.league_season_id!r}"
+            )
 
-        model_cats = self.league_seasons.scoring_categories(league_season_id)
+        model_cats = self.league_seasons.scoring_categories()
         domain_cats = [_to_domain_category(c) for c in model_cats]
         cat_id_by_key = {c.key: c.id for c in model_cats}
-        teams_by_provider = self.league_seasons.teams_by_provider(league_season_id)
+        teams_by_provider = self.league_seasons.teams_by_provider()
 
         periods = matchups = created = superseded = unchanged = unknowns = 0
         with self.ingestion.run_scope(
             season.provider_key, kind="matchups", league_season_id=league_season_id
         ) as run:
-            for period in self.league_seasons.final_periods(league_season_id):
+            for period in self.league_seasons.final_periods():
                 if period.provider_period_id is None:
                     continue
                 sb = adapter.fetch_scoreboard(

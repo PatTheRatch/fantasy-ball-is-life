@@ -59,7 +59,7 @@ def test_folds_category_records_into_ranked_table() -> None:
     )
 
     svc = _service([period], [_team(a, "A", "TA"), _team(b, "B", "TB")], [m], results)
-    out = svc.standings(uuid.uuid4())
+    out = svc.standings()
 
     assert out.freshness == "final"
     assert out.stale is False
@@ -87,7 +87,7 @@ def test_bye_team_still_appears_with_zero_record() -> None:
         [bye],
         [],  # no category results for a bye
     )
-    out = svc.standings(uuid.uuid4())
+    out = svc.standings()
 
     (row,) = out.rows  # only A appears; B never played and is absent
     assert row.team_id == a
@@ -97,7 +97,7 @@ def test_bye_team_still_appears_with_zero_record() -> None:
 
 def test_empty_season_returns_empty_table_and_null_as_of() -> None:
     svc = _service([], [], [], [])
-    out = svc.standings(uuid.uuid4())
+    out = svc.standings()
 
     assert out.rows == ()
     assert out.as_of is None
@@ -121,7 +121,7 @@ def test_through_period_filters_periods_and_scopes_as_of() -> None:
     matchups_repo.category_results_for.return_value = [_cat_result(m.id, "home")]
 
     svc = StandingsReadService(league_seasons, matchups_repo)
-    out = svc.standings(uuid.uuid4(), through_period=1)
+    out = svc.standings(through_period=1)
 
     # as_of scoped to the *included* period (p1), not the global latest (p2).
     assert out.as_of == date(2026, 1, 11)
@@ -145,7 +145,7 @@ def test_null_category_result_does_not_increment_ties() -> None:
     )
 
     svc = _service([period], [_team(a, "A"), _team(b, "B")], [m], results)
-    out = svc.standings(uuid.uuid4())
+    out = svc.standings()
 
     first = out.rows[0]
     # The unknown category must NOT become a tie: home stays 6-2-1, not 6-2-2.
@@ -162,12 +162,12 @@ def test_complete_and_unknown_category_count_reflect_unknowns() -> None:
 
     partial = [_cat_result(m.id, "home"), _cat_result(m.id, None)]
     svc = _service([period], [_team(a, "A"), _team(b, "B")], [m], partial)
-    out = svc.standings(uuid.uuid4())
+    out = svc.standings()
     assert out.complete is False
     assert out.unknown_category_count == 1
 
     known = [_cat_result(m.id, "home"), _cat_result(m.id, "away")]
     svc2 = _service([period], [_team(a, "A"), _team(b, "B")], [m], known)
-    out2 = svc2.standings(uuid.uuid4())
+    out2 = svc2.standings()
     assert out2.complete is True
     assert out2.unknown_category_count == 0
