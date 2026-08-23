@@ -9,8 +9,8 @@ Pure ``frozen`` dataclasses so they sit in ``backend.domain`` (which imports
 nothing — the architecture test enforces it) and are trivially testable. Each
 maps 1:1 onto a fantasy-core table from ``02-fantasy.md``:
 
-- ``LeagueSettingsDTO`` → ``league_seasons``
-- ``TeamDTO``            → ``fantasy_team_seasons``
+- ``LeagueSettingsDTO`` → ``leagues`` + ``league_seasons`` + ``league_season_categories``
+- ``TeamDTO``            → ``fantasy_team_seasons`` + ``managers`` (+ ``TeamOwnerDTO``)
 - ``MatchupPeriodDTO``   → ``matchup_periods``
 """
 
@@ -34,14 +34,19 @@ class PeriodType(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class LeagueSettingsDTO:
-    """One league-season's settings (→ ``league_seasons``).
+    """One league-season's settings (→ ``leagues`` + ``league_seasons``).
 
-    Fields nullable here are nullable on the table. ``timezone`` defaults to the
-    schema default when the provider does not expose one — every date boundary
-    resolves through it (02-fantasy.md).
+    ``name`` is the league (franchise) display name → ``leagues.name``.
+    ``categories`` is the season's scoring-category keys, in provider order, as
+    FCP ``categories.key`` values (→ ``league_season_categories``) — D11: the
+    count is whatever the season declares, never assumed to be nine. Fields
+    nullable here are nullable on the table. ``timezone`` defaults to the schema
+    default when the provider does not expose one — every date boundary resolves
+    through it (02-fantasy.md).
     """
 
     provider_league_id: str
+    name: str
     season_year: int
     scoring_type: str | None
     timezone: str
@@ -52,17 +57,31 @@ class LeagueSettingsDTO:
     regular_season_periods: int | None = None
     acquisition_budget: int | None = None
     uses_faab: bool | None = None
+    categories: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TeamOwnerDTO:
+    """One team owner (→ ``managers``, matched by provider owner id, never name)."""
+
+    provider_owner_id: str
+    display_name: str
 
 
 @dataclass(frozen=True, slots=True)
 class TeamDTO:
-    """One team in one season (→ ``fantasy_team_seasons``)."""
+    """One team in one season (→ ``fantasy_team_seasons``).
+
+    ``owners`` is ordered: the first entry is the primary owner (``role='owner'``),
+    any further entries are co-managers (``role='co_manager'``, charter D9).
+    """
 
     provider_team_id: str
     name: str
     abbreviation: str | None = None
     logo_url: str | None = None
     draft_position: int | None = None
+    owners: tuple[TeamOwnerDTO, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
