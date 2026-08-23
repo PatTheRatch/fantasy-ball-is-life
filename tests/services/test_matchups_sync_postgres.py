@@ -43,6 +43,7 @@ from backend.repos.ingestion import (
     RawPayloadRepository,
 )
 from backend.repos.matchups import LeagueSeasonRepository, MatchupRepository
+from backend.repos.scope import LeagueSeasonScope
 from backend.services.ingestion import IngestionService
 from backend.services.matchups import MatchupSyncService
 
@@ -132,7 +133,8 @@ def _seed(db_session: Session) -> tuple[uuid.UUID, uuid.UUID]:
     return season.id, fts_a.id
 
 
-def _service(db_session: Session) -> MatchupSyncService:
+def _service(db_session: Session, league_season_id: uuid.UUID) -> MatchupSyncService:
+    scope = LeagueSeasonScope(league_season_id)
     ingestion = IngestionService(
         ProviderRepository(db_session),
         IngestionRunRepository(db_session),
@@ -140,8 +142,8 @@ def _service(db_session: Session) -> MatchupSyncService:
     )
     return MatchupSyncService(
         ingestion,
-        LeagueSeasonRepository(db_session),
-        MatchupRepository(db_session),
+        LeagueSeasonRepository(scope, db_session),
+        MatchupRepository(scope, db_session),
     )
 
 
@@ -157,7 +159,7 @@ def test_differing_resync_supersedes_without_unique_violation(db_session: Sessio
                  {"PTS": 105.0, "fgm": 40.0, "fga": 80.0}, "away"),
     ))
 
-    svc = _service(db_session)
+    svc = _service(db_session, season_id)
     first = svc.sync_league_final_periods(
         season_id, connection=object(), adapter=_FakeAdapter([sb1])
     )
@@ -169,7 +171,7 @@ def test_differing_resync_supersedes_without_unique_violation(db_session: Sessio
     assert first.created == 1
     assert second.superseded == 1
 
-    repo = MatchupRepository(db_session)
+    repo = MatchupRepository(LeagueSeasonScope(season_id), db_session)
     live = repo.find_live(db_session.scalars(select(MatchupPeriod)).one().id, _home_id)
     assert live is not None
     assert live.computed_result == "away"
@@ -185,7 +187,7 @@ def test_identical_resync_noops_with_ratio_rounding(db_session: Session) -> None
                  {"PTS": 100.0, "fgm": 38.0, "fga": 82.0}, "home"),
     ))
 
-    svc = _service(db_session)
+    svc = _service(db_session, season_id)
     first = svc.sync_league_final_periods(
         season_id, connection=object(), adapter=_FakeAdapter([sb])
     )
@@ -212,7 +214,7 @@ def test_failing_sync_leaves_durable_failed_run_and_no_orphans(
     # charter D28: a failed job is a queryable row, not a rolled-away nothing.
     season_id, _home_id = _seed(db_session)
 
-    svc = _service(db_session)
+    svc = _service(db_session, season_id)
     with pytest.raises(RuntimeError, match="adapter timeout"):
         svc.sync_league_final_periods(
             season_id, connection=object(), adapter=_RaisingAdapter()
@@ -250,7 +252,7 @@ def test_partial_sync_marks_run_partial_without_losing_result(db_session: Sessio
         _matchup("1", "2", {"PTS": 110.0}, {"PTS": 100.0}, "home"),
     ))
 
-    svc = _service(db_session)
+    svc = _service(db_session, season_id)
     summary = svc.sync_league_final_periods(
         season_id, connection=object(), adapter=_FakeAdapter([sb])
     )
@@ -288,7 +290,7 @@ def test_clean_sync_commits_succeeded_durably(db_session: Session) -> None:
                  {"PTS": 100.0, "fgm": 38.0, "fga": 80.0}, "home"),
     ))
 
-    svc = _service(db_session)
+    svc = _service(db_session, season_id)
     svc.sync_league_final_periods(
         season_id, connection=object(), adapter=_FakeAdapter([sb])
     )

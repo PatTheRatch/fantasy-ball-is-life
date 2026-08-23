@@ -9,11 +9,13 @@ from fastapi import Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.models.fantasy import LeagueSeason
 from backend.platform.auth import AuthError, ExpiredToken, Principal, verify_token
 from backend.platform.settings import jwt_audience, jwt_issuer
 from backend.repos.identity import AuthBootstrapRepository
 from backend.repos.matchups import LeagueSeasonRepository, MatchupRepository
 from backend.repos.membership import LeagueMembershipRepository
+from backend.repos.scope import LeagueSeasonScope
 from backend.services.identity import IdentityResolutionError, resolve_current_user
 from backend.services.standings_read import StandingsReadService
 
@@ -93,8 +95,13 @@ def require_league_member(
     Order of checks: ``get_current_user`` raises 401 for a missing/invalid
     bearer token; a missing league_season is 404 (before the membership check,
     so a non-existent league isn't reported as "forbidden"); a non-member is 403.
+
+    This is the one legitimate *cross-scope* read in the league read path: it
+    establishes the scope, so it cannot be scoped by the thing it produces. The
+    existence check reads the ``LeagueSeason`` row directly rather than through a
+    scoped repository (which would require the scope this function creates).
     """
-    if LeagueSeasonRepository(session).get(league_season_id) is None:
+    if session.get(LeagueSeason, league_season_id) is None:
         raise HTTPException(status_code=404, detail="league season not found")
     if not LeagueMembershipRepository(session).is_member(league_season_id, user.id):
         raise HTTPException(status_code=403, detail="not a member of this league")
@@ -102,9 +109,17 @@ def require_league_member(
 
 
 def get_standings_service(
+    league_season_id: uuid.UUID = Depends(require_league_member),
     session: Session = Depends(get_db),
 ) -> StandingsReadService:
-    """Wire the standings read service to the request-scoped session."""
+    """Wire the standings read service to a scope that passed the membership gate.
+
+    The repositories cannot be constructed without a ``LeagueSeasonScope``, and
+    the only way to get one here is through ``require_league_member`` — so the
+    service is unreachable for a caller who has not passed the membership check
+    (charter D26: tenancy is structural, not conventional).
+    """
+    scope = LeagueSeasonScope(league_season_id)
     return StandingsReadService(
-        LeagueSeasonRepository(session), MatchupRepository(session)
+        LeagueSeasonRepository(scope, session), MatchupRepository(scope, session)
     )

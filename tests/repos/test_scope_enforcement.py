@@ -18,8 +18,13 @@ from sqlalchemy.pool import StaticPool
 
 from backend.models.base import uuid7
 from backend.platform.db import Base
-from backend.repos.base import LeagueScopedRepository, UserScopedRepository
-from backend.repos.scope import LeagueScope, UserScope
+from backend.repos.base import (
+    LeagueScopedRepository,
+    LeagueSeasonScopedRepository,
+    UserScopedRepository,
+)
+from backend.repos.matchups import LeagueSeasonRepository, MatchupRepository
+from backend.repos.scope import LeagueScope, LeagueSeasonScope, UserScope
 
 
 class ScopedUserRow(Base):
@@ -36,12 +41,23 @@ class ScopedLeagueRow(Base):
     league_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
 
 
+class ScopedSeasonRow(Base):
+    __tablename__ = "test_season_scoped_rows"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid7)
+    league_season_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+
+
 @pytest.fixture
 def session() -> Iterator[Session]:
     engine = create_engine("sqlite:///:memory:", poolclass=StaticPool)
     Base.metadata.create_all(
         engine,
-        tables=[ScopedUserRow.__table__, ScopedLeagueRow.__table__],
+        tables=[
+            ScopedUserRow.__table__,
+            ScopedLeagueRow.__table__,
+            ScopedSeasonRow.__table__,
+        ],
     )
     with Session(engine) as s:
         yield s
@@ -89,3 +105,43 @@ def test_cross_tenant_read_returns_nothing(session: Session) -> None:
     rows = session.scalars(repo.scoped_select(ScopedUserRow)).all()
 
     assert rows == []
+
+
+def test_league_season_scoped_repo_requires_scope(session: Session) -> None:
+    with pytest.raises(TypeError):
+        LeagueSeasonScopedRepository(session=session)  # type: ignore[call-arg]
+
+
+def test_league_season_scoped_select_filters_to_scope(session: Session) -> None:
+    season_a, season_b = uuid.uuid4(), uuid.uuid4()
+    session.add_all(
+        [
+            ScopedSeasonRow(league_season_id=season_a),
+            ScopedSeasonRow(league_season_id=season_b),
+        ]
+    )
+    session.commit()
+
+    repo = LeagueSeasonScopedRepository(LeagueSeasonScope(season_a), session)
+    rows = session.scalars(repo.scoped_select(ScopedSeasonRow)).all()
+
+    assert [r.league_season_id for r in rows] == [season_a]
+
+
+def test_league_season_scoped_cross_tenant_returns_nothing(session: Session) -> None:
+    session.add(ScopedSeasonRow(league_season_id=uuid.uuid4()))
+    session.commit()
+
+    repo = LeagueSeasonScopedRepository(LeagueSeasonScope(uuid.uuid4()), session)
+    rows = session.scalars(repo.scoped_select(ScopedSeasonRow)).all()
+
+    assert rows == []
+
+
+def test_real_league_repos_require_scope(session: Session) -> None:
+    # charter D26: the structural assertion that is the point of this bite —
+    # a league repository cannot be constructed without a scope.
+    with pytest.raises(TypeError):
+        LeagueSeasonRepository(session=session)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        MatchupRepository(session=session)  # type: ignore[call-arg]

@@ -23,3 +23,15 @@ class LeagueScope:
     """A single league's tenancy boundary."""
 
     league_id: uuid.UUID
+
+
+@dataclass(frozen=True)
+class LeagueSeasonScope:
+    """A single league_season's tenancy boundary.
+
+    The scope object for every real league table (S1-06 keyed them on
+    ``league_season_id``), in contrast to :class:`LeagueScope` which is the
+    franchise-level boundary (``fantasy_teams`` outlives any one season).
+    """
+
+    league_season_id: uuid.UUID

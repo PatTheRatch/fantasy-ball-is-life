@@ -79,19 +79,15 @@ class StandingsReadService:
         self.league_seasons = league_seasons
         self.matchups = matchups
 
-    def standings(
-        self, league_season_id: uuid.UUID, *, through_period: int | None = None
-    ) -> StandingsResult:
-        periods = self.league_seasons.final_periods(league_season_id)
+    def standings(self, *, through_period: int | None = None) -> StandingsResult:
+        periods = self.league_seasons.final_periods()
         if through_period is not None:
             periods = [p for p in periods if p.ordinal <= through_period]
 
-        teams = {t.id: t for t in self.league_seasons.teams(league_season_id)}
+        teams = {t.id: t for t in self.league_seasons.teams()}
 
         period_ids = [p.id for p in periods]
-        matchups = self.matchups.live_for_season(
-            league_season_id, period_ids=period_ids
-        )
+        matchups = self.matchups.live_for_season(period_ids=period_ids)
         by_matchup = _group_by_matchup(
             self.matchups.category_results_for([m.id for m in matchups])
         )
