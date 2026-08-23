@@ -186,21 +186,16 @@ H-01 and H-02 are correctness bugs in shipped code.
   Test-and-docstring only — no route or API change.
   *Charter: D26 — which names a test as the mechanism; non-negotiable #1.*
 
-- [ ] **H-05a · Additive schema constraints** — **NEXT**
-  Four constraints behind guarantees the prose already makes: a partial unique
-  index for name-only `provider_identities` (Postgres treats NULL
-  `provider_entity_id` as distinct, so BBM/Hashtag identities have no
-  uniqueness at all); a partial unique index for one open
-  `identity_review_queue` row per identity (added alongside the listing index,
-  not replacing it); `0 <= confidence <= 1`; and
-  `(status='final') = (finalized_at IS NOT NULL)` as an equivalence.
-  **Not migration-only:** the first two turn a silent double-insert into an
-  `IntegrityError`, so `resolve_and_link` needs `begin_nested()` + re-read —
-  otherwise the bite trades a data bug for an availability bug. Four test
-  seeds will break on the finality constraint; fixing them is the point.
-  Scoped: [`docs/tickets/H-05a-additive-schema-constraints.md`](../tickets/H-05a-additive-schema-constraints.md).
+- [x] **H-05a · Additive schema constraints** — `0f6b918`
+  Four additive constraints in one migration: partial unique indexes for
+  name-only provider_identities and one-open-review-per-identity,
+  0 <= confidence <= 1, and (status='final') = (finalized_at IS NOT NULL)
+  as an equivalence. resolve_and_link now inserts inside begin_nested() and
+  re-reads the winner on IntegrityError — the indexes don't trade a data bug
+  for an availability bug. Migration applies and rolls back; four test seeds
+  were fixed (not weakened) to seed finalized_at.
 
-- [ ] **H-05b · Cross-league composite keys** — depends on H-05a
+- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — **NEXT**
   `matchups` carries four independent FKs with nothing tying the period and
   both team-seasons to the claimed `league_season_id`, so one row can span
   three leagues with every FK valid. `fantasy_team_seasons` has the same gap
@@ -296,6 +291,6 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-05 split into H-05a/b/c and
-H-05a scoped. Slice 1 closed at S1-11c; S1-11d stays optional and unscoped —
-UX polish, not a blocker, and nothing in hardening depends on it.*
+*Claude updates this on approval. Last change: H-05a merged. Slice 1 closed
+at S1-11c; S1-11d stays optional and unscoped — UX polish, not a blocker, and
+nothing in hardening depends on it.*
