@@ -175,11 +175,14 @@ H-01 and H-02 are correctness bugs in shipped code.
   `@declare_policy` only sets an attribute, and the matrix test only asserts
   the attribute exists — so a route can declare `LEAGUE_SCOPED`, skip
   `require_league_member`, and pass CI. Make the matrix test walk each route's
-  dependency graph and fail when a policy's required dependency is absent,
-  with a negative test proving it catches one. Prefer the test-based gate over
-  injecting dependencies from `declare_policy`, which would make `policy.py`
-  import `deps.py` and risk a cycle.
-  *Charter: D26, non-negotiable #1.*
+  dependency graph (transitively — `get_standings_service` now supplies the
+  gate for the standings route) and fail when a policy's required dependency
+  is absent. The policy→dependency map must be **total over `RoutePolicy`**:
+  `MANAGER_PRIVATE` has no gate yet, and declaring a policy the harness cannot
+  enforce must fail CI rather than ship a label. Map lives in the test, not
+  `policy.py`, which stays a pure declaration module.
+  *Charter: D26 — which names a test as the mechanism; non-negotiable #1.*
+  Scoped: [`docs/tickets/H-04b-make-route-policy-executable.md`](../tickets/H-04b-make-route-policy-executable.md).
 
 - [ ] **H-05 · Constrain what the schema claims**
   Database-level gaps behind stated invariants: matchups can reference a
@@ -269,4 +272,5 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-04a merged.*
+*Claude updates this on approval. Last change: H-04b scoped and assigned —
+it closes the tenancy split, and S1-11c closes Slice 1 after it.*
