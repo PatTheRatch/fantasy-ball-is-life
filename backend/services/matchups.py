@@ -319,6 +319,10 @@ class MatchupSyncService:
         constraint makes them inseparable), then **commit** — commit per period,
         not per run, so a failure later in the run leaves this period durable and
         a re-run resumes where it stopped. Returns the unknown-category count.
+
+        Recomputes the season context rather than taking it as a parameter, so
+        this stays callable standalone; the extra reload per period is fine for a
+        ~20-period backfill.
         """
         season, domain_cats, cat_id_by_key, teams_by_provider = self._season_context()
         sync = self._sync_period(

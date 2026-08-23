@@ -118,6 +118,19 @@ def _scoreboard(home_stats: dict, away_stats: dict, result: str) -> ScoreboardDT
     )
 
 
+class _RecordingAdapter:
+    """Serves scoreboards and records every fetch — so tests can assert the
+    adapter was genuinely *not called*, not just that the queue stayed empty."""
+
+    def __init__(self, scoreboards) -> None:
+        self._scoreboards = list(scoreboards)
+        self.fetched: list[str] = []
+
+    def fetch_scoreboard(self, connection, season_year, provider_period_id):
+        self.fetched.append(provider_period_id)
+        return self._scoreboards.pop(0)
+
+
 # --- the happy path ----------------------------------------------------------
 
 
@@ -152,7 +165,7 @@ def test_eligible_period_finalizes(db_session: Session) -> None:
 def test_inside_grace_window_does_not_finalize(db_session: Session) -> None:
     end = date(2025, 10, 28)
     season_id, _ = _seed_season(db_session, periods=[(1, end, "1", "regular")])
-    adapter = _FakeAdapter([])
+    adapter = _RecordingAdapter([])
     svc = _service(db_session, season_id)
 
     # 12h past end-of-day, inside the 48h grace → not eligible.
@@ -163,20 +176,22 @@ def test_inside_grace_window_does_not_finalize(db_session: Session) -> None:
 
     assert summary.finalized == 0
     assert summary.skipped_ineligible == 1
-    assert adapter._scoreboards == []  # never fetched
+    assert adapter.fetched == []  # never fetched
 
 
 def test_timezone_boundary_does_not_finalize(db_session: Session) -> None:
-    # end_date has passed in UTC but not in America/Los_Angeles (UTC-8).
+    # end_date has passed in UTC but not in America/Los_Angeles.
     end = date(2025, 10, 28)
     season_id, _ = _seed_season(
         db_session, timezone="America/Los_Angeles", periods=[(1, end, "1", "regular")]
     )
-    adapter = _FakeAdapter([])
+    adapter = _RecordingAdapter([])
     svc = _service(db_session, season_id)
 
-    # 2025-10-29 06:00 UTC == 2025-10-28 22:00 in LA — the period's end-of-day
-    # (10-29 00:00 LA == 10-29 08:00 UTC) has not arrived yet in league time.
+    # Late October LA is PDT (UTC-7). 2025-10-29 06:00 UTC == 2025-10-28 23:00
+    # in LA — the period's end-of-day (10-29 00:00 PDT == 10-29 07:00 UTC) has
+    # not arrived yet in league time. A naive UTC comparison would read 06:00
+    # UTC as already past 10-29 00:00 UTC and finalize a day early.
     summary = svc.finalize_eligible_periods(
         connection=object(), adapter=adapter,
         now=datetime(2025, 10, 29, 6, 0, tzinfo=UTC), grace_hours=0,
@@ -184,6 +199,7 @@ def test_timezone_boundary_does_not_finalize(db_session: Session) -> None:
 
     assert summary.finalized == 0
     assert summary.skipped_ineligible == 1
+    assert adapter.fetched == []
 
 
 # --- already-final is never refetched ----------------------------------------
@@ -200,7 +216,7 @@ def test_already_final_is_not_refetched(db_session: Session) -> None:
     period.finalized_at = datetime(2025, 10, 29, tzinfo=UTC)
     db_session.commit()
 
-    adapter = _FakeAdapter([])
+    adapter = _RecordingAdapter([])
     svc = _service(db_session, season_id)
     summary = svc.finalize_eligible_periods(
         connection=object(), adapter=adapter,
@@ -209,7 +225,7 @@ def test_already_final_is_not_refetched(db_session: Session) -> None:
 
     assert summary.finalized == 0
     assert summary.skipped_final == 1
-    assert adapter._scoreboards == []  # fetch_scoreboard never called
+    assert adapter.fetched == []  # fetch_scoreboard never called
 
 
 # --- break + missing categories ----------------------------------------------
