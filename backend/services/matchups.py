@@ -17,8 +17,9 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from backend.domain.categories import (
     Category as DomainCategory,
@@ -35,6 +36,7 @@ from backend.models.base import uuid7
 from backend.models.fantasy import (
     Category,
     FantasyTeamSeason,
+    LeagueSeason,
     Matchup,
     MatchupCategoryResult,
     MatchupPeriod,
@@ -70,6 +72,28 @@ class SyncSummary:
     superseded: int
     unchanged: int
     unknown_categories: int
+
+
+@dataclass(frozen=True, slots=True)
+class _PeriodSync:
+    """What syncing one period did — the shared fetch-normalize-persist result."""
+
+    matchups: int
+    created: int
+    superseded: int
+    unchanged: int
+    unknowns: int
+
+
+@dataclass(frozen=True, slots=True)
+class FinalizeSummary:
+    """What one finalize pass did."""
+
+    finalized: int
+    skipped_final: int
+    skipped_ineligible: int
+    skipped_no_provider_id: int
+    unknowns: int
 
 
 class MatchupSyncError(Exception):
@@ -156,8 +180,31 @@ def _matchup_signature(
     return (m_sig, r_sig)
 
 
+def _period_eligible(
+    period: MatchupPeriod, now: datetime, tz: ZoneInfo, grace_hours: int
+) -> bool:
+    """True when the period's end date has passed by the grace margin, in the
+    league's timezone.
+
+    ``end_date`` is a calendar date; the period is over at midnight *after* it
+    (its final day of games is still in progress during ``end_date`` itself).
+    Comparing in UTC or server-local would mis-finalize by up to a day at the
+    boundary — a whole week's standings. ``now`` must be timezone-aware.
+    """
+    if period.end_date is None:
+        return False
+    end_of_day = datetime.combine(period.end_date, time.min, tzinfo=tz) + timedelta(days=1)
+    return now >= end_of_day + timedelta(hours=grace_hours)
+
+
 class MatchupSyncService:
-    """Syncs one league_season's final periods into matchups + category results."""
+    """Finalizes and re-syncs one league_season's periods into matchups.
+
+    ``finalize_eligible_periods`` is the only code path that writes
+    ``status='final'``; ``resync_final_periods`` is the repair path that
+    re-reads already-final periods and never touches status. Both share
+    ``_sync_period``, the single implementation of fetch-normalize-persist.
+    """
 
     def __init__(
         self,
@@ -169,55 +216,158 @@ class MatchupSyncService:
         self.league_seasons = league_seasons
         self.matchups = matchups
 
-    def sync_league_final_periods(
+    def _season_context(
         self,
-        league_season_id: uuid.UUID,
-        *,
-        connection: object,
-        adapter: ScoreboardAdapter,
-    ) -> SyncSummary:
-        """Fetch + persist every ``final`` period for one league_season."""
+    ) -> tuple[
+        LeagueSeason,
+        list[DomainCategory],
+        dict[str, uuid.UUID],
+        dict[str, FantasyTeamSeason],
+    ]:
+        """Load the scoped season's sync context (season, categories, teams)."""
         season = self.league_seasons.get()
         if season is None:
             raise MatchupSyncError(
                 f"unknown league_season: {self.league_seasons.scope.league_season_id!r}"
             )
-
         model_cats = self.league_seasons.scoring_categories()
         domain_cats = [_to_domain_category(c) for c in model_cats]
         cat_id_by_key = {c.key: c.id for c in model_cats}
         teams_by_provider = self.league_seasons.teams_by_provider()
+        return season, domain_cats, cat_id_by_key, teams_by_provider
 
+    def _sync_period(
+        self,
+        period: MatchupPeriod,
+        season: LeagueSeason,
+        domain_cats: list[DomainCategory],
+        cat_id_by_key: dict[str, uuid.UUID],
+        teams_by_provider: dict[str, FantasyTeamSeason],
+        run: IngestionRun,
+        connection: object,
+        adapter: ScoreboardAdapter,
+    ) -> _PeriodSync:
+        """Fetch + persist one period's matchups — the single implementation of
+        the thing that writes matchups, shared by finalize and resync."""
+        if period.provider_period_id is None:
+            return _PeriodSync(0, 0, 0, 0, 0)
+        sb = adapter.fetch_scoreboard(
+            connection, season.season_year, period.provider_period_id
+        )
+        self.ingestion.record_payload(
+            run, f"scoreboard/{period.provider_period_id}", asdict(sb)
+        )
+        matchups = created = superseded = unchanged = unknowns = 0
+        for m in sb.matchups:
+            outcome, unknown_count = self._persist_matchup(
+                m, period, season.id, domain_cats, cat_id_by_key, teams_by_provider, run
+            )
+            matchups += 1
+            unknowns += unknown_count
+            if outcome == "created":
+                created += 1
+            elif outcome == "superseded":
+                superseded += 1
+            else:
+                unchanged += 1
+        return _PeriodSync(matchups, created, superseded, unchanged, unknowns)
+
+    def resync_final_periods(
+        self, *, connection: object, adapter: ScoreboardAdapter
+    ) -> SyncSummary:
+        """Repair path: re-read already-``final`` periods after a normalizer change.
+
+        This must **not** change any period's ``status`` — finality is owned by
+        :meth:`finalize_period` alone. It re-fetches and supersedes the matchups
+        of periods already marked final; a normalizer bump is fixed by re-running
+        this over the stored payloads, never by touching finality.
+        """
+        season, domain_cats, cat_id_by_key, teams_by_provider = self._season_context()
         periods = matchups = created = superseded = unchanged = unknowns = 0
         with self.ingestion.run_scope(
-            season.provider_key, kind="matchups", league_season_id=league_season_id
+            season.provider_key, kind="matchups", league_season_id=season.id
         ) as run:
             for period in self.league_seasons.final_periods():
-                if period.provider_period_id is None:
-                    continue
-                sb = adapter.fetch_scoreboard(
-                    connection, season.season_year, period.provider_period_id
+                sync = self._sync_period(
+                    period, season, domain_cats, cat_id_by_key, teams_by_provider,
+                    run, connection, adapter,
                 )
-                self.ingestion.record_payload(
-                    run, f"scoreboard/{period.provider_period_id}", asdict(sb)
-                )
-                for m in sb.matchups:
-                    outcome, unknown_count = self._persist_matchup(
-                        m, period, league_season_id, domain_cats, cat_id_by_key,
-                        teams_by_provider, run,
-                    )
-                    matchups += 1
-                    unknowns += unknown_count
-                    if outcome == "created":
-                        created += 1
-                    elif outcome == "superseded":
-                        superseded += 1
-                    else:
-                        unchanged += 1
+                matchups += sync.matchups
+                created += sync.created
+                superseded += sync.superseded
+                unchanged += sync.unchanged
+                unknowns += sync.unknowns
                 periods += 1
-
             summary = SyncSummary(
                 periods, matchups, created, superseded, unchanged, unknowns
+            )
+            status = RUN_PARTIAL if unknowns else RUN_SUCCEEDED
+            self.ingestion.finish_run(run, status, stats=asdict(summary))
+        return summary
+
+    def finalize_period(
+        self,
+        period: MatchupPeriod,
+        *,
+        connection: object,
+        adapter: ScoreboardAdapter,
+        run: IngestionRun,
+    ) -> int:
+        """Finalize one already-eligible period within an open run.
+
+        Fetch + persist + flip ``status``/``finalized_at`` together (H-05a's
+        constraint makes them inseparable), then **commit** — commit per period,
+        not per run, so a failure later in the run leaves this period durable and
+        a re-run resumes where it stopped. Returns the unknown-category count.
+        """
+        season, domain_cats, cat_id_by_key, teams_by_provider = self._season_context()
+        sync = self._sync_period(
+            period, season, domain_cats, cat_id_by_key, teams_by_provider,
+            run, connection, adapter,
+        )
+        period.status = "final"
+        period.finalized_at = datetime.now(UTC)
+        self.matchups.commit()
+        return sync.unknowns
+
+    def finalize_eligible_periods(
+        self,
+        *,
+        connection: object,
+        adapter: ScoreboardAdapter,
+        grace_hours: int = 48,
+        now: datetime | None = None,
+    ) -> FinalizeSummary:
+        """Finalize every eligible period of the scoped season, in ordinal order.
+
+        A period is eligible when it is not already ``final``, has a
+        ``provider_period_id``, and its ``end_date`` has passed by ``grace_hours``
+        in the league's timezone. ``now`` is injectable for the boundary tests.
+        """
+        season, _, _, _ = self._season_context()
+        now = now or datetime.now(UTC)
+        tz = ZoneInfo(season.timezone)
+        finalized = skipped_final = skipped_ineligible = skipped_no_id = 0
+        unknowns = 0
+        with self.ingestion.run_scope(
+            season.provider_key, kind="finalize", league_season_id=season.id
+        ) as run:
+            for period in self.league_seasons.periods():
+                if period.status == "final":
+                    skipped_final += 1
+                    continue
+                if period.provider_period_id is None:
+                    skipped_no_id += 1
+                    continue
+                if not _period_eligible(period, now, tz, grace_hours):
+                    skipped_ineligible += 1
+                    continue
+                unknowns += self.finalize_period(
+                    period, connection=connection, adapter=adapter, run=run
+                )
+                finalized += 1
+            summary = FinalizeSummary(
+                finalized, skipped_final, skipped_ineligible, skipped_no_id, unknowns
             )
             status = RUN_PARTIAL if unknowns else RUN_SUCCEEDED
             self.ingestion.finish_run(run, status, stats=asdict(summary))

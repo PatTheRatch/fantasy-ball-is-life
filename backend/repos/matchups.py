@@ -185,3 +185,11 @@ class MatchupRepository(LeagueSeasonScopedRepository):
         inserted (else the partial unique index rejects the insert).
         """
         self.session.flush()
+
+    def commit(self) -> None:
+        """Commit the session.
+
+        The finalize path commits per period (not per run) so a mid-run failure
+        leaves earlier periods durable and a re-run resumes where it stopped.
+        """
+        self.session.commit()

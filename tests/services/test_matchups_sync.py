@@ -137,7 +137,7 @@ def test_normalizes_matchup_and_category_results() -> None:
     )
 
     svc, ingestion, adapter = _service(cats, teams, periods, matchups, [sb])
-    summary = svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    summary = svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     assert summary.matchups == 1
     assert summary.created == 1
@@ -175,7 +175,7 @@ def test_provider_tiebreak_when_computed_ties() -> None:
     )
 
     svc, _, adapter = _service(cats, teams, periods, matchups, [sb])
-    svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     (m,) = matchups.added
     assert m.computed_result == "tie"  # home wins PTS, away wins REB
@@ -195,7 +195,7 @@ def test_bye_produces_matchup_without_category_results() -> None:
     )
 
     svc, _, adapter = _service(cats, teams, periods, matchups, [sb])
-    svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     (m,) = matchups.added
     assert m.away_team_season_id is None
@@ -215,12 +215,11 @@ def test_identical_resync_is_unchanged() -> None:
                             {"PTS": 100.0, "REB": 45.0}, "home"),),
     )
 
-    league_id = uuid.uuid4()
     svc, _, adapter = _service(cats, teams, periods, matchups, [sb, sb])
-    first = svc.sync_league_final_periods(league_id, connection=Mock(), adapter=adapter)
+    first = svc.resync_final_periods(connection=Mock(), adapter=adapter)
     assert first.created == 1
 
-    second = svc.sync_league_final_periods(league_id, connection=Mock(), adapter=adapter)
+    second = svc.resync_final_periods(connection=Mock(), adapter=adapter)
     assert second.unchanged == 1
     assert second.created == 0
     assert len(matchups.added) == 1  # no new row
@@ -243,10 +242,9 @@ def test_differing_resync_supersedes() -> None:
                             {"PTS": 105.0, "REB": 55.0}, "away"),),
     )
 
-    league_id = uuid.uuid4()
     svc, _, adapter = _service(cats, teams, periods, matchups, [sb1, sb2])
-    svc.sync_league_final_periods(league_id, connection=Mock(), adapter=adapter)
-    second = svc.sync_league_final_periods(league_id, connection=Mock(), adapter=adapter)
+    svc.resync_final_periods(connection=Mock(), adapter=adapter)
+    second = svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     assert second.superseded == 1
     assert len(matchups.added) == 2  # old superseded + new live
@@ -275,7 +273,7 @@ def test_ratio_rounding_keeps_result_and_category_consistent() -> None:
     )
 
     svc, _, adapter = _service(cats, teams, periods, matchups, [sb])
-    svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     (m,) = matchups.added
     (r,) = matchups.added_results
@@ -301,7 +299,7 @@ def test_missing_category_persists_result_none_not_tie() -> None:
     )
 
     svc, _, adapter = _service(cats, teams, periods, matchups, [sb])
-    svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     (m,) = matchups.added
     assert m.computed_result == "home"  # PTS decided → home wins 1-0
@@ -326,7 +324,7 @@ def test_computed_result_ignores_unknown_categories() -> None:
     )
 
     svc, _, adapter = _service(cats, teams, periods, matchups, [sb])
-    svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     (m,) = matchups.added
     # 1-1 decided (PTS home, REB away); the unknown AST must not tip it.
@@ -350,7 +348,7 @@ def test_missing_category_stamps_run_partial() -> None:
     )
 
     svc, ingestion, adapter = _service(cats, teams, periods, matchups, [sb])
-    summary = svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    summary = svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     assert summary.unknown_categories == 1
     assert ingestion.finish_run.call_args.args[1] == "partial"
@@ -370,7 +368,7 @@ def test_complete_scoreboard_stamps_run_succeeded() -> None:
     )
 
     svc, ingestion, adapter = _service(cats, teams, periods, matchups, [sb])
-    summary = svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    summary = svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     assert summary.unknown_categories == 0
     assert ingestion.finish_run.call_args.args[1] == "succeeded"
@@ -390,7 +388,7 @@ def test_bye_stamps_run_succeeded_not_partial() -> None:
     )
 
     svc, ingestion, adapter = _service(cats, teams, periods, matchups, [sb])
-    summary = svc.sync_league_final_periods(uuid.uuid4(), connection=Mock(), adapter=adapter)
+    summary = svc.resync_final_periods(connection=Mock(), adapter=adapter)
 
     assert summary.unknown_categories == 0
     assert ingestion.finish_run.call_args.args[1] == "succeeded"
