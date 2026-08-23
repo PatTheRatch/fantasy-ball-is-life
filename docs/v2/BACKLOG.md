@@ -155,14 +155,19 @@ wait.
   idempotent by natural key; an unmapped category finishes the run partial.
   *Charter: D9, D11, D13, D16, D17, D28.*
 
-- [ ] **D-02 · Period finality producer** — **NEXT** — depends on D-01 — *this is H-07*
+- [ ] **D-02 · Period finality producer** — **NEXT** — depends on D-01 — *was H-07*
   Nothing writes `matchup_periods.status='final'`, so standings has no input
-  and every league reads "not synced". Build `finalize_period` as the single
-  transactional owner of the transition: last authoritative fetch → persist →
-  supersede → set `status` + `finalized_at` together (H-05a's constraint makes
-  them inseparable). Then rename `sync_league_final_periods`, whose docstring
-  claims to be the sync while behaving as a backfill.
+  and a fully bootstrapped league renders "not synced" on every screen.
+  `finalize_period` becomes the single owner of the transition: last
+  authoritative fetch → persist → supersede → set `status` + `finalized_at`
+  together (H-05a's constraint makes them inseparable). Eligibility is
+  `end_date` + a named 48h grace, **resolved through the league's timezone** —
+  a UTC comparison is wrong by up to a day, which on the boundary is a whole
+  week of standings. Commits per period, so a flake at 15 of 20 leaves 1–14
+  final and resumes. `sync_league_final_periods` renamed `resync_final_periods`
+  and marked repair-only — it never touches `status`.
   *Charter: D10, D20, D28.*
+  Scoped: [`docs/tickets/D-02-period-finality-producer.md`](../tickets/D-02-period-finality-producer.md).
 
 - [ ] **D-03 · Sync CLI + claim** — depends on D-01, D-02
   `scripts/sync_league.py` taking a league id, season year and
@@ -333,4 +338,5 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: D-01 merged.*
+*Claude updates this on approval. Last change: D-02 scoped and assigned — the
+last bite before D-03's CLI puts a real league on screen.*
