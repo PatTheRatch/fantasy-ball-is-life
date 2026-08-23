@@ -14,6 +14,75 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "PeriodOut": {
+        "properties": {
+          "end_date": {
+            "format": "date",
+            "title": "End Date",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "start_date": {
+            "format": "date",
+            "title": "Start Date",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "label",
+          "type",
+          "status",
+          "start_date",
+          "end_date"
+        ],
+        "title": "PeriodOut",
+        "type": "object"
+      },
+      "PeriodsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodOut"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "PeriodsResponse",
+        "type": "object"
+      },
       "StandingRowOut": {
         "properties": {
           "losses": {
@@ -202,6 +271,62 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/leagues/{league_season_id}/periods": {
+      "get": {
+        "operationId": "periods_api_v1_leagues__league_season_id__periods_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "league_season_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "League Season Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Periods"
+      }
+    },
     "/api/v1/leagues/{league_season_id}/standings": {
       "get": {
         "operationId": "standings_api_v1_leagues__league_season_id__standings_get",

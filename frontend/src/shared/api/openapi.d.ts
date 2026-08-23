@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/leagues/{league_season_id}/periods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Periods */
+        get: operations["periods_api_v1_leagues__league_season_id__periods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/leagues/{league_season_id}/standings": {
         parameters: {
             query?: never;
@@ -63,6 +80,37 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** PeriodOut */
+        PeriodOut: {
+            /**
+             * End Date
+             * Format: date
+             */
+            end_date: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string | null;
+            /** Ordinal */
+            ordinal: number;
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /** Status */
+            status: string;
+            /** Type */
+            type: string;
+        };
+        /** PeriodsResponse */
+        PeriodsResponse: {
+            /** Data */
+            data: components["schemas"]["PeriodOut"][];
         };
         /** StandingRowOut */
         StandingRowOut: {
@@ -142,6 +190,39 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    periods_api_v1_leagues__league_season_id__periods_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                league_season_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeriodsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     standings_api_v1_leagues__league_season_id__standings_get: {
         parameters: {
             query?: {
