@@ -162,15 +162,30 @@ H-01 and H-02 are correctness bugs in shipped code.
   partial). One run owner today; the next owner inherits the guarantee.
   *Charter: D28 — job outcomes are queryable data, not log lines.*
 
-- [ ] **H-04 · Make tenancy structural, not conventional** — **NEXT**
-  Two halves, both currently labels rather than gates: `MatchupRepository` and
-  `LeagueSeasonRepository` take a bare `Session` while `LeagueScopedRepository`
-  sits unused, and `@declare_policy` attaches no dependency while the matrix
-  test only asserts the attribute exists. Bind league repos to a scope, and
-  make the matrix test inspect each route's dependency graph so a
-  `LEAGUE_SCOPED` route without a membership dependency fails CI.
-  **No live hole today** — the standings route is guarded — but D26 claims
-  structure, and structure is what is missing.
+- [ ] **H-04a · Bind league repositories to a scope** — **NEXT**
+  `LeagueSeasonRepository` and `MatchupRepository` take a bare `Session` while
+  `LeagueScopedRepository` sits unused — not from laziness: its
+  `scope_column = "league_id"` never matched the tables S1-06 landed, which
+  key on `league_season_id`. Add `LeagueSeasonScope` + a matching base, bind
+  both repos, and wire `get_standings_service` behind `require_league_member`
+  so the service cannot be built without passing the gate. Keep `LeagueScope`
+  (`fantasy_teams` is league-keyed, so it has a real future home).
+  **No live hole** — the route is gated — but D26 claims structure and
+  structure is what is missing.
+  **Ahead of S1-11c on purpose:** S1-11c adds a periods repo and another
+  LEAGUE_SCOPED route; fixing the foundation first means it is written
+  against the enforced shape instead of being retrofitted.
+  *Charter: D26, non-negotiable #1.*
+  Scoped: [`docs/tickets/H-04a-bind-league-repos-to-a-scope.md`](../tickets/H-04a-bind-league-repos-to-a-scope.md).
+
+- [ ] **H-04b · Make route policy executable** — depends on H-04a
+  `@declare_policy` only sets an attribute, and the matrix test only asserts
+  the attribute exists — so a route can declare `LEAGUE_SCOPED`, skip
+  `require_league_member`, and pass CI. Make the matrix test walk each route's
+  dependency graph and fail when a policy's required dependency is absent,
+  with a negative test proving it catches one. Prefer the test-based gate over
+  injecting dependencies from `declare_policy`, which would make `policy.py`
+  import `deps.py` and risk a cycle.
   *Charter: D26, non-negotiable #1.*
 
 - [ ] **H-05 · Constrain what the schema claims**
@@ -261,4 +276,5 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-03 merged.*
+*Claude updates this on approval. Last change: H-04 split into H-04a
+(repositories) and H-04b (route policy); H-04a scoped and assigned.*
