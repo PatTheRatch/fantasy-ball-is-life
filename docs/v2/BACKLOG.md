@@ -165,21 +165,17 @@ wait.
   End-to-end bootstrap → finalize → standings now returns a populated table.
   *Charter: D10, D20, D28.*
 
-- [ ] **D-03 · Sync CLI + claim** — **NEXT** — depends on D-01, D-02
-  `scripts/sync_league.py`: bootstrap → finalize → claim. (D-02 folded matchup
-  persistence into `finalize_period`, so there is no separate sync step.)
-  Credentials come from the environment only, **never `argv`** — arguments are
-  visible in `ps`, shell history and CI logs. The `--claim-team` step creates
-  the `manager_user_links` row that makes a real user a member; **the CLI must
-  find an existing user, never create one**, because `users.auth_subject` is
-  NOT NULL UNIQUE and an invented one would silently fork a second user at
-  first real sign-in. Prints the `league_season_id` URL — S1-11d is not built,
-  so this is the only way to reach the league.
-  **Correction:** an earlier note here claimed this doubles as the open
-  question 6 live check. It does not — #6 concerns `rosterForCurrentScoringPeriod`
-  and `mTransactions2`, and this CLI touches neither. That probe is still owed,
-  as its own S1-03-shaped bite.
-  Scoped: [`docs/tickets/D-03-sync-cli-and-claim.md`](../tickets/D-03-sync-cli-and-claim.md).
+- [x] **D-03 · Sync CLI + claim** — `f75797a` — depends on D-01, D-02
+  scripts/sync_league.py: bootstrap → finalize → claim → summary. Credentials
+  from env only (never argv; --espn-s2 rejected by test); claim finds an
+  existing user by --claim-email and never creates one; --claim-team omitted
+  or unknown lists teams and exits non-zero. Prints the league_season_id URL
+  (S1-11d not built) and reports run statuses honestly. This closes the demo
+  path.
+  *Charter: D13, D28.*
+
+The demo path is done; remaining hardening is H-05b/c, H-06, H-08, H-09,
+H-10, and open question #6 still owes its own S1-03-shaped probe.
 
 ---
 
@@ -244,7 +240,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   for an availability bug. Migration applies and rolls back; four test seeds
   were fixed (not weakened) to seed finalized_at.
 
-- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — *waits on the demo path*
+- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — **NEXT**
   `matchups` carries four independent FKs with nothing tying the period and
   both team-seasons to the claimed `league_season_id`, so one row can span
   three leagues with every FK valid. `fantasy_team_seasons` has the same gap
@@ -340,6 +336,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: D-03 scoped and assigned — the
-last bite before a real league is on screen. Also corrected the claim that it
-answers open question 6; that probe is still owed separately.*
+*Claude updates this on approval. Last change: D-03 merged — demo path complete.*
