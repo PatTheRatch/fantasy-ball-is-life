@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  within,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { LeaguePage } from "./LeaguePage";
@@ -21,6 +27,21 @@ const ROWS = [
   { rank: 3, team_id: "t3", team_name: "Pistons", team_abbreviation: null, wins: 10, losses: 30, ties: 0, win_pct: 33.3, played: 40 },
 ];
 
+// Week 1 is final (selectable); week 2 is scheduled (visible, disabled).
+const PERIODS = [
+  { id: "p1", ordinal: 1, label: "Week 1", type: "regular", status: "final", start_date: "2026-01-05", end_date: "2026-01-11" },
+  { id: "p2", ordinal: 2, label: "Week 2", type: "regular", status: "scheduled", start_date: "2026-01-12", end_date: "2026-01-18" },
+];
+
+const SYNCED_STANDINGS = {
+  data: ROWS,
+  as_of: "2026-01-11",
+  freshness: "final",
+  stale: false,
+  complete: true,
+  unknown_category_count: 0,
+};
+
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -33,6 +54,36 @@ function renderPage() {
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
+  );
+}
+
+// Serve different payloads for the standings and periods endpoints, keyed on
+// path, so a single page render exercises both queries distinctly.
+function mockGet(standings: unknown, periods: unknown) {
+  vi.mocked(api.GET).mockImplementation(
+    ((path: string) => {
+      if (path === "/api/v1/leagues/{league_season_id}/periods") {
+        return Promise.resolve({
+          data: periods,
+          error: undefined,
+          response: new Response(),
+        });
+      }
+      return Promise.resolve({
+        data: standings,
+        error: undefined,
+        response: new Response(),
+      });
+    }) as never,
+  );
+}
+
+function standingsCalls() {
+  // `api.GET` is an overloaded generic, so its `.mock.calls` types as `never[]`;
+  // cast to a plain shape to read the call arguments.
+  const mock = api.GET as unknown as { mock: { calls: unknown[][] } };
+  return mock.mock.calls.filter(
+    ([path]) => path === "/api/v1/leagues/{league_season_id}/standings",
   );
 }
 
@@ -135,5 +186,92 @@ describe("LeaguePage", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Something went wrong.");
     expect(alert).not.toHaveTextContent("doesn't exist or you're not a member");
+  });
+
+  it("offers only final periods as selectable, non-final disabled", async () => {
+    mockGet(SYNCED_STANDINGS, { data: PERIODS });
+    renderPage();
+
+    await screen.findByText("Cavs");
+    const select = screen.getByRole("combobox");
+    expect(
+      within(select).getByRole("option", { name: "Full season" }),
+    ).toBeInTheDocument();
+    expect(
+      within(select).getByRole("option", { name: "Week 1" }),
+    ).not.toBeDisabled();
+    expect(
+      within(select).getByRole("option", { name: "Week 2" }),
+    ).toBeDisabled();
+  });
+
+  it("selecting a period refetches standings with through_period", async () => {
+    mockGet(SYNCED_STANDINGS, { data: PERIODS });
+    renderPage();
+
+    await screen.findByText("Cavs");
+    // Initial fetch is "Full season" — no through_period.
+    expect(standingsCalls()).toHaveLength(1);
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "1" } });
+
+    await waitFor(() => {
+      expect(standingsCalls().length).toBeGreaterThan(1);
+    });
+    const lastCall = standingsCalls()[standingsCalls().length - 1];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((lastCall?.[1] as any)?.params?.query?.through_period).toBe(1);
+  });
+
+  it("omits through_period entirely for Full season", async () => {
+    mockGet(SYNCED_STANDINGS, { data: PERIODS });
+    renderPage();
+
+    await screen.findByText("Cavs");
+    const [path, options] = standingsCalls()[0];
+    expect(path).toBe("/api/v1/leagues/{league_season_id}/standings");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((options as any)?.params?.query).toBeUndefined();
+  });
+
+  it("renders the unknown-categories line when complete is false", async () => {
+    mockGet(
+      {
+        ...SYNCED_STANDINGS,
+        complete: false,
+        unknown_category_count: 3,
+      },
+      { data: PERIODS },
+    );
+    renderPage();
+
+    expect(
+      await screen.findByText(/3 category results unknown/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not render the unknown-categories line when complete is true", async () => {
+    mockGet(SYNCED_STANDINGS, { data: PERIODS });
+    renderPage();
+
+    await screen.findByText("Cavs");
+    expect(screen.queryByText(/category results unknown/)).not.toBeInTheDocument();
+  });
+
+  it("renders no selector when there are no final periods", async () => {
+    const scheduledOnly = [
+      { ...PERIODS[0], status: "scheduled" },
+      PERIODS[1],
+    ];
+    mockGet(
+      { data: [], as_of: null, freshness: "final", stale: false, complete: true, unknown_category_count: 0 },
+      { data: scheduledOnly },
+    );
+    renderPage();
+
+    expect(
+      await screen.findByText("This league hasn't synced a completed week yet."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 });

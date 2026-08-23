@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from typing import Protocol
 
 from fastapi import Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.models.fantasy import LeagueSeason
+from backend.models.fantasy import LeagueSeason, MatchupPeriod
 from backend.platform.auth import AuthError, ExpiredToken, Principal, verify_token
 from backend.platform.settings import jwt_audience, jwt_issuer
 from backend.repos.identity import AuthBootstrapRepository
@@ -123,3 +124,32 @@ def get_standings_service(
     return StandingsReadService(
         LeagueSeasonRepository(scope, session), MatchupRepository(scope, session)
     )
+
+
+def get_periods_repository(
+    league_season_id: uuid.UUID = Depends(require_league_member),
+    session: Session = Depends(get_db),
+) -> PeriodsReader:
+    """Wire a league-scoped repository to a scope that passed the membership gate.
+
+    The periods endpoint is a scoped read with no fold, so there is no service —
+    but a router still cannot import the concrete repository (charter D26
+    layering: routers must not reach for ``backend.repos``). The dependency
+    returns a :class:`PeriodsReader` protocol instead, so the router depends on
+    the method and the repo stays wired in the deps layer. The gate remains in
+    the dependency chain, which is what H-04b's matrix test enforces
+    transitively.
+    """
+    return LeagueSeasonRepository(LeagueSeasonScope(league_season_id), session)
+
+
+class PeriodsReader(Protocol):
+    """The periods read a router needs: a scoped ``periods()`` with no fold.
+
+    A protocol, not a service — the periods endpoint has no business logic to
+    justify a service layer, but the router cannot import the concrete
+    repository (charter D26 layering). This exposes the one method the router
+    calls and keeps the repo/model wiring in the deps layer.
+    """
+
+    def periods(self) -> list[MatchupPeriod]: ...

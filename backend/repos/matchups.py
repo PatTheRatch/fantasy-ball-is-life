@@ -82,6 +82,20 @@ class LeagueSeasonRepository(LeagueSeasonScopedRepository):
             )
         )
 
+    def periods(self) -> list[MatchupPeriod]:
+        """Every period in the season, ordinal-ordered — including the ones not
+        yet played.
+
+        The reader needs the season's actual shape (a half-finished season must
+        not look complete). Which periods are *selectable* is a UI decision the
+        caller makes from ``status``; this returns them all.
+        """
+        return list(
+            self.session.scalars(
+                self.scoped_select(MatchupPeriod).order_by(MatchupPeriod.ordinal)
+            )
+        )
+
     def teams(self) -> list[FantasyTeamSeason]:
         """All teams in a season, for name/abbreviation enrichment on read."""
         return list(self.session.scalars(self.scoped_select(FantasyTeamSeason)))
