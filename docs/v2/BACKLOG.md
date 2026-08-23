@@ -177,6 +177,20 @@ wait.
 The demo path is done; remaining hardening is H-05b/c, H-06, H-08, H-09,
 H-10, and open question #6 still owes its own S1-03-shaped probe.
 
+- [ ] **D-04 · Local runbook — make it actually runnable** — **NEXT** — depends on D-03
+  The demo path is code-complete and **nobody has ever run this app outside
+  CI**. Four gaps found by survey: the V2 Supabase auth wiring has never been
+  done (`SUPABASE_JWT_ISSUER` / `_AUDIENCE` / `SUPABASE_JWKS_URL` appear
+  nowhere but `settings.py` — V1's DEPLOY.md documents a project under
+  different names); `.env.example` omits all three, so the backend cannot
+  start; `CONTRIBUTING.md`'s run command points at a `backend/api/main.py`
+  that does not exist (it is `app.py`, factory-only); and there is no local
+  Postgres story. Deliver `docs/v2/RUNBOOK.md` **written by doing it**, fix
+  those three defects, and report anything larger rather than absorbing it.
+  **No auth weakening** — if a real token needs a decision only Patrick can
+  make, stop and say so.
+  Scoped: [`docs/tickets/D-04-local-runbook.md`](../tickets/D-04-local-runbook.md).
+
 ---
 
 ## Slice 1 hardening — from the red-team triage
@@ -240,7 +254,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   for an availability bug. Migration applies and rolls back; four test seeds
   were fixed (not weakened) to seed finalized_at.
 
-- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — **NEXT**
+- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — *waits on D-04*
   `matchups` carries four independent FKs with nothing tying the period and
   both team-seasons to the claimed `league_season_id`, so one row can span
   three leagues with every FK valid. `fantasy_team_seasons` has the same gap
@@ -336,4 +350,6 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: D-03 merged — demo path complete.*
+*Claude updates this on approval. Last change: D-04 added and scoped — the
+demo path is code-complete but unrunnable in practice, and that gap outranks
+resuming hardening. H-05b waits.*
