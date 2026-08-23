@@ -166,14 +166,20 @@ wait.
   *Charter: D10, D20, D28.*
 
 - [ ] **D-03 · Sync CLI + claim** — **NEXT** — depends on D-01, D-02
-  `scripts/sync_league.py` taking a league id, season year and
-  `espn_s2`/`SWID`: bootstrap → finalize → matchup sync against a local
-  Postgres, plus an explicit `--claim-team` step creating the
-  `manager_user_links` row that makes a real user a member (the auditable act
-  D-01 deliberately leaves undone). After this, `npm run dev` + a dev token
-  shows a real league.
-  **Doubles as the open question #6 live check** — running the real pipeline
-  against a real league is exactly that investigation.
+  `scripts/sync_league.py`: bootstrap → finalize → claim. (D-02 folded matchup
+  persistence into `finalize_period`, so there is no separate sync step.)
+  Credentials come from the environment only, **never `argv`** — arguments are
+  visible in `ps`, shell history and CI logs. The `--claim-team` step creates
+  the `manager_user_links` row that makes a real user a member; **the CLI must
+  find an existing user, never create one**, because `users.auth_subject` is
+  NOT NULL UNIQUE and an invented one would silently fork a second user at
+  first real sign-in. Prints the `league_season_id` URL — S1-11d is not built,
+  so this is the only way to reach the league.
+  **Correction:** an earlier note here claimed this doubles as the open
+  question 6 live check. It does not — #6 concerns `rosterForCurrentScoringPeriod`
+  and `mTransactions2`, and this CLI touches neither. That probe is still owed,
+  as its own S1-03-shaped bite.
+  Scoped: [`docs/tickets/D-03-sync-cli-and-claim.md`](../tickets/D-03-sync-cli-and-claim.md).
 
 ---
 
@@ -334,4 +340,6 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: D-02 merged.*
+*Claude updates this on approval. Last change: D-03 scoped and assigned — the
+last bite before a real league is on screen. Also corrected the claim that it
+answers open question 6; that probe is still owed separately.*
