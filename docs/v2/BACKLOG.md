@@ -249,7 +249,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   for an availability bug. Migration applies and rolls back; four test seeds
   were fixed (not weakened) to seed finalized_at.
 
-- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — *waits on H-11*
+- [ ] **H-05b · Cross-league composite keys** — **NEXT** — depends on H-05a
   `matchups` carries four independent FKs with nothing tying the period and
   both team-seasons to the claimed `league_season_id`, so one row can span
   three leagues with every FK valid. `fantasy_team_seasons` has the same gap
@@ -266,24 +266,15 @@ H-01 and H-02 are correctness bugs in shipped code.
   references. Not a constraint that can simply be added, which is why it is
   carved out of H-05 rather than buried in it.
 
-- [ ] **H-11 · Wire Supabase auth end-to-end** — **NEXT** — found by D-04
-  **Decided (Patrick, 23 Aug): V2 reuses V1's existing Supabase project**
-  (ref in `docs/DEPLOY.md`), not a new one — so this wires against that
-  project, and its signing algorithm is a fact to read off it, not a choice.
-  create_app(keyset=…, session_factory=…) takes the JWKS and session as
-  injectable test params, but nothing loads the JWKS from SUPABASE_JWKS_URL or
-  builds the session from DATABASE_URL — so uvicorn --factory yields
-  jwks_keyset=None and every authenticated route 500s. Also: platform/auth.py
-  verifies RS256 only, but Supabase signs ES256 (P-256), so a real token 401s
-  even once the JWKS is wired. Add a real entry point (load JWKS + build
-  session) and ES256 support; no mock verifier / bypass / skip-JWKS-in-dev.
-  Two independent defects, both required for one successful request: no
-  production entry point, and a verifier that accepts only RS256. **The
-  algorithm must come from the trusted keyset, never the token header** —
-  taking `alg` from the header is the classic confusion attack. Allowlist is
-  RS256 + ES256; never HS256, never `none`. JWKS rotation is deliberately out
-  of scope and filed as a follow-up.
-  Scoped: [`docs/tickets/H-11-wire-supabase-auth.md`](../tickets/H-11-wire-supabase-auth.md).
+- [x] **H-11 · Wire Supabase auth end-to-end** — `e8e734f` — found by D-04
+  create_app() loads the JWKS from SUPABASE_JWKS_URL and builds the session
+  from DATABASE_URL by default (runbook's uvicorn --factory command unchanged);
+  load_from_env=False keeps the matrix test network-free; missing config or a
+  failed fetch fails fast at construction (typed JwksFetchError, 5s timeout).
+  The verifier accepts ES256 (P-256) + RS256, dispatching on the JWK's kty; the
+  algorithm comes from the trusted keyset, never the token header (HS256/none
+  rejected; confusion test included). RUNBOOK §6 is now working instructions.
+  JWKS rotation stays out of scope (follow-up: bounded refetch on UnknownKey).
 
 - [ ] **H-06 · Wire payload dedupe, or delete the claim**
   `find_by_hash` and `latest_for` have zero callers; `record_payload` always
@@ -364,5 +355,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-11 scoped — the last gap
-between the demo path and a logged-in page.*
+*Claude updates this on approval. Last change: H-11 merged — auth wired end-to-end; H-05b next.*
