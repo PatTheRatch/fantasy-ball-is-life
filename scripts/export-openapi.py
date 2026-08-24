@@ -9,8 +9,9 @@ Run from the repo root::
 
     python scripts/export-openapi.py
 
-``create_app()`` builds without a database or keyset (the route-policy matrix
-test relies on the same property), so this needs no environment.
+``create_app(load_from_env=False)`` builds without a database or keyset (the
+route-policy matrix test relies on the same property), so this needs no
+environment.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ OUT = REPO / "frontend" / "openapi.json"
 
 
 def main() -> None:
-    schema = create_app().openapi()
+    schema = create_app(load_from_env=False).openapi()
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n")
 

@@ -144,12 +144,12 @@ def _unmapped_policies(policy_map: dict[RoutePolicy, Any]) -> list[RoutePolicy]:
 
 
 def test_every_route_declares_a_policy() -> None:
-    app = create_app()
+    app = create_app(load_from_env=False)
     assert _undeclared_routes(app) == []
 
 
 def test_every_route_satisfies_its_policy() -> None:
-    app = create_app()
+    app = create_app(load_from_env=False)
     assert _unmet_routes(app) == []
 
 
