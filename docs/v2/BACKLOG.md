@@ -249,7 +249,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   for an availability bug. Migration applies and rolls back; four test seeds
   were fixed (not weakened) to seed finalized_at.
 
-- [ ] **H-05b · Cross-league composite keys** — **NEXT** — depends on H-05a
+- [ ] **H-05b · Cross-league composite keys** — depends on H-05a — *waits on H-11*
   `matchups` carries four independent FKs with nothing tying the period and
   both team-seasons to the claimed `league_season_id`, so one row can span
   three leagues with every FK valid. `fantasy_team_seasons` has the same gap
@@ -266,7 +266,10 @@ H-01 and H-02 are correctness bugs in shipped code.
   references. Not a constraint that can simply be added, which is why it is
   carved out of H-05 rather than buried in it.
 
-- [ ] **H-11 · Wire Supabase auth end-to-end** — found by D-04
+- [ ] **H-11 · Wire Supabase auth end-to-end** — **NEXT** — found by D-04
+  **Decided (Patrick, 23 Aug): V2 reuses V1's existing Supabase project**
+  (ref in `docs/DEPLOY.md`), not a new one — so this wires against that
+  project, and its signing algorithm is a fact to read off it, not a choice.
   create_app(keyset=…, session_factory=…) takes the JWKS and session as
   injectable test params, but nothing loads the JWKS from SUPABASE_JWKS_URL or
   builds the session from DATABASE_URL — so uvicorn --factory yields
@@ -354,5 +357,6 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: D-04 merged — app is runnable;
-auth wiring (H-11) filed as its own bite.*
+*Claude updates this on approval. Last change: H-11 promoted to NEXT ahead of
+H-05b and stamped with the Supabase decision (reuse V1's project). Nothing
+authenticated runs until it lands, so it outranks schema hardening.*
