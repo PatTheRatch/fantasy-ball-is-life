@@ -277,6 +277,13 @@ H-01 and H-02 are correctness bugs in shipped code.
   verifies RS256 only, but Supabase signs ES256 (P-256), so a real token 401s
   even once the JWKS is wired. Add a real entry point (load JWKS + build
   session) and ES256 support; no mock verifier / bypass / skip-JWKS-in-dev.
+  Two independent defects, both required for one successful request: no
+  production entry point, and a verifier that accepts only RS256. **The
+  algorithm must come from the trusted keyset, never the token header** —
+  taking `alg` from the header is the classic confusion attack. Allowlist is
+  RS256 + ES256; never HS256, never `none`. JWKS rotation is deliberately out
+  of scope and filed as a follow-up.
+  Scoped: [`docs/tickets/H-11-wire-supabase-auth.md`](../tickets/H-11-wire-supabase-auth.md).
 
 - [ ] **H-06 · Wire payload dedupe, or delete the claim**
   `find_by_hash` and `latest_for` have zero callers; `record_payload` always
@@ -357,6 +364,5 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-11 promoted to NEXT ahead of
-H-05b and stamped with the Supabase decision (reuse V1's project). Nothing
-authenticated runs until it lands, so it outranks schema hardening.*
+*Claude updates this on approval. Last change: H-11 scoped — the last gap
+between the demo path and a logged-in page.*
