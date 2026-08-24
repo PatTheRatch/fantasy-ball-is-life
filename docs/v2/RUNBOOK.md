@@ -2,8 +2,8 @@
 
 Written by actually running it on a clean checkout (2026-08-23). Every command
 below was executed; the "expected output" is what actually printed, not what the
-code looks like it should print. Where the app does not yet have a running path
-(auth), that is stated as a finding, not papered over.
+code looks like it should print. The two steps that need Patrick's credentials —
+a live Supabase sign-in and a live ESPN sync — are marked as such.
 
 ---
 
@@ -105,9 +105,16 @@ alembic current
 ## 5. Run the backend
 
 The app is a FastAPI **factory** — there is no `backend/api/main.py` and no
-module-level `app`, so uvicorn needs `--factory`:
+module-level `app`, so uvicorn needs `--factory`. Bare `create_app()` wires the
+JWKS keyset and the database session from the environment at startup, and fails
+fast if any setting is missing or the JWKS cannot be fetched:
 
 ```bash
+source .venv/bin/activate
+export DATABASE_URL="postgresql+psycopg://fcp:fcp@localhost:5432/fcp"
+export SUPABASE_JWT_ISSUER="https://<project-ref>.supabase.co/auth/v1"
+export SUPABASE_JWT_AUDIENCE="authenticated"
+export SUPABASE_JWKS_URL="https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json"
 uvicorn backend.api.app:create_app --factory --reload
 ```
 
@@ -118,42 +125,40 @@ curl localhost:8000/health
 # {"status":"ok"}
 ```
 
-`GET /health` works with no environment and no database — it is the smoke test
-that uvicorn reached the app.
+`GET /health` is the smoke test that uvicorn reached the app. If the backend
+exits at startup instead of listening, a `SUPABASE_*` value or `DATABASE_URL`
+is missing or wrong — see §6 and Troubleshooting.
 
 ---
 
-## 6. Auth — the part that is not wired yet (a finding, not a step to skip)
+## 6. Auth — configure Supabase and get a token
 
-The backend verifies JWTs end-to-end; there is no bypass and none is added here.
-But the path from a real Supabase token to a verified request **does not exist
-yet**, for two reasons, both out of scope for a runbook and both needing a code
-change:
+Bare `create_app()` wires the JWKS keyset and the DB session from the
+environment (see §5) and verifies JWTs end to end — no mock verifier, no bypass.
+The three Supabase settings:
 
-1. **Nothing wires the app.** `create_app(keyset=…, session_factory=…)` takes the
-   JWKS and the DB session as injectable parameters (so tests can build without
-   them), but no entry point loads the JWKS from `SUPABASE_JWKS_URL` or builds
-   the session from `DATABASE_URL` and passes them in. `uvicorn … --factory`
-   therefore produces an app with `jwks_keyset=None` and `session_factory=None`.
-   Verified: `GET /api/v1/me` with a bearer token returns **500**, not a clean
-   401/200.
+- `SUPABASE_JWT_ISSUER` — the `iss` claim on Supabase tokens, e.g.
+  `https://<project-ref>.supabase.co/auth/v1`.
+- `SUPABASE_JWT_AUDIENCE` — the `aud` claim, normally `authenticated`.
+- `SUPABASE_JWKS_URL` — where the backend fetches signing keys at startup, e.g.
+  `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`.
 
-2. **The verifier is RS256-only.** `backend/platform/auth.py` calls
-   `jwt.decode(…, algorithms=["RS256"])` via `RSAAlgorithm.from_jwk`. Supabase
-   Auth signs with **ES256 (P-256)** — so even once the JWKS is wired, a real
-   Supabase token will not verify until the verifier learns ES256.
+The verifier accepts **RS256** and **ES256** — Supabase signs ES256 (P-256). The
+signature algorithm is derived from the trusted keyset, never the token header,
+so a forged `HS256`/`none` header is rejected.
 
-The three settings `SUPABASE_JWT_ISSUER`, `SUPABASE_JWT_AUDIENCE` and
-`SUPABASE_JWKS_URL` (now in `.env.example`) are read by `settings.py` at
-request time, but they appear nowhere else in the repo — the wiring that
-consumes them is the missing piece.
+To authenticate, sign in to Supabase Auth for the project and take the access
+token, then set it as `VITE_DEV_TOKEN` (see §7). The first authenticated request
+creates the `users` row (get-or-create by `auth_subject`) — that is the row
+D-03's `--claim-email` needs to exist.
 
-**What this means for a developer today:** the read-only half of the app
-(`/health`) runs, but no authenticated or database-backed route works. Getting a
-real Supabase token — from `https://<project-ref>.supabase.co/auth/v1`, with the
-JWKS at `…/.well-known/jwks.json`, then attaching it as `VITE_DEV_TOKEN` — is a
-separate bite together with the two fixes above. This is reported, not absorbed:
-see the PR body for the full finding.
+**This sign-in step needs Patrick's Supabase account**, so I could not run it.
+The wiring itself is verified against a local fake JWKS: a bad token returns
+`401 {"detail":"invalid token"}`, never 500.
+
+Known limitation (out of scope): the keyset is loaded once at startup, so a
+Supabase signing-key rotation needs a process restart. Manual and rare, and
+there is no deployment yet.
 
 ---
 
@@ -165,11 +170,11 @@ npm install
 cp .env.example .env.local
 ```
 
-`frontend/.env.example` has three keys. For now only `VITE_DEV_TOKEN` matters
-(the dev auth shim reads it, or `localStorage["fcp.devToken"]`); leave
-`VITE_API_PROXY_TARGET=http://localhost:8000` as the default. A real token
-cannot be supplied until §6 is resolved — without one, the SPA still serves but
-every authenticated call fails with 401/500.
+`frontend/.env.example` has three keys. Set `VITE_DEV_TOKEN` to the Supabase
+access token from §6 (the dev auth shim reads it, or `localStorage["fcp.devToken"]`);
+leave `VITE_API_PROXY_TARGET=http://localhost:8000` as the default. Without a
+token the SPA still serves, but `/` shows "Could not load your profile" — every
+authenticated call returns 401 until the token is set.
 
 ```bash
 npm run dev
@@ -235,10 +240,14 @@ Failures actually hit while writing this document:
 Cause: the venv was created with `python3`, which is 3.11 here. Fix: recreate
 with `python3.12 -m venv .venv` and reinstall.
 
-**`GET /api/v1/me` returns 500, not 401, with a valid-looking token.**
-Cause: no keyset/session wiring (§6) — `jwks_keyset` is `None`. A missing
-`SUPABASE_JWT_ISSUER` also surfaces here as an unhandled `SettingsError`
-(500). Fix: none in the runbook; this is the §6 finding.
+**The backend exits at startup with `required setting SUPABASE_JWKS_URL is not set`** (or any of the four).
+Cause: bare `create_app()` fails fast on missing config. Fix: export
+`DATABASE_URL` and the three `SUPABASE_*` values before uvicorn (§5).
+
+**`GET /api/v1/me` returns 401 with a real-looking token.**
+Cause: the token's `iss`/`aud` don't match `SUPABASE_JWT_ISSUER` /
+`SUPABASE_JWT_AUDIENCE`, or the token is expired, or its `kid` is not in the
+JWKS (a stale keyset — restart the backend). A bad token is a clean 401, never a 500.
 
 **`alembic upgrade head` says `required setting DATABASE_URL is not set`.**
 Cause: `DATABASE_URL` is not exported in the shell running alembic. Fix:

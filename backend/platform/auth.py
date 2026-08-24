@@ -5,6 +5,12 @@ Verifies a Supabase-issued JWT entirely in-process: signature, ``iss``,
 caller), so verification never performs a network round trip — the reason we
 don't use ``PyJWKClient``, which fetches per call.
 
+Both Supabase signing key types are supported: ``RS256`` (RSA) and ``ES256``
+(P-256). The signature algorithm is derived from the *trusted JWK*, never from
+the token header — an attacker who sets ``alg: HS256`` and signs with the
+public key as an HMAC secret is rejected because the header is not consulted
+for the algorithm.
+
 Failures are typed (charter D28): ``ExpiredToken``, ``UnknownKey``, and
 ``InvalidToken`` for everything else — never a silent ``None``.
 """
@@ -12,16 +18,20 @@ Failures are typed (charter D28): ``ExpiredToken``, ``UnknownKey``, and
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import jwt
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from jwt import PyJWTError
-from jwt.algorithms import RSAAlgorithm
+from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 from jwt.exceptions import ExpiredSignatureError
 
 #: A keyset indexed by ``kid`` for O(1) lookup during verification.
 JwksKeyset = dict[str, dict[str, Any]]
+
+#: The only signature algorithms the verifier will accept. Derived from the
+#: trusted JWK, never from the token header. ``HS256`` and ``none`` are
+#: deliberately absent — they are the algorithm-confusion vector.
+ALLOWED_ALGORITHMS = frozenset({"RS256", "ES256"})
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,28 @@ def index_keyset(jwks: dict[str, Any]) -> JwksKeyset:
     return {key["kid"]: key for key in jwks.get("keys", [])}
 
 
+def _algorithm_for(jwk: dict[str, Any]) -> str:
+    """Return the one permitted signature algorithm for a trusted JWK.
+
+    The algorithm is derived from the JWK alone — its ``alg`` if present,
+    otherwise its key type — and validated against the allowlist. It is never
+    read from the token header, which is untrusted input (the classic
+    algorithm-confusion attack: a forged ``alg: HS256`` header, signed with the
+    public key as the HMAC secret).
+    """
+    alg = jwk.get("alg")
+    if alg is not None:
+        if not isinstance(alg, str) or alg not in ALLOWED_ALGORITHMS:
+            raise InvalidToken(f"unsupported alg {alg!r}")
+        return alg
+    kty = jwk.get("kty")
+    if kty == "RSA":
+        return "RS256"
+    if kty == "EC":
+        return "ES256"
+    raise InvalidToken(f"unsupported kty {kty!r}")
+
+
 def verify_token(
     token: str,
     keyset: JwksKeyset,
@@ -71,20 +103,28 @@ def verify_token(
     if jwk is None:
         raise UnknownKey(f"no key for kid={kid!r}")
 
+    # The permitted algorithm is derived from the trusted JWK, never the token
+    # header. Passed as a single-element list so PyJWT rejects any header whose
+    # ``alg`` does not match the key's algorithm.
+    algorithm = _algorithm_for(jwk)
+
     try:
-        key = RSAAlgorithm.from_jwk(jwk)
+        # A public JWK yields a public key; the union includes the private-key
+        # case only for JWKs that carry a private component, which a keyset
+        # never does. ``Any`` stands in for "RSAPublicKey | EllipticCurvePublicKey".
+        key: Any = (
+            RSAAlgorithm.from_jwk(jwk)
+            if algorithm == "RS256"
+            else ECAlgorithm.from_jwk(jwk)
+        )
     except PyJWTError as exc:
         raise InvalidToken("unusable signing key") from exc
-
-    # A public JWK yields a public key; the union includes the private-key case
-    # only for JWKs that carry a private component, which a keyset never does.
-    public_key = cast("RSAPublicKey", key)
 
     try:
         claims = jwt.decode(
             token,
-            public_key,
-            algorithms=["RS256"],
+            key,
+            algorithms=[algorithm],
             issuer=issuer,
             audience=audience,
             options={"require": ["exp", "iss", "aud", "sub"]},
