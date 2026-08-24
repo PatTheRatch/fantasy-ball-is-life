@@ -66,6 +66,24 @@ thing to get wrong. This is a local-only database, not a production one.
 If a Postgres is already listening on `:5432`, stop it first or the compose
 service will fail to bind the port.
 
+### Coming from V1's `.env`? Two traps
+
+**Do not point `DATABASE_URL` at the Supabase Postgres.** It is tempting —
+"closer to production" — and it would run V2's migrations against the database
+V1 serves live traffic from. V1 already has a `public.leagues` table and so does
+V2's `0003_fantasy_core`, so `alembic upgrade head` collides on a production
+table. V2 starts with an empty database by design (charter D25); keep it local.
+
+**The ESPN variables were renamed.** V1's `.env` has `ESPN_SWID`, `ESPN_S2` and
+`ESPN_LEAGUE_ID`; the V2 CLI reads `FCP_ESPN_SWID`, `FCP_ESPN_ESPN_S2` and
+`FCP_ESPN_LEAGUE_ID` (the doubled `ESPN` is not a typo — the prefix is `FCP_ESPN_`
+and the variable is `ESPN_S2`). Copy the values across under the new names;
+V2 reads none of the V1 names.
+
+The three `SUPABASE_JWT_ISSUER` / `SUPABASE_JWT_AUDIENCE` / `SUPABASE_JWKS_URL`
+values are all derived from V1's existing `SUPABASE_URL` and are not secrets —
+issuer, audience and the JWKS endpoint are public for any Supabase project.
+
 ---
 
 ## 4. Migrations
