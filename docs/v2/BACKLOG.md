@@ -186,6 +186,35 @@ H-10, and open question #6 still owes its own S1-03-shaped probe.
   fake adapter. Surfaced two auth findings (no JWKS/session wiring; RS256-only
   vs Supabase ES256) — see the new item below.
 
+## First-run blockers — found running it for real
+
+Confirmed against the code, not reported second-hand.
+
+- [ ] **D-05 · Nothing seeds `nba_seasons`**
+  `league_bootstrap.py:197` raises `BootstrapError("no nba_seasons row for
+  season_year …")` and **no migration ever creates one** — `0004` seeds
+  categories, nothing seeds seasons. So the CLI fails on its first real run.
+  This is a missing producer of exactly the shape D-02 fixed for finality, and
+  it is a gap in D-01's scope (mine, not Aisha's). Charter D14 says FCP owns
+  canonical NBA seasons; decide whether they are seeded by migration, derived
+  from the provider's pro schedule, or created by the bootstrap itself.
+  **Blocks the demo.**
+
+- [ ] **D-06 · There is no login flow, and tokens expire**
+  S1-11a deferred "the full Supabase auth flow" to a later bite and that bite
+  was never cut. Signing in currently means: curl Supabase Auth, copy the
+  access token, `localStorage.setItem("fcp.devToken", …)`, refresh. The token
+  is ES256-signed with ~1h expiry, so **this is not one-time setup — it recurs
+  every hour**. Fine for a scripted test, not fine for the product owner
+  looking at his own league. Minimum viable: a token-mint helper. Proper: the
+  real sign-in flow.
+  *Not a bug — the auth gate works. A missing feature on the critical path.*
+
+- [ ] **D-07 · ESPN scoreboard mapping** — *Aisha's finding, unverified here*
+  Flagged during the first real run; needs her description before scoping.
+
+---
+
 ---
 
 ## Slice 1 hardening — from the red-team triage
