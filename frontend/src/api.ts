@@ -427,11 +427,17 @@ export async function getScoreboardCurrent(
   slug: string,
   scoringPeriod?: number,
 ): Promise<JsonRecord[]> {
-  const { data } = await client.get<JsonRecord[]>(leaguePath(slug, '/scoreboard/current'), {
-    params:
-      scoringPeriod != null ? { scoring_period: scoringPeriod } : undefined,
-  })
-  return data
+  // Snapshot-backed endpoint: returns the `{ data, fetched_at }` envelope,
+  // same as /standings and /settings. Unwrap it — the consumer
+  // (fetchCurrentMatchupGroups → enrichCurrentRows) maps over the rows.
+  const { data } = await client.get<{ data: JsonRecord[]; fetched_at: string | null }>(
+    leaguePath(slug, '/scoreboard/current'),
+    {
+      params:
+        scoringPeriod != null ? { scoring_period: scoringPeriod } : undefined,
+    },
+  )
+  return data.data ?? []
 }
 
 export async function getRostersCurrent(slug: string, params?: {
