@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Literal, Optional
 import pandas as pd
 from backend.draft import auction_sim as auction_mc
 from fastapi import APIRouter, HTTPException
+
+from backend.projections.errors import MissingProjectionsError
 from pydantic import BaseModel, Field
 
 from backend.api.deps import _df_records
@@ -241,6 +243,8 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
                 continue
             price = t.expected_price if t.expected_price is not None else float(match["$"].iloc[0])
             resolved_targets.append((t.player_key, price))
+    except MissingProjectionsError:
+        raise  # fatal to the whole draft surface — never degrade silently
     except Exception:
         skipped_target_keys.extend(t.player_key for t in candidate_targets)
 
@@ -311,6 +315,8 @@ def _build_pool_context(picks: List[DraftPickEntry], params: DraftPoolParams):
                 # objective math); re-negate for a normal positive display value.
                 "to": round(float(-row["TO"]), 1),
             }
+    except MissingProjectionsError:
+        raise  # fatal to the whole draft surface — never degrade silently
     except Exception:
         pass  # value board / roster enrichment degrades to bare keys rather than failing the whole request
 
@@ -432,6 +438,11 @@ def draft_auction_sim(body: AuctionSimulationBody) -> dict:
             star_exponent=body.star_exponent,
             return_sales=body.return_sales,
         )
+    except MissingProjectionsError:
+        # Missing projections is a fixable configuration state, not a server
+        # fault — let it reach the app-wide handler (422) instead of being
+        # flattened into a 500 here.
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -479,6 +490,11 @@ def draft_plans(body: DraftPlansBody) -> dict:
 
     try:
         plans = generate_portfolio(configs, solve_fn, limit=body.n_plans)
+    except MissingProjectionsError:
+        # Missing projections is a fixable configuration state, not a server
+        # fault — let it reach the app-wide handler (422) instead of being
+        # flattened into a 500 here.
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -517,6 +533,11 @@ def draft_plans_custom(body: CustomPlanBody) -> dict:
 
     try:
         roster = solve_fn(cfg)
+    except MissingProjectionsError:
+        # Missing projections is a fixable configuration state, not a server
+        # fault — let it reach the app-wide handler (422) instead of being
+        # flattened into a 500 here.
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -554,6 +575,11 @@ def draft_pick(body: DraftPickBody) -> dict:
 
     try:
         updated = apply_pick(prior, body.new_pick.player_key, solve_fn)
+    except MissingProjectionsError:
+        # Missing projections is a fixable configuration state, not a server
+        # fault — let it reach the app-wide handler (422) instead of being
+        # flattened into a 500 here.
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -648,6 +674,11 @@ def draft_relax(body: DraftRelaxBody) -> dict:
 
     try:
         proposal = relax_plan(base.config, solve_with_score_fn)
+    except MissingProjectionsError:
+        # Missing projections is a fixable configuration state, not a server
+        # fault — let it reach the app-wide handler (422) instead of being
+        # flattened into a 500 here.
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -687,6 +718,8 @@ def draft_players_search(q: str = "") -> List[dict]:
         return []
     try:
         df = OptimizeLineup(value_col="Value").player_data_df
+    except MissingProjectionsError:
+        raise  # an empty search box would look like "no such player"
     except Exception:
         return []
     matches = df[df["Name"].str.lower().str.contains(q, na=False)]

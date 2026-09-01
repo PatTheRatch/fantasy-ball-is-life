@@ -1,4 +1,5 @@
 import string
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -19,6 +20,10 @@ from backend.config import (
 from backend.draft import targets_mc as mc
 from backend.draft import values as player_values
 from backend.league.credentials import _require_context, get_league_context, LeagueContext
+from backend.projections.errors import (
+    MissingProjectionsError,
+    missing_projections_message,
+)
 
 shutup.please()
 
@@ -176,6 +181,12 @@ class OptimizeLineup:
         if self._projections_df is not None:
             stats_df = self._projections_df.copy()
         else:
+            # No active season ProjectionSet and no legacy workbook on disk:
+            # fail with an actionable message instead of letting read_excel
+            # raise FileNotFoundError (which the routers surfaced as a 500
+            # carrying the server's absolute path).
+            if not Path(BBM_PROJECTIONS_PATH).exists():
+                raise MissingProjectionsError(missing_projections_message())
             stats_df = pd.read_excel(BBM_PROJECTIONS_PATH)
         stat_columns = {
             'fg%': 'FG%', 'ft%': 'FT%', 'p/g': 'PTS', '3/g': '3PM',

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # Nothing configures the root logger by default -- plain `logging.info(...)`
 # calls elsewhere in the app (e.g. recap assembly phase timing) were silently
@@ -53,8 +54,18 @@ except Exception:
 from backend import config
 from backend.api.middleware_slug import LeagueSlugMiddleware
 from backend.league.cache import ESPNRequestCacheMiddleware
+from backend.projections.errors import MissingProjectionsError
 
 app = FastAPI(title="Full Court Press API", version="0.1.0")
+
+
+# A missing season-projection source is a configuration state the user can
+# fix, not a server fault. Handled app-wide so every consumer (draft plans,
+# pick, relax, triage, auction-sim, optimizer) reports it identically —
+# several of those routes only have a generic `except Exception` → 500.
+@app.exception_handler(MissingProjectionsError)
+async def _missing_projections_handler(_request: Request, exc: MissingProjectionsError):
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 # P-4b: resolve slug → LeagueContext BEFORE any handler runs.
 # Starlette add_middleware is LIFO — this runs as the innermost layer (after
