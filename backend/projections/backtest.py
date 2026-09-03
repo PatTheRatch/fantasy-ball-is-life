@@ -168,8 +168,12 @@ def evaluate(
     ft_errors = (ft_pct_pred - ft_pct_actual).abs()
     mae["ft_pct"] = _weighted_mae(ft_errors, merged["fta_actual"])
 
-    # Build per-player error DataFrame for inspection
-    errors_df = merged[["person_id", "gp"]].copy()
+    # Build per-player error DataFrame for inspection.
+    # A model that reports its own projected games collides with the actuals'
+    # `gp` in the merge above, suffixing both. Prefer the actual either way —
+    # this frame describes what really happened, not what was predicted.
+    gp_col = "gp" if "gp" in merged.columns else "gp_actual"
+    errors_df = merged[["person_id", gp_col]].copy().rename(columns={gp_col: "gp"})
     for cat in _COUNT_CATS:
         col = _CAT_MAP[cat]
         errors_df[f"{cat}_err"] = (merged[f"{col}_pred"] - merged[f"{col}_actual"]).abs()
