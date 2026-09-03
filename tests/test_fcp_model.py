@@ -20,6 +20,7 @@ from backend.projections.fcp_model import (
     PlayerAssumption,
     age_factor,
     fit_age_curve,
+    project_games,
     project_minutes,
     project_season,
     shrink_rates,
@@ -199,34 +200,98 @@ class TestAgeCurve:
 # ---------------------------------------------------------------------------
 
 class TestTeamCoherence:
+    """The budget constrains availability-weighted load, Σ(mpg × gp/82), not
+    raw Σ(mpg). Asserting on the raw sum is what hid a 3x league-wide
+    under-projection: two players averaging 30 MPG in disjoint halves of a
+    season sum to 60 without ever sharing the floor."""
+
+    @staticmethod
+    def _load(mpg: pd.Series, games: pd.Series) -> float:
+        return float((mpg * games / GAMES_IN_SEASON).sum())
+
     def test_no_team_exceeds_the_minutes_budget(self):
         """'Not a rotation, a clown car': eight 40-MPG teammates get scaled."""
-        rows = [season_row(i, 2024, mpg=40.0, team="LAL") for i in range(1, 9)]
+        rows = [season_row(i, 2024, mpg=40.0, gp=82, team="LAL") for i in range(1, 9)]
         rates = weighted_per_minute_rates(frame(rows))
-        mpg = project_minutes(rates)
-        assert mpg.sum() <= TEAM_MINUTES_PER_GAME + 1e-6
+        games = project_games(rates, FALLBACK_AGE_CURVE)
+        mpg = project_minutes(rates, games)
+        assert self._load(mpg, games) <= TEAM_MINUTES_PER_GAME + 1e-6
         # Scaled proportionally, so equals stay equal.
         assert mpg.nunique() == 1
 
     def test_thin_roster_is_not_inflated(self):
         """Under budget is left alone — don't invent minutes nobody plays."""
         rows = [season_row(i, 2024, mpg=20.0, team="SAS") for i in range(1, 4)]
-        mpg = project_minutes(weighted_per_minute_rates(frame(rows)))
+        rates = weighted_per_minute_rates(frame(rows))
+        games = project_games(rates, FALLBACK_AGE_CURVE)
+        mpg = project_minutes(rates, games)
         assert mpg.sum() == pytest.approx(60.0, rel=1e-6)
 
+    def test_a_full_rotation_is_not_scaled_down(self):
+        """The regression guard for the 3x bug: a realistic 15-man roster
+        whose availability-weighted load sits under 240 must come through
+        untouched, even though its raw MPG sum (300) far exceeds it."""
+        rows = [season_row(i, 2024, mpg=20.0, gp=60, team="MIA") for i in range(1, 16)]
+        rates = weighted_per_minute_rates(frame(rows))
+        games = project_games(rates, FALLBACK_AGE_CURVE)
+        mpg = project_minutes(rates, games)
+        assert mpg.sum() == pytest.approx(300.0, rel=1e-6), (
+            "a plausible roster was scaled down by the raw-sum budget"
+        )
+        assert self._load(mpg, games) < TEAM_MINUTES_PER_GAME
+
     def test_each_team_is_budgeted_independently(self):
-        rows = [season_row(i, 2024, mpg=40.0, team="LAL") for i in range(1, 9)]
+        rows = [season_row(i, 2024, mpg=40.0, gp=82, team="LAL") for i in range(1, 9)]
         rows += [season_row(i, 2024, mpg=15.0, team="SAS") for i in range(9, 12)]
         rates = weighted_per_minute_rates(frame(rows))
-        mpg = project_minutes(rates)
-        by_team = mpg.groupby(rates["team"]).sum()
-        assert by_team["LAL"] <= TEAM_MINUTES_PER_GAME + 1e-6
-        assert by_team["SAS"] == pytest.approx(45.0, rel=1e-6)
+        games = project_games(rates, FALLBACK_AGE_CURVE)
+        mpg = project_minutes(rates, games)
+        load = (mpg * games / GAMES_IN_SEASON).groupby(rates["team"]).sum()
+        assert load["LAL"] <= TEAM_MINUTES_PER_GAME + 1e-6
+        assert mpg.groupby(rates["team"]).sum()["SAS"] == pytest.approx(45.0, rel=1e-6)
 
     def test_projection_respects_the_cap_end_to_end(self):
-        rows = [season_row(i, 2024, mpg=40.0, team="LAL") for i in range(1, 9)]
-        run = project_season(frame(rows), 2025)
-        assert run.projections["projected_mpg"].sum() <= TEAM_MINUTES_PER_GAME + 1e-6
+        rows = [season_row(i, 2024, mpg=40.0, gp=82, team="LAL") for i in range(1, 9)]
+        proj = project_season(frame(rows), 2025).projections
+        load = (proj["projected_mpg"] * proj["projected_gp"] / GAMES_IN_SEASON).sum()
+        assert load <= TEAM_MINUTES_PER_GAME + 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Roster lookback — long-retired players must not be projected or consume
+# their old team's minutes budget
+# ---------------------------------------------------------------------------
+
+class TestRosterLookback:
+    def test_long_retired_players_are_not_projected(self):
+        hist = frame(
+            [season_row(1, 2024, team="LAL")]                       # active
+            + [season_row(9, 2015, team="LAL")]                     # retired 2015
+        )
+        proj = project_season(hist, 2025).projections
+        assert set(proj["person_id"]) == {1}
+
+    def test_retirees_do_not_consume_the_budget(self):
+        """The bug Aisha caught: 16 seasons of history put ~60 players on
+        every team instead of ~19, crushing everyone's minutes."""
+        active = [season_row(i, 2024, mpg=30.0, gp=82, team="LAL") for i in range(1, 9)]
+        retired = [
+            season_row(100 + i, 2010 + (i % 5), mpg=30.0, gp=82, team="LAL")
+            for i in range(40)
+        ]
+        proj = project_season(frame(active + retired), 2025).projections
+        assert len(proj) == 8, "retired players leaked into the projection"
+        # Eight 30-MPG players at full availability = 240 exactly, so the
+        # budget binds but must not crush them toward the bench.
+        assert proj["projected_mpg"].min() > 25.0, (
+            f"active players were scaled down by retirees "
+            f"(min {proj['projected_mpg'].min():.1f} mpg)"
+        )
+
+    def test_lookback_can_be_disabled(self):
+        hist = frame([season_row(1, 2024), season_row(9, 2015)])
+        proj = project_season(hist, 2025, roster_lookback=None).projections
+        assert set(proj["person_id"]) == {1, 9}
 
 
 # ---------------------------------------------------------------------------

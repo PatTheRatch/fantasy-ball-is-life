@@ -63,6 +63,12 @@ TEAM_MINUTES_PER_GAME: float = 240.0
 #: A full NBA season. Used as the ceiling on projected games played.
 GAMES_IN_SEASON: int = 82
 
+#: How recently a player must have appeared to be projected at all. 1 means
+#: "played last season". Long-retired players must not receive projections
+#: or consume their old team's minutes budget — with 16 seasons of history
+#: that inflates a roster from ~19 players to ~60.
+ROSTER_LOOKBACK_SEASONS: int = 1
+
 #: Counting stats carried per-minute through the model. Percentages are NOT
 #: here — they are derived from makes/attempts at the end (spec §3.5).
 RATE_STATS: tuple[str, ...] = (
@@ -335,15 +341,25 @@ def age_factor(age: Optional[float], curve: Mapping[int, float]) -> float:
 
 def project_minutes(
     rates: pd.DataFrame,
+    games: pd.Series,
     *,
     assumptions: Optional[Mapping[int, PlayerAssumption]] = None,
     team_minutes_cap: float = TEAM_MINUTES_PER_GAME,
 ) -> pd.Series:
     """Projected MPG per player, capped so team totals stay physical.
 
-    Starts from the player's recent MPG, applies any manual assumption, then
-    enforces team coherence: if a team's projected minutes exceed the budget
-    (5 on the floor × 48), every player on it is scaled down proportionally.
+    Team coherence is **availability-weighted**, which is the only version
+    that is physically meaningful. A team plays 240 minutes per game, so
+    over a season ``Σ(mpg_i × gp_i) = 240 × 82`` — that is, the budget
+    constrains ``Σ(mpg_i × gp_i / 82)``, not ``Σ(mpg_i)``.
+
+    The distinction is not academic. Summing raw MPG across a season's
+    roster legitimately exceeds 240: two players can each average 30 MPG in
+    disjoint halves of a season and never once share the floor. Capping the
+    raw sum therefore punishes every team with roster churn, scaling real
+    rotation players down toward the bench. An earlier version of this
+    function did exactly that and under-projected minutes ~3x league-wide.
+
     Teams under the budget are left alone — a thin roster is a real thing,
     and inflating it would invent minutes nobody plays.
     """
@@ -362,10 +378,20 @@ def project_minutes(
     if "team" not in rates.columns:
         return mpg
 
-    team_totals = mpg.groupby(rates["team"]).transform("sum")
-    over = team_totals > team_minutes_cap
+    # Share of a team's games each player is expected to be available for.
+    availability = (
+        pd.to_numeric(games, errors="coerce")
+        .reindex(mpg.index)
+        .fillna(0.0)
+        .clip(lower=0.0, upper=GAMES_IN_SEASON)
+        / GAMES_IN_SEASON
+    )
+    load = mpg * availability
+    team_load = load.groupby(rates["team"]).transform("sum")
+
+    over = team_load > team_minutes_cap
     scale = pd.Series(1.0, index=mpg.index)
-    scale[over] = team_minutes_cap / team_totals[over]
+    scale[over] = team_minutes_cap / team_load[over]
     return mpg * scale
 
 
@@ -421,12 +447,18 @@ def project_season(
     age_curve: Optional[Mapping[int, float]] = None,
     assumptions: Optional[Iterable[PlayerAssumption]] = None,
     team_minutes_cap: float = TEAM_MINUTES_PER_GAME,
+    roster_lookback: Optional[int] = ROSTER_LOOKBACK_SEASONS,
 ) -> ProjectionRun:
     """Project ``target_season`` from seasons strictly before it.
 
     Only rows with ``season < target_season`` are used — the guard is here
     rather than left to the caller because leaking the target season into
     its own prediction would silently invalidate every backtest.
+
+    ``roster_lookback`` restricts the pool to players who appeared within
+    that many seasons of the target, so long-retired players neither receive
+    projections nor consume their old team's minutes budget. Pass ``None``
+    to project every player with any history.
 
     The returned frame matches ``backtest.evaluate``'s ``predictions``
     contract: ``person_id`` plus per-game ``pts, reb, ast, stl, blk, tpm,
@@ -438,8 +470,21 @@ def project_season(
             age_curve={}, season_weights=tuple(weights),
         )
 
-    prior = history[pd.to_numeric(history["season"], errors="coerce") < target_season]
+    seasons = pd.to_numeric(history["season"], errors="coerce")
+    prior = history[seasons < target_season]
     n_players_total = history["person_id"].nunique()
+
+    # Only project players who are plausibly still in the league. Without
+    # this, sixteen seasons of history means every team carries every player
+    # who ever finished a season there — ~60 "teammates" instead of ~19 —
+    # and the team-minutes budget is shared out among retirees.
+    if roster_lookback is not None and not prior.empty:
+        cutoff = target_season - roster_lookback
+        recent_ids = prior.loc[
+            pd.to_numeric(prior["season"], errors="coerce") >= cutoff, "person_id"
+        ].unique()
+        prior = prior[prior["person_id"].isin(recent_ids)]
+
     if prior.empty:
         return ProjectionRun(
             target_season=target_season, projections=pd.DataFrame(),
@@ -470,8 +515,12 @@ def project_season(
             if a is not None and a.usage_adjustment is not None:
                 usage_mult.at[idx] = float(a.usage_adjustment)
 
-    mpg = project_minutes(rates, assumptions=amap, team_minutes_cap=team_minutes_cap)
+    # Games first: the team-minutes budget is availability-weighted, so it
+    # needs each player's projected games before it can be applied.
     games = project_games(rates, curve, assumptions=amap)
+    mpg = project_minutes(
+        rates, games, assumptions=amap, team_minutes_cap=team_minutes_cap,
+    )
 
     out = pd.DataFrame({"person_id": rates["person_id"]})
     for stat in RATE_STATS:
