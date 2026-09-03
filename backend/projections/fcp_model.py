@@ -324,7 +324,11 @@ def fit_age_curve(
 
 
 def age_factor(age: Optional[float], curve: Mapping[int, float]) -> float:
-    """Look up the multiplicative age adjustment, clamped to the curve's range."""
+    """Look up the curve's LEVEL at an age, clamped to the curve's range.
+
+    This is the absolute position on the aging arc. It is almost never what
+    you want to multiply a projection by — see ``aging_delta``.
+    """
     if age is None or pd.isna(age):
         return 1.0
     a = int(round(float(age)))
@@ -333,6 +337,37 @@ def age_factor(age: Optional[float], curve: Mapping[int, float]) -> float:
     elif a > _MAX_AGE:
         a = _MAX_AGE
     return float(curve.get(a, 1.0))
+
+
+def aging_delta(
+    from_age: Optional[float],
+    to_age: Optional[float],
+    curve: Mapping[int, float],
+) -> float:
+    """How much a player's production changes moving between two ages.
+
+    ``curve[to] / curve[from]`` — the *change*, not the level.
+
+    This distinction is the whole ballgame. Observed rates were produced at
+    the player's observed age, so they already embody that age's effect.
+    Multiplying them by the curve's absolute level double-counts aging, and
+    because the curve is peak-normalized (every value <= 1.0) it applies a
+    downward haircut to literally every player in the league. An earlier
+    version did exactly that and cost ~4% league-wide in the synthetic
+    fixture, more on real data where the age distribution is wider.
+
+    A 30-year-old projected forward one year should be adjusted by
+    ``curve[31] / curve[30]`` (about 0.985), not by ``curve[30]`` (0.98
+    against a peak of 1.0, i.e. a 2% cut applied on top of rates that
+    already reflect being 30).
+    """
+    if from_age is None or pd.isna(from_age):
+        return 1.0
+    base = age_factor(from_age, curve)
+    if base <= 0:
+        return 1.0
+    target = age_factor(to_age if to_age is not None else from_age, curve)
+    return float(target / base)
 
 
 # ---------------------------------------------------------------------------
@@ -404,13 +439,18 @@ def project_games(
     curve: Mapping[int, float],
     *,
     assumptions: Optional[Mapping[int, PlayerAssumption]] = None,
+    target_season: Optional[int] = None,
 ) -> pd.Series:
     """Projected games played — availability history, nudged by age.
 
     Kept strictly separate from per-game ability (spec §3.4). Older players
-    miss more games, so the age factor is applied to availability as well,
-    but at a fraction of its strength: aging costs availability more slowly
-    than it costs per-minute production.
+    miss more games, so aging is applied to availability as well, but at
+    half strength: it costs availability more slowly than it costs
+    per-minute production.
+
+    Like the rate adjustment, this uses the aging *delta* rather than the
+    curve's level — the observed games already reflect the age they were
+    played at.
     """
     if rates.empty:
         return pd.Series(dtype="float64")
@@ -421,9 +461,21 @@ def project_games(
 
     ages = rates.get("last_age")
     if ages is not None:
-        # Age enters availability at half strength.
-        factors = ages.map(lambda a: 1.0 - (1.0 - age_factor(a, curve)) * 0.5)
-        base = base * factors
+        if target_season is not None and "last_season" in rates.columns:
+            ahead = (
+                target_season - pd.to_numeric(rates["last_season"], errors="coerce")
+            ).fillna(1.0).clip(lower=0)
+        else:
+            ahead = pd.Series(1.0, index=rates.index)
+        # Age enters availability at half the strength of its rate effect.
+        deltas = pd.Series(
+            [
+                aging_delta(a, (a + n) if pd.notna(a) else a, curve)
+                for a, n in zip(ages, ahead)
+            ],
+            index=rates.index,
+        )
+        base = base * (1.0 - (1.0 - deltas) * 0.5)
 
     if assumptions:
         for idx, pid in rates["person_id"].items():
@@ -504,10 +556,25 @@ def project_season(
         )
     rates = shrink_rates(rates, shrinkage_minutes=shrinkage_minutes)
 
-    # Age applies to production per minute, and the assumption layer can
-    # scale usage on top of it.
-    age_mult = rates["last_age"].map(lambda a: age_factor(a, curve)) \
-        if "last_age" in rates.columns else pd.Series(1.0, index=rates.index)
+    # Age applies to production per minute as the CHANGE from the player's
+    # observed age to their age in the target season — never as the curve's
+    # absolute level, which would re-apply an effect the observed rates
+    # already contain. The assumption layer scales usage on top of it.
+    if "last_age" in rates.columns:
+        ages_ahead = (
+            (target_season - pd.to_numeric(rates["last_season"], errors="coerce"))
+            if "last_season" in rates.columns
+            else pd.Series(1.0, index=rates.index)
+        ).fillna(1.0).clip(lower=0)
+        age_mult = pd.Series(
+            [
+                aging_delta(a, (a + n) if pd.notna(a) else a, curve)
+                for a, n in zip(rates["last_age"], ages_ahead)
+            ],
+            index=rates.index,
+        )
+    else:
+        age_mult = pd.Series(1.0, index=rates.index)
     usage_mult = pd.Series(1.0, index=rates.index)
     if amap:
         for idx, pid in rates["person_id"].items():
@@ -517,7 +584,9 @@ def project_season(
 
     # Games first: the team-minutes budget is availability-weighted, so it
     # needs each player's projected games before it can be applied.
-    games = project_games(rates, curve, assumptions=amap)
+    games = project_games(
+        rates, curve, assumptions=amap, target_season=target_season,
+    )
     mpg = project_minutes(
         rates, games, assumptions=amap, team_minutes_cap=team_minutes_cap,
     )

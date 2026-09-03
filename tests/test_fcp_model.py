@@ -19,6 +19,7 @@ from backend.projections.fcp_model import (
     TEAM_MINUTES_PER_GAME,
     PlayerAssumption,
     age_factor,
+    aging_delta,
     fit_age_curve,
     project_games,
     project_minutes,
@@ -183,6 +184,33 @@ class TestAgeCurve:
                 rows.append(season_row(pid, season, age=age, pts=pts, mpg=32.0, gp=75))
         curve = fit_age_curve(frame(rows), min_pairs_per_age=5)
         assert max(curve.values()) == pytest.approx(1.0, rel=1e-9)
+
+    def test_aging_delta_is_a_change_not_a_level(self):
+        """The observed rates already embody the age they were produced at,
+        so the adjustment is curve[to]/curve[from] — never curve[from]."""
+        curve = FALLBACK_AGE_CURVE
+        # A peak-age player moving one year forward barely changes.
+        assert aging_delta(26, 27, curve) == pytest.approx(1.0, abs=1e-9)
+        # The level at that same age is also 1.0 here, but for a 35-year-old
+        # the two diverge sharply — that gap was a league-wide haircut.
+        assert age_factor(35, curve) == pytest.approx(0.87)
+        assert aging_delta(35, 36, curve) == pytest.approx(0.83 / 0.87)
+        assert aging_delta(35, 36, curve) > age_factor(35, curve)
+
+    def test_aging_delta_declines_for_older_players(self):
+        curve = FALLBACK_AGE_CURVE
+        assert aging_delta(34, 35, curve) < aging_delta(26, 27, curve)
+        # And a young player still improving gains.
+        assert aging_delta(21, 22, curve) > 1.0
+
+    def test_no_league_wide_haircut_at_peak_age(self):
+        """A league of peak-age players must not be scaled down at all —
+        the bug that cost ~4% across every player in the league."""
+        rows = [season_row(i, 2024, age=26, pts=20.0, mpg=32.0, gp=82, team=f"T{i%30}")
+                for i in range(1, 61)]
+        proj = project_season(frame(rows), 2025, age_curve=FALLBACK_AGE_CURVE).projections
+        # Same rates, one year of aging at the plateau: essentially unchanged.
+        assert proj["pts"].mean() == pytest.approx(20.0, rel=0.02)
 
     def test_aging_vet_declines(self):
         """Golden player: same rates, older age → lower projection."""

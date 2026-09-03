@@ -245,6 +245,45 @@ class TestBeatsNaiveOnSyntheticData:
             f"only won {wins}/{len(margins)} worlds: {[f'{m:+.2%}' for m in margins]}"
         )
 
+    def test_projections_are_unbiased_in_aggregate(self, world):
+        """The guard that would have caught all three shipped bugs at once.
+
+        Every one of them was a silent systematic scaling error — the team
+        budget over the historical pool (0.19x), the raw-MPG cap, and the
+        age curve applied as a level rather than a change (0.96x). Per-player
+        MAE cannot see a uniform scaling: it just degrades a little and the
+        model looks merely mediocre instead of visibly broken.
+
+        Comparing population means catches it immediately, and is the first
+        thing to check whenever the real backtest loses.
+        """
+        actuals = world[world["season"] == TARGET]
+        proj = project_season(world, TARGET).projections
+        m = proj.merge(
+            actuals[["person_id", "mpg", "gp", "pts", "reb", "ast"]],
+            on="person_id", suffixes=("_p", "_a"),
+        )
+        m = m[m["gp"] >= 20]
+        assert len(m) > 100
+
+        mpg_ratio = m["projected_mpg"].mean() / m["mpg"].mean()
+        assert 0.90 < mpg_ratio < 1.10, (
+            f"minutes are systematically off: projected/actual = {mpg_ratio:.3f}"
+        )
+
+        for stat in ("pts", "reb", "ast"):
+            ratio = m[f"{stat}_p"].mean() / m[f"{stat}_a"].mean()
+            assert 0.90 < ratio < 1.10, (
+                f"{stat} is systematically off: projected/actual = {ratio:.3f}"
+            )
+            # Isolate the per-minute term from the minutes term, so a failure
+            # says which half is wrong (this is how bug 3 was found).
+            rate_ratio = ratio / mpg_ratio
+            assert 0.92 < rate_ratio < 1.08, (
+                f"{stat} per-minute rate is off: {rate_ratio:.3f} "
+                f"(stat ratio {ratio:.3f} / mpg ratio {mpg_ratio:.3f})"
+            )
+
     def test_projections_are_physically_plausible(self, world):
         """Sanity: no negative production, no 60-minute players."""
         proj = project_season(world, TARGET).projections
