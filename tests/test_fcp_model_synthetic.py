@@ -94,7 +94,12 @@ def _build_world(seed: int = SEED) -> pd.DataFrame:
     career_len = np.clip(rng.normal(6, 3, size=N_PLAYERS), 1, len(SEASONS)).astype(int)
     # Role weight drives share of a team's minutes: a few starters, a long tail.
     role = np.clip(rng.lognormal(mean=np.log(1.0), sigma=0.6, size=N_PLAYERS), 0.15, 3.0)
-    team_of = np.array([f"T{p % N_TEAMS:02d}" for p in range(N_PLAYERS)])
+    # Rosters churn. Roughly a quarter of the league changes team each year,
+    # which matters because the model attributes a player to their LAST
+    # team: churn makes some projected rosters far too big and others too
+    # small. A fixture with fixed team assignment cannot see the resulting
+    # bias in any team-level constraint.
+    team_idx = rng.integers(0, N_TEAMS, size=N_PLAYERS)
 
     rows: list[dict] = []
     for s_idx, season in enumerate(SEASONS):
@@ -104,6 +109,13 @@ def _build_world(seed: int = SEED) -> pd.DataFrame:
         ]
         if not active:
             continue
+
+        # ~25% of active players change team each season.
+        movers = rng.random(N_PLAYERS) < 0.25
+        for p in active:
+            if movers[p] and s_idx > 0:
+                team_idx[p] = int(rng.integers(0, N_TEAMS))
+        team_of = np.array([f"T{team_idx[p]:02d}" for p in range(N_PLAYERS)])
 
         gp_of = {p: int(np.clip(rng.normal(66, 14), 5, 82)) for p in active}
 
