@@ -63,6 +63,26 @@ TEAM_MINUTES_PER_GAME: float = 240.0
 #: A full NBA season. Used as the ceiling on projected games played.
 GAMES_IN_SEASON: int = 82
 
+#: Headroom on the team-minutes budget before the cap intervenes.
+#:
+#: The budget is a guard against absurdity (the spec's "not a rotation, a
+#: clown car"), NOT a renormalizer. Roster attribution is too unreliable to
+#: renormalize on: a player is assigned to the team on their most recent
+#: season row, mid-season trades put a full season of minutes under one
+#: abbreviation, and next year's roster is unknown. Capping every team that
+#: nudges over 240 therefore shaves real rotation players for reasons that
+#: have nothing to do with their minutes — measured at ~8% league-wide on
+#: real data. With headroom, ordinary attribution noise passes through and
+#: only genuinely implausible rosters are corrected.
+TEAM_BUDGET_TOLERANCE: float = 0.25
+
+#: Team values that do not denote a real team and must never share a budget.
+#: nba_api reports traded players as "TOT" (season totals across teams), so
+#: without this every traded player in the league lands on one pseudo-team
+#: carrying full-season minutes — wildly "over budget" and scaled toward
+#: zero, which is the opposite of what the constraint is for.
+UNKNOWN_TEAMS: frozenset[str] = frozenset({"", "TOT", "TOTAL", "NAN", "NONE"})
+
 #: How recently a player must have appeared to be projected at all. 1 means
 #: "played last season". Long-retired players must not receive projections
 #: or consume their old team's minutes budget — with 16 seasons of history
@@ -380,8 +400,9 @@ def project_minutes(
     *,
     assumptions: Optional[Mapping[int, PlayerAssumption]] = None,
     team_minutes_cap: float = TEAM_MINUTES_PER_GAME,
+    team_budget_tolerance: float = TEAM_BUDGET_TOLERANCE,
 ) -> pd.Series:
-    """Projected MPG per player, capped so team totals stay physical.
+    """Projected MPG per player, guarded so team totals stay plausible.
 
     Team coherence is **availability-weighted**, which is the only version
     that is physically meaningful. A team plays 240 minutes per game, so
@@ -422,11 +443,24 @@ def project_minutes(
         / GAMES_IN_SEASON
     )
     load = mpg * availability
-    team_load = load.groupby(rates["team"]).transform("sum")
 
-    over = team_load > team_minutes_cap
+    teams = rates["team"].astype(str).str.strip().str.upper()
+    known = ~teams.isin(UNKNOWN_TEAMS)
+    if not known.any():
+        return mpg
+
+    team_load = load.where(known).groupby(teams).transform("sum")
+
+    # Soft ceiling: teams are only corrected once they exceed the budget by
+    # more than the tolerance, and are then brought back to that ceiling
+    # rather than to the budget itself. That keeps the correction continuous
+    # — a team a hair over the line is barely touched, while a genuinely
+    # impossible roster is pulled hard — instead of a cliff where crossing
+    # the threshold costs a fifth of everyone's minutes.
+    ceiling = team_minutes_cap * (1.0 + max(team_budget_tolerance, 0.0))
+    over = known & (team_load > ceiling)
     scale = pd.Series(1.0, index=mpg.index)
-    scale[over] = team_minutes_cap / team_load[over]
+    scale[over] = ceiling / team_load[over]
     return mpg * scale
 
 
@@ -499,6 +533,7 @@ def project_season(
     age_curve: Optional[Mapping[int, float]] = None,
     assumptions: Optional[Iterable[PlayerAssumption]] = None,
     team_minutes_cap: float = TEAM_MINUTES_PER_GAME,
+    team_budget_tolerance: float = TEAM_BUDGET_TOLERANCE,
     roster_lookback: Optional[int] = ROSTER_LOOKBACK_SEASONS,
 ) -> ProjectionRun:
     """Project ``target_season`` from seasons strictly before it.
@@ -589,6 +624,7 @@ def project_season(
     )
     mpg = project_minutes(
         rates, games, assumptions=amap, team_minutes_cap=team_minutes_cap,
+        team_budget_tolerance=team_budget_tolerance,
     )
 
     out = pd.DataFrame({"person_id": rates["person_id"]})

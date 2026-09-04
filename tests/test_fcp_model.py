@@ -16,6 +16,7 @@ from backend.projections.fcp_model import (
     DEFAULT_SEASON_WEIGHTS,
     FALLBACK_AGE_CURVE,
     GAMES_IN_SEASON,
+    TEAM_BUDGET_TOLERANCE,
     TEAM_MINUTES_PER_GAME,
     PlayerAssumption,
     age_factor,
@@ -237,13 +238,19 @@ class TestTeamCoherence:
     def _load(mpg: pd.Series, games: pd.Series) -> float:
         return float((mpg * games / GAMES_IN_SEASON).sum())
 
+    #: The guard fires at the budget plus its tolerance, not at the budget.
+    #: Correcting every team that nudges over 240 cost ~8% league-wide on
+    #: real data, because roster attribution is not reliable enough to
+    #: renormalize on. See TEAM_BUDGET_TOLERANCE.
+    CEILING = TEAM_MINUTES_PER_GAME * (1.0 + TEAM_BUDGET_TOLERANCE)
+
     def test_no_team_exceeds_the_minutes_budget(self):
         """'Not a rotation, a clown car': eight 40-MPG teammates get scaled."""
         rows = [season_row(i, 2024, mpg=40.0, gp=82, team="LAL") for i in range(1, 9)]
         rates = weighted_per_minute_rates(frame(rows))
         games = project_games(rates, FALLBACK_AGE_CURVE)
         mpg = project_minutes(rates, games)
-        assert self._load(mpg, games) <= TEAM_MINUTES_PER_GAME + 1e-6
+        assert self._load(mpg, games) <= self.CEILING + 1e-6
         # Scaled proportionally, so equals stay equal.
         assert mpg.nunique() == 1
 
@@ -275,14 +282,63 @@ class TestTeamCoherence:
         games = project_games(rates, FALLBACK_AGE_CURVE)
         mpg = project_minutes(rates, games)
         load = (mpg * games / GAMES_IN_SEASON).groupby(rates["team"]).sum()
-        assert load["LAL"] <= TEAM_MINUTES_PER_GAME + 1e-6
+        assert load["LAL"] <= self.CEILING + 1e-6
         assert mpg.groupby(rates["team"]).sum()["SAS"] == pytest.approx(45.0, rel=1e-6)
+
+    def test_ordinary_attribution_noise_does_not_shave_rotation_players(self):
+        """The round-4 bug, measured on real data as an 8% league-wide cut.
+
+        Roster attribution is unreliable — players are assigned to the team
+        on their last season row, trades put a whole season under one
+        abbreviation, and next year's roster is unknown. A team that lands
+        modestly over budget for those reasons must NOT have its real
+        rotation players scaled down; only implausible rosters get corrected.
+        """
+        # 13 players at 24 mpg, near-full availability: load ~= 296, i.e.
+        # ~23% over the 240 budget — squarely in ordinary-noise territory.
+        rows = [season_row(i, 2024, mpg=24.0, gp=78, team="DEN") for i in range(1, 14)]
+        rates = weighted_per_minute_rates(frame(rows))
+        games = project_games(rates, FALLBACK_AGE_CURVE)
+        mpg = project_minutes(rates, games)
+        assert mpg.mean() == pytest.approx(24.0, rel=0.01), (
+            f"rotation players were shaved to {mpg.mean():.2f} mpg by "
+            f"ordinary attribution noise"
+        )
+
+    def test_an_impossible_roster_is_still_corrected(self):
+        """The guard must still fire on a genuine clown car."""
+        rows = [season_row(i, 2024, mpg=40.0, gp=82, team="LAL") for i in range(1, 16)]
+        rates = weighted_per_minute_rates(frame(rows))
+        games = project_games(rates, FALLBACK_AGE_CURVE)
+        mpg = project_minutes(rates, games)
+        assert mpg.mean() < 30.0, "fifteen 40-MPG teammates went uncorrected"
+
+    def test_traded_players_are_not_crushed_by_the_TOT_pseudo_team(self):
+        """nba_api reports traded players as team "TOT" with full-season
+        stats. Without exempting it, every traded player in the league
+        shares one pseudo-team, blows the budget, and is scaled toward zero."""
+        traded = [season_row(i, 2024, mpg=30.0, gp=75, team="TOT") for i in range(1, 41)]
+        rates = weighted_per_minute_rates(frame(traded))
+        games = project_games(rates, FALLBACK_AGE_CURVE)
+        mpg = project_minutes(rates, games)
+        assert mpg.mean() == pytest.approx(30.0, rel=0.01), (
+            f"traded players were scaled to {mpg.mean():.2f} mpg by the "
+            f"'TOT' pseudo-team"
+        )
+
+    def test_unknown_team_players_do_not_drag_real_teams(self):
+        """A blank team must not pool with other blanks into a fake roster."""
+        rows = [season_row(i, 2024, mpg=30.0, gp=75, team="") for i in range(1, 31)]
+        rates = weighted_per_minute_rates(frame(rows))
+        games = project_games(rates, FALLBACK_AGE_CURVE)
+        mpg = project_minutes(rates, games)
+        assert mpg.mean() == pytest.approx(30.0, rel=0.01)
 
     def test_projection_respects_the_cap_end_to_end(self):
         rows = [season_row(i, 2024, mpg=40.0, gp=82, team="LAL") for i in range(1, 9)]
         proj = project_season(frame(rows), 2025).projections
         load = (proj["projected_mpg"] * proj["projected_gp"] / GAMES_IN_SEASON).sum()
-        assert load <= TEAM_MINUTES_PER_GAME + 1e-6
+        assert load <= self.CEILING + 1e-6
 
 
 # ---------------------------------------------------------------------------
