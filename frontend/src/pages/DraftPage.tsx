@@ -22,6 +22,7 @@ import {
   postDraftTriage,
 } from '../api'
 import { ProjectionBadge } from '../components/ProjectionBadge'
+import { ProjectionUpload } from '../draft/ProjectionUpload'
 import { Board } from '../draft/Board'
 import { ControlsSheet } from '../draft/ControlsSheet'
 import {
@@ -309,6 +310,8 @@ export function DraftPage() {
           <ProjectionBadge horizon="season" />
         </div>
       </div>
+
+      <ProjectionUpload />
 
       <SetupPanel
         params={params}
