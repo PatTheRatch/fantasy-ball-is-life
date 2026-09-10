@@ -77,11 +77,15 @@ def harness(tmp_path):
     regardless of which branch the developer is standing on — and, critically,
     they can never `git reset --hard` away someone's uncommitted work, which an
     earlier version of this fixture did.
+
+    The `claude` stub also records the full prompt it received, so tests can
+    assert on how review.sh builds the prompt (see TestPromptShape).
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh_log = tmp_path / "gh-calls.log"
     git_log = tmp_path / "git-calls.log"
+    prompt_log = tmp_path / "claude-prompt.log"
 
     # `gh` records its argv, and answers the few queries review.sh makes.
     _make_stub(
@@ -117,7 +121,19 @@ exit 0
     )
 
     def run(claude_body: str, *args: str) -> subprocess.CompletedProcess:
-        _make_stub(bin_dir / "claude", claude_body)
+        # The claude stub records the prompt (the argument after -p) so
+        # prompt-shape regressions are testable, without the surrounding flags.
+        _make_stub(
+            bin_dir / "claude",
+            f'''prompt=""
+seen_p=0
+for a in "$@"; do
+  if [[ "$seen_p" -eq 1 ]]; then prompt="$a"; break; fi
+  [[ "$a" == "-p" || "$a" == "--print" ]] && seen_p=1
+done
+printf '%s' "$prompt" > "{prompt_log}"
+{claude_body}''',
+        )
         env = dict(os.environ)
         env["PATH"] = f"{bin_dir}:{env['PATH']}"
         # review.sh exports HOME=/home/aisha for the real runner; point it
@@ -134,6 +150,7 @@ exit 0
 
     run.gh_log = gh_log  # type: ignore[attr-defined]
     run.git_log = git_log  # type: ignore[attr-defined]
+    run.prompt_log = prompt_log  # type: ignore[attr-defined]
     return run
 
 
@@ -174,6 +191,12 @@ class TestReviewerCrash:
         r = harness('echo "## Verdict"; echo "APPROVED"; exit 2', "--pr", "42")
         assert r.returncode == EXIT_INCOMPLETE, r.stdout[-2000:]
         _assert_never_approved(harness)
+        calls = _gh_calls(harness)
+        # It should still say something, so silence isn't mistaken for a pass.
+        assert "pr review" in calls, "an incomplete run told nobody"
+        assert "--request-changes" not in calls, (
+            "an incomplete run posted a blocking review it cannot justify"
+        )
 
 
 # --- No usable verdict -------------------------------------------------------
@@ -242,3 +265,68 @@ class TestVerdictParsing:
         )
         r = harness(f"cat <<'EOF'\n{body}\nEOF", "--no-post")
         assert r.returncode == EXIT_CHANGES, r.stdout[-2000:]
+
+
+# --- Prompt shape (invocation-level bugs) ------------------------------------
+
+class TestPromptShape:
+    """`claude -p "<arg>"` parses a leading-dash argument as a CLI flag.
+
+    A prompt whose first character is `-` dies with
+    `error: unknown option '...'` before the model runs: exit 1, zero tokens,
+    zero review. The failure text reads like turn exhaustion, so it invites a
+    wrong fix (`--max-turns`). These tests pin the invariant at the source,
+    because the bug was introduced and re-lost twice.
+    """
+
+    def _prompt(self, harness) -> str:
+        return harness.prompt_log.read_text() if harness.prompt_log.exists() else ""
+
+    def test_round_1_prompt_does_not_start_with_a_dash(self, harness):
+        harness(f"cat <<'EOF'\n{REVIEW_BODY.format(verdict='APPROVED')}\nEOF", "--no-post")
+        prompt = self._prompt(harness)
+        assert prompt, "the claude stub recorded no prompt"
+        assert not prompt.lstrip().startswith("-"), (
+            "review.sh handed claude a prompt beginning with a dash; "
+            f"claude will parse it as a flag. Prompt starts: {prompt[:60]!r}"
+        )
+
+    def test_round_2_prompt_does_not_start_with_a_dash(self, harness):
+        """Regression: the round-2 preamble began with `--- RE-REVIEW` and
+        silently broke the entire re-review path."""
+        harness(
+            f"cat <<'EOF'\n{REVIEW_BODY.format(verdict='APPROVED')}\nEOF",
+            "--no-post",
+            "--round", "2",
+        )
+        prompt = self._prompt(harness)
+        assert prompt, "the claude stub recorded no prompt"
+        assert not prompt.lstrip().startswith("-"), (
+            "the round-2 prompt begins with a dash — claude will treat it as a "
+            f"CLI option and die. Prompt starts: {prompt[:60]!r}"
+        )
+        assert "RE-REVIEW" in prompt, "the round-2 preamble went missing entirely"
+
+    def test_round_2_still_produces_a_verdict(self, harness):
+        """The end-to-end shape: a round-2 run reaches the verdict path."""
+        r = harness(
+            f"cat <<'EOF'\n{REVIEW_BODY.format(verdict='APPROVED')}\nEOF",
+            "--no-post",
+            "--round", "2",
+        )
+        assert r.returncode == EXIT_APPROVED, r.stdout[-2000:]
+        assert "VERDICT: APPROVED" in r.stdout
+
+
+# --- Diff construction -------------------------------------------------------
+
+class TestDiffConstruction:
+    def test_diff_is_built_against_the_resolved_base(self, harness):
+        """The stub's git log exists to make this checkable: the bundle must be
+        diffed against the resolved base ref, not against whatever HEAD is."""
+        harness(f"cat <<'EOF'\n{REVIEW_BODY.format(verdict='APPROVED')}\nEOF", "--no-post")
+        calls = harness.git_log.read_text() if harness.git_log.exists() else ""
+        assert "diff" in calls, f"review.sh never invoked git diff:\n{calls}"
+        assert "origin/v2" in calls, (
+            f"the diff was not built against the resolved base ref:\n{calls}"
+        )
