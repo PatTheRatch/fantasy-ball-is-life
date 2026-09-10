@@ -33,6 +33,13 @@ league_*/
 
 # Keep placeholder dirs
 !data/.gitkeep
+
+# Committed test fixtures are the exception. The rule above exists to keep
+# user-uploaded projections and pulled league data out of git — but a synthetic
+# fixture that tests depend on MUST be committed (§6.1: CI has no other copy).
+# Scoped to this one directory rather than a blanket `!*.csv`, so it cannot
+# accidentally un-ignore a real projection dump placed anywhere else.
+!tests/fixtures/projections/*.csv
 !player_rankings/.gitkeep
 
 # macOS duplicate-file artifacts ("foo 2.ext")
