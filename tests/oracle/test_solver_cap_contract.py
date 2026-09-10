@@ -224,7 +224,7 @@ def _solve_with_status(optimizer_module, opt, status: str) -> str:
 
 
 def test_user_limit_without_incumbent_names_the_time_limit(v1_root: Path) -> None:
-    """Branch 2: `user_limit` + no incumbent is its own distinct error.
+    """B1: `user_limit` + no incumbent is its own distinct error.
 
     The message must say the result does not imply infeasibility — that
     distinction is the entire reason §6.3 flagged this path. A V2 port that
@@ -241,7 +241,7 @@ def test_user_limit_without_incumbent_names_the_time_limit(v1_root: Path) -> Non
 
 
 def test_infeasible_reports_the_status_verbatim(v1_root: Path) -> None:
-    """Branch 3: infeasible names `status=infeasible` in the message.
+    """B2: infeasible names `status=infeasible` in the message.
 
     Captured because the two errors are easy to mistake for each other: both are
     ValueError, both mention the pool size and budget. The tell is that branch 3
@@ -257,8 +257,8 @@ def test_infeasible_reports_the_status_verbatim(v1_root: Path) -> None:
 
 
 def test_unknown_status_is_not_silently_accepted(v1_root: Path) -> None:
-    """Branch 3 generalises: any non-accepted status raises rather than
-    returning a partial roster.
+    """B2 generalises: any non-accepted status raises rather than returning a
+    partial roster.
 
     `optimal`, `optimal_inaccurate` and `user_limit` are the accepted set. An
     unrecognised status must not fall through to a "best effort" roster — that

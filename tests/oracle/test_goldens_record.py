@@ -256,3 +256,47 @@ def test_rosters_are_made_of_fixture_players(
             f"{category}: roster names {sorted(unknown)[:3]} are not in the fixture — "
             "the fixture was likely regenerated and the goldens need recapturing"
         )
+
+
+def test_oracle_modules_are_dependency_light() -> None:
+    """The oracle suite must import cleanly without V1's heavy dependencies.
+
+    **This is a regression guard for a real CI failure.** A module-scope
+    ``import numpy`` in the capture module broke the *default* test run with::
+
+        ModuleNotFoundError: No module named 'numpy'
+        !!! Interrupted: 1 error during collection !!!
+
+    because pytest **imports a module to collect it**, and the ``capture`` marker
+    deselects at *test* level, not module level. An import that exists only to
+    support deselected tests still has to be lazy — or the deselecting environment
+    (CI, which installs none of these) cannot even collect the file.
+
+    The failure surfaced as a bare ``ModuleNotFoundError`` from a test file nobody
+    intended to run. This test converts that from an implicit CI accident into an
+    explicit assertion with a clear message and a named fix.
+
+    Checked by reading the source rather than importing, so this test cannot
+    itself be the thing that fails to import.
+    """
+    banned = {"numpy", "pandas", "cvxpy", "scipy", "highspy", "openpyxl", "pulp"}
+    offenders: list[str] = []
+
+    for path in sorted(Path(__file__).parent.glob("*.py")):
+        if path.name == "capture_goldens.py":
+            continue  # the harness is meant to import V1; it is never collected
+        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+            stripped = line.strip()
+            # Only top-level imports count. Indented ones are lazy by definition.
+            if line != stripped or not stripped.startswith(("import ", "from ")):
+                continue
+            root = stripped.split()[1].split(".")[0]
+            if root in banned:
+                offenders.append(f"{path.name}:{lineno}: {stripped}")
+
+    assert not offenders, (
+        "module-scope import of a dependency CI does not install — pytest imports "
+        "this file to collect it even when every test is deselected, so the whole "
+        "run fails with a collection error. Move the import inside the function:\n  "
+        + "\n  ".join(offenders)
+    )
