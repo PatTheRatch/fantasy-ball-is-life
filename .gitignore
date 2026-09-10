@@ -46,3 +46,7 @@ league_*/
 * 2.*
 # Added by code-review-graph
 .code-review-graph/
+
+# Python packaging artifacts (pip install -e . creates fcp.egg-info/)
+*.egg-info/
+.venv/

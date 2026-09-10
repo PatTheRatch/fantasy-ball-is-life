@@ -381,29 +381,47 @@ reference.
   (60 files).
   *Classification: §6 item 1.*
 
-- [ ] **D-09 · Characterization oracle + solver-cap semantics** — **NEXT** — depends on D-08
-  Run V1 against the fixture and record golden outputs for optimizer /
-  targets / strategies / values; pin the timeout-vs-infeasible solver-cap
-  contract (`SOLVER_TIME_LIMIT_SECONDS=8`) as an explicit golden, not an
-  assumption.
-  **First act, before capturing any golden:** construct the frame and
-  confirm V1's `OptimizeLineup` actually accepts `projections_df` — the one
-  thing the D-08 review could not verify, and everything downstream depends
-  on it. Bundled context for D-09's own review must include `optimizer.py`
-  around the `_projections_df` branch and `BBM_PROJECTIONS_PATH`.
-  D-09's input world is larger than the fixture knows: the orphaned branch
-  `claude/p-series-status-1fo1i8` holds the FCP veteran projection model
-  (`8c852c3`, `fcp_model.py`, 566 lines) plus three fixes — `8485406`
-  (minutes bugs), `f43ac81` (age curve as a level, not a change), `d628783`
-  (team cap shaving ~8% off rotation players) — and `9dc6223` (~25% annual
-  roster churn in that model's synthetic world). That model exists nowhere
-  else: not on `main`, not on `v2`. Each fix encodes a named correct
-  behaviour; reimplement them as D-09's expected-behaviour list against
-  schema §05, rather than relanding the branch — its target paths are
-  V1-era and do not exist on `v2`.
+- [x] **D-09 · Characterization oracle + solver-cap semantics** — `2cb1eb0`, `dc64104` — depends on D-08
+  Delivered more than scoped: the recon half falsified part of D-08's own
+  claim before any golden could be captured. D-08's 30 tests check the
+  fixture's *structure*, not whether it can actually drive V1 — and it
+  couldn't, for three reasons invisible to those tests: no players priced at
+  exactly $1 (the LP's `minimum_value_players` constraint is an equality,
+  and the ladder decayed to $1.67 and never hit floor); guards labelled
+  `'G'` against V1's `str.contains` vocabulary of `(C, PG, SG, SF, PF)`,
+  leaving PG with zero eligible players; and V1 matching positions in two
+  places with different rules (`_validate_pool_feasibility` uses
+  `str.contains` for all five including C, the LP constraint uses
+  `Pos == 'C'` capped at 3 plus `str.contains` for the rest — they agree for
+  this vocabulary but would diverge for a label like `"C PF"`). All three
+  fixed in the fixture. Also discovered: `OptimizeLineup` takes two
+  injection args and `projections_rows` (a list) takes *precedence* over
+  `projections_df` — `projections_rows` is the V2 consumer shape and is what
+  D-12 must feed; and construction additionally requires a `league` object
+  reading `self.league.draft`, sourced from a live 4-request ESPN fetch, so
+  any oracle harness must stub the network.
+  Capture half: `tests/oracle/d09_goldens.json` is the committed record — 7
+  of 9 categories solve (PTS 744.275/cost 199.58, REB 381.78, AST 180.25,
+  STL 50.715, BLK 55.23, 3PM 102.48, TO -39.795); FG%/FT% raise `KeyError`
+  on a missing `'{cat} PW'` column (V1 can constrain a percentage but never
+  maximize one, and nothing in its own tests/CLI/API ever asks it to) —
+  recorded as UNDECIDED, not reproduced as a requirement; that call is
+  pushed to D-12. `tests/oracle/capture_goldens.py` is the harness that
+  produced the record, committed and opt-in via a `capture` pytest marker
+  gated on `D09_V1_ROOT` — its presence is load-bearing, since without it
+  the goldens would be unfalsifiable magic numbers. `test_goldens_record.py`
+  (12 tests, no V1 import) runs in normal CI; `test_solver_cap_contract.py`
+  (6 tests, capture-marked) characterizes all four `SOLVER_TIME_LIMIT_SECONDS=8`
+  branches (user-limit-no-incumbent, any non-accepted status, user-limit
+  with a wrong-length incumbent, user-limit with a correct-length incumbent)
+  as deterministic branch behaviour rather than a numeric golden, since which
+  incumbent HiGHS holds at a wall clock depends on CPU/solver/BLAS.
+  `pyproject.toml`: `addopts = "-q -m 'not capture'"`.
+  Gate on merged `v2`: 280 passed, 61 skipped, 6 deselected, ruff clean,
+  mypy clean.
   *Classification: §6 items 2–3.*
 
-- [ ] **D-10 · Forge Value port** (`backend/draft/values.py`) — depends on D-09
+- [ ] **D-10 · Forge Value port** (`backend/draft/values.py`) — **NEXT** — depends on D-09
   Least-trusted of the four gated items: Forge Value has **no V1 test file
   at all**, so D-09's golden is its only coverage.
   *Classification: §6 item 4, §7.*
@@ -413,6 +431,51 @@ reference.
 - [ ] **D-12 · Optimizer / solver port** (`optimizer.py` + `engine.py` solver glue) — depends on D-10, D-11
   Must assert the solver-cap feasibility contract D-09 pinned — a timeout
   and an infeasible solve are not the same outcome.
+  **FG%/FT% call (D-09 left this open, deciding it is now in scope):**
+  percentages are out of scope for this port; note the `KeyError` gap as
+  inherited from V1, not a regression to fix or a behaviour to reproduce —
+  V1 itself never maximizes a percentage category anywhere in its own
+  tests, CLI, or API.
+  **Bundle requirements, from D-09's review:**
+  - All 9 categories in the golden comparison, not a sample — different
+    categories bind different constraints, so a subset can pass while a
+    real regression hides in the categories left out.
+  - The constants D-09 pinned as data, not tuning knobs: `roster_size` 13,
+    `initial_budget` 200, `minimum_value_players` 3,
+    `minimum_game_threshold` 20, `value_col` `'$'`,
+    `SOLVER_TIME_LIMIT_SECONDS` 8.
+  - Capture via the `projections_rows` path explicitly — it takes
+    precedence over `projections_df`, and `projections_rows` is the shape
+    V2 actually produces.
+  - The frozen league/draft state D-09 stubbed (`draft=[]`, `teams=[]`) is
+    part of the contract, not an incidental test detail.
+  - A float tolerance policy: `rel=1e-6` on the objective value, exact
+    equality on roster membership.
+  - The dependency version manifest D-09 captured (`cvxpy 1.9.2` etc.) so a
+    future mismatch triages as version drift, not a port bug.
+  - **Open question for D-12 to resolve:** roster uniqueness under
+    degeneracy. The optimal *value* is well-defined but the optimal
+    *roster* need not be — a different HiGHS/BLAS build could return a
+    different, equally-optimal 13-man set with the same objective, which
+    would break exact membership equality. Decide whether
+    objective-equality is the actual contract and membership stays
+    informational-only.
+  - The oracle's objective *magnitudes* are pinned only for PTS/REB (a weak
+    "> budget" floor, not an exact-value assertion) — a hand-edit of, say,
+    AST 180.25 → 175.0 would survive the record suite as written. The
+    magnitudes are trustworthy because they were captured against real V1,
+    not because the suite verifies them independently. Do not ask D-12 to
+    close this by recomputing the weighting inside the test — that
+    duplicates V1's own logic and is exactly the drift the oracle exists to
+    avoid.
+  - Capture tests never run in default CI and will rot silently if V1 or
+    the fixture moves. Standing reminder: re-run
+    `D09_V1_ROOT=... pytest -m capture` whenever either changes. The
+    mechanical guard against a different failure mode is already in place —
+    `test_oracle_modules_are_dependency_light` — because pytest imports a
+    module to collect it even when every test inside is deselected, so a
+    module-scope import of a heavy dependency breaks default CI collection
+    regardless of markers.
 
 - [ ] **D-13 · Plan diversity + apply-pick engine** (`strategies.py` + `engine.py`) — depends on D-12
   Carries the seven §7 draft invariants — "never freeze on bad input."
@@ -477,4 +540,7 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: D-08 merged — synthetic projection fixture, delivered by injection not file write; D-09 next.*
+*Claude updates this on approval. Last change: D-09 merged — characterization
+oracle + solver-cap contract, plus a recon half that found and fixed three
+defects blocking D-08's fixture from driving V1 at all; D-10 (Forge Value
+port) next.*
