@@ -144,7 +144,16 @@ grep -A40 "Bundle inventory" "$BUNDLE" | head -25 | tee -a "$OUT" || true
 PROMPT="$(cat docs/claude-prompts/review-template.md)"
 
 if [[ "$ROUND" -gt 1 ]]; then
-  PROMPT="--- RE-REVIEW: ROUND ${ROUND} ---
+  # NOTE: the prompt must not begin with a dash. `claude -p "<arg>"` parses a
+  # leading-dash argument as a CLI flag and dies with
+  # `error: unknown option '--- RE-REVIEW ...'` before the model ever runs —
+  # zero tokens spent, zero review produced, exit 1. That failure reads like
+  # turn exhaustion, so it is easy to misdiagnose and "fix" by raising
+  # --max-turns, which never helps. The single-round path escaped this only
+  # because the shipped template happens to start with the word "You".
+  # Keep the heading; drop the leading dashes.
+  PROMPT="RE-REVIEW: ROUND ${ROUND}
+
 This is a re-review. Your previous round raised findings; the author has pushed fixes.
 For each previously-raised finding, state whether it is RESOLVED, PARTIALLY RESOLVED, or
 NOT ADDRESSED, and check that the fix did not introduce a new defect. Then apply the full
