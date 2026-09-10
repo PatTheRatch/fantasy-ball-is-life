@@ -31,7 +31,14 @@ include = ["backend*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# The `capture` marker gates tests that import V1 and therefore cvxpy/pandas.
+# They are deselected by default so the normal suite stays dependency-light.
+# Run them deliberately with an explicit V1 checkout:
+#   D09_V1_ROOT=/path/to/v1-worktree pytest -m capture
+addopts = "-q -m 'not capture'"
+markers = [
+    "capture: imports V1 (cvxpy/pandas); opt-in, needs --v1-root",
+]
 
 [tool.ruff]
 line-length = 100
