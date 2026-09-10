@@ -185,6 +185,37 @@ def test_dollar_ladder_is_right_skewed(raw_rows: list[dict[str, str]]) -> None:
     assert values[0] >= 40.0, f"top value {values[0]} too low to be a real top pick"
 
 
+def test_dollar_ladder_reaches_the_one_dollar_floor(raw_rows: list[dict[str, str]]) -> None:
+    """The fixture must contain players at exactly $1 — the solver requires it.
+
+    V1's ``optimize_roster`` calls ``_validate_pool_feasibility``, which raises
+    unless ``minimum_value_players`` (default **3**) players priced at exactly
+    ``$1`` survive filtering::
+
+        ValueError: `minimum_value_players`=3 but only 0 player(s) with $==1
+        remain after filtering (minimum_game_threshold=20).
+
+    Found the hard way: the first version of this generator decayed
+    exponentially and bottomed out at $1.67, so the fixture parsed fine, passed
+    every structural test, and **could not drive the optimizer at all**. That is
+    precisely the class of gap D-09 exists to catch, and it would have surfaced
+    as a confusing solver error rather than a fixture error.
+
+    Asserts a margin above V1's default so a test may raise
+    ``minimum_value_players`` without regenerating the fixture.
+    """
+    # Mirrors V1's OptimizeLineup default.
+    v1_minimum_value_players = 3
+
+    at_floor = sum(1 for r in raw_rows if float(r["source_value"]) == 1.0)
+    assert at_floor >= v1_minimum_value_players, (
+        f"only {at_floor} player(s) at $1; V1's solver needs at least "
+        f"{v1_minimum_value_players} and raises otherwise"
+    )
+    # Margin, so the fixture is not one V1 default-change away from breaking.
+    assert at_floor >= 10, f"$1 floor cluster ({at_floor}) is too thin to be robust"
+
+
 def test_games_survive_v1_pool_hygiene(raw_rows: list[dict[str, str]]) -> None:
     """Every player must clear V1's real games floor.
 
@@ -349,6 +380,43 @@ def test_adapter_columns_are_injectable_as_v1_input() -> None:
     for numeric in ("g", "$", "fg%", "ft%", "p/g", "r/g", "a/g", "s/g", "b/g", "to/g"):
         assert all(isinstance(v, (int, float)) for v in columns[numeric]), (
             f"column {numeric!r} is not uniformly numeric"
+        )
+
+
+def test_adapter_positions_use_v1_vocabulary() -> None:
+    """Every position label must be one V1's solver actually matches.
+
+    V1 validates pool feasibility against exactly ``('C', 'PG', 'SG', 'SF',
+    'PF')`` and raises if any has zero eligible players. An earlier version of
+    the adapter labelled guards ``'G'`` — which passes every structural test and
+    then fails the solver with::
+
+        ValueError: No eligible players remain at position 'PG' after filtering
+
+    Found by running the real solver, which is what D-09's first act was for.
+    Locked here so the vocabulary cannot drift back.
+    """
+    v1_position_vocabulary = {"C", "PG", "SG", "SF", "PF"}
+
+    rows = adapter.load_canonical()
+    labels = {adapter.to_v1(row).position for row in rows}
+    assert labels <= v1_position_vocabulary, (
+        f"positions {sorted(labels - v1_position_vocabulary)} are not in V1's "
+        f"vocabulary {sorted(v1_position_vocabulary)}"
+    )
+    # Each must have at least one eligible player, exactly as V1 checks. 'C' and
+    # the four str.contains codes are all exercised by the fixture, not just
+    # present in principle.
+    for position in v1_position_vocabulary:
+        eligible = 0
+        for row in rows:
+            label = adapter.to_v1(row).position
+            # Mirrors V1: C by equality, the rest by substring containment.
+            matched = label == "C" if position == "C" else position in label
+            if matched:
+                eligible += 1
+        assert eligible >= 1, (
+            f"position {position!r} has 0 eligible players — V1's solver raises on this"
         )
 
 
