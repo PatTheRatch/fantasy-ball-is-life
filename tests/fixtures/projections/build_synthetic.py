@@ -232,14 +232,17 @@ def _build_rows() -> list[PlayerRow]:
             keys.append(ARCHETYPES[-1].key)
 
     by_key = {a.key: a for a in ARCHETYPES}
-    # Stable ordering by archetype, then by a deterministic shuffle within it,
-    # so index i is a real player and the file never reorders between runs.
+    # Shuffle, then iterate in shuffled order: players of the same archetype are
+    # interleaved through the file rather than clustered in blocks. Without this
+    # the fixture's first 60 rows would all be guards, which makes the committed
+    # CSV misleading to read (it looks sorted by position and is not) and makes
+    # any human spot-check of "the top of the file" examine one archetype only.
     shuffled = list(range(PLAYER_COUNT))
     rng.shuffle(shuffled)
 
     position_counts: dict[str, int] = {}
 
-    for idx in sorted(shuffled):
+    for idx in shuffled:
         archetype = by_key[keys[idx]]
         minutes = _sample(rng, *archetype.minutes)
         weight = _minutes_weight(minutes, archetype)

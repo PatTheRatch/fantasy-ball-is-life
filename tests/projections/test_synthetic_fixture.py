@@ -186,16 +186,31 @@ def test_dollar_ladder_is_right_skewed(raw_rows: list[dict[str, str]]) -> None:
 
 
 def test_games_survive_v1_pool_hygiene(raw_rows: list[dict[str, str]]) -> None:
-    """V1's ``clean_player_data()`` drops players below
-    ``MIN_SEASON_GAMES_FILTER``. If the fixture's games straddle that floor
-    without most players clearing it, the usable pool silently shrinks and the
-    goldens describe a pool nobody declared.
+    """Every player must clear V1's real games floor.
+
+    ``clean_player_data()`` drops rows below ``MIN_SEASON_GAMES_FILTER``
+    (``backend/config.py``, default **25**). If the fixture's games straddle that
+    floor, V1 silently drops players and the D-02 goldens describe a pool smaller
+    than the file declares — a discrepancy nobody would notice from the numbers
+    alone.
+
+    Pinned to the actual constant's value rather than a guessed round number: an
+    earlier version of this test asserted 40, which proved nothing about V1's
+    behaviour.
     """
+    # Mirrors backend/config.py MIN_SEASON_GAMES_FILTER (default "25").
+    v1_min_season_games = 25
+
     games = [float(row["games"]) for row in raw_rows]
-    assert min(games) > 0
-    # Every player should clear a realistic floor, so the fixture's usable pool
-    # equals its declared size and the goldens are about the whole file.
-    assert sum(1 for g in games if g >= 40) >= 190
+    assert min(games) > v1_min_season_games, (
+        f"lowest games value {min(games)} does not clear V1's "
+        f"{v1_min_season_games} floor — V1 would drop players the fixture declares"
+    )
+    # And with margin, not by a hair: a fixture that barely clears the floor is
+    # fragile against any future change to the generator's range.
+    assert min(games) >= v1_min_season_games + 10, (
+        "games floor clearance is too thin to be robust"
+    )
 
 
 # --- The V1 adapter ----------------------------------------------------------
@@ -267,17 +282,74 @@ def test_adapter_zero_attempts_does_not_raise() -> None:
     assert v1.ft_pct == 0.0
 
 
-def test_adapter_writes_a_v1_consumable_file(tmp_path: Path) -> None:
-    """D-02 points ``BBM_PROJECTIONS_PATH`` at an emitted file, so the emitter has
-    to produce something real. This checks shape and readability, not that pandas
-    accepts it — that is the first thing D-02 verifies against ``main``."""
-    destination = tmp_path / "v1_view.csv"
-    adapter.write_v1_view(destination)
-    assert destination.exists()
-    with destination.open(newline="") as handle:
-        reader = csv.DictReader(handle)
-        assert list(reader.fieldnames or []) == list(adapter.V1_COLUMNS)
-        assert len(list(reader)) == len(adapter.load_canonical())
+def test_adapter_value_mapping_is_per_field_correct() -> None:
+    """Every V1 rate column must equal its canonical source, field by field.
+
+    This is the gap that mattered: the column *header* test passed, and the
+    percentage identity test passed, and neither would catch a transposition
+    (``reb=row.ast``) — a row-level mapping bug that would corrupt every D-02
+    golden while the whole suite stayed green.
+
+    Pins the entire mapping, not a sample: all 15 columns are asserted for all
+    200 rows.
+    """
+    rows = adapter.load_canonical()
+    columns = adapter.to_v1_columns(rows)
+    expected = {
+        "Name": lambda r: adapter.v1_name(r.key),
+        "g": lambda r: r.games,
+        "Pos": lambda r: adapter.v1_position(r.key),
+        "$": lambda r: r.source_value,
+        "fga/g": lambda r: r.fga,
+        "fta/g": lambda r: r.fta,
+        "fg%": lambda r: r.fgm / r.fga,
+        "ft%": lambda r: r.ftm / r.fta,
+        "p/g": lambda r: r.pts,
+        "3/g": lambda r: r.tpm,
+        "r/g": lambda r: r.reb,
+        "a/g": lambda r: r.ast,
+        "s/g": lambda r: r.stl,
+        "b/g": lambda r: r.blk,
+        "to/g": lambda r: r.tov,
+    }
+    assert set(columns) == set(expected)
+
+    for i, row in enumerate(rows):
+        for column, getter in expected.items():
+            got = columns[column][i]
+            want = getter(row)
+            assert got == pytest.approx(want) if isinstance(want, float) else got == want, (
+                f"row {i} player {row.key}: {column!r} is {got!r}, expected {want!r}"
+            )
+
+
+def test_adapter_columns_are_injectable_as_v1_input() -> None:
+    """The delivery mechanism for D-02 is injection, not a file.
+
+    V1's ``OptimizeLineup`` takes a ``projections_df`` argument and prefers it to
+    reading ``BBM_PROJECTIONS_PATH`` (which is a hardcoded constant and cannot be
+    pointed at anything). So the contract this test locks is: the adapter yields
+    every column V1 consumes, with one value per player, in a form a DataFrame
+    accepts directly.
+
+    This replaces an earlier test that asserted a written CSV file was
+    "V1-consumable" — it was not, because V1's fallback loader is
+    ``pd.read_excel``. The old test checked shape and readability and explicitly
+    did not check that V1 could read it, so it certified nothing.
+    """
+    rows = adapter.load_canonical()
+    columns = adapter.to_v1_columns(rows)
+
+    assert list(columns) == list(adapter.V1_COLUMNS)
+    for name, values in columns.items():
+        assert len(values) == len(rows), f"column {name!r} has {len(values)} of {len(rows)}"
+    # The types V1's own pipeline expects to see in the frame.
+    assert all(isinstance(v, str) for v in columns["Name"])
+    assert all(isinstance(v, str) for v in columns["Pos"])
+    for numeric in ("g", "$", "fg%", "ft%", "p/g", "r/g", "a/g", "s/g", "b/g", "to/g"):
+        assert all(isinstance(v, (int, float)) for v in columns[numeric]), (
+            f"column {numeric!r} is not uniformly numeric"
+        )
 
 
 def test_no_network_or_git_access() -> None:

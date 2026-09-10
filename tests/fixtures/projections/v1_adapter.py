@@ -115,15 +115,44 @@ def v1_name(player_id: str) -> str:
     return f"Synthetic {suffix}"
 
 
-def v1_position(player_id: str) -> str:
-    """Deterministic position label.
+def position_for_stats(reb: float, ast: float, blk: float, tpm: float) -> str:
+    """Infer a plausible position label from a row's stat shape.
 
-    Derived from the numeric suffix so a given ``player_id`` always reports the
-    same position. It is *not* the archetype the generator used — the canonical
-    file does not record that, and inventing a lookup would make the adapter
-    depend on generator internals. V1 uses ``Pos`` only for display and its
-    ``POSITION_OVERRIDES`` hook, so any stable assignment satisfies the contract.
+    Ordered checks, most distinctive signature first. The thresholds are
+    deliberately loose — this labels a synthetic fixture for display, so the bar
+    is "a big is not called a guard", not a real position classifier. Kept as a
+    pure function of the stats so the label can never disagree with the numbers
+    it came from.
+
+    Signals chosen because they are what actually separates positions in the
+    9-category box score: blocks and rebounds for bigs, assists for guards,
+    three-point volume for wings.
     """
+    if blk >= 1.2 and reb >= 7.0:
+        return "C"
+    if reb >= 6.5:
+        return "PF"
+    if ast >= 3.5 and tpm >= 1.8:
+        return "G"
+    if ast >= 2.8 or tpm >= 2.0:
+        return "SG"
+    return "SF"
+
+
+def v1_position(player_id: str) -> str:
+    """Kept for callers that only have a player id.
+
+    The honest mapping needs the row's stats, so this indirection exists only so
+    ``player_id``-keyed call sites don't break. Prefer
+    ``position_for_stats`` — a label derived from an id is exactly the arbitrary
+    assignment this module moved away from. Looks up the canonical row and
+    delegates; falls back to the id-derived cycle only if the player is unknown.
+    """
+    rows = load_canonical()
+    for row in rows:
+        if row.key == player_id:
+            return position_for_stats(reb=row.reb, ast=row.ast, blk=row.blk, tpm=row.tpm)
+    # Unknown player: stable fallback so the function stays total.
     suffix = player_id.rsplit("-", 1)[-1]
     try:
         index = int(suffix)
@@ -142,7 +171,7 @@ def to_v1(row: CanonicalRow) -> V1Row:
     return V1Row(
         name=v1_name(row.key),
         games=row.games,
-        position=v1_position(row.key),
+        position=position_for_stats(reb=row.reb, ast=row.ast, blk=row.blk, tpm=row.tpm),
         dollars=row.source_value,
         fga_pg=row.fga,
         fta_pg=row.fta,
@@ -156,32 +185,6 @@ def to_v1(row: CanonicalRow) -> V1Row:
         blk=row.blk,
         tov=row.tov,
     )
-
-
-def render_v1(rows: list[CanonicalRow]) -> str:
-    """Render the V1 view as CSV, header row first."""
-    lines: list[str] = [",".join(V1_COLUMNS)]
-    for row in rows:
-        v1 = to_v1(row)
-        cells = (
-            v1.name,
-            f"{v1.games:.2f}",
-            v1.position,
-            f"{v1.dollars:.2f}",
-            f"{v1.fga_pg:.3f}",
-            f"{v1.fta_pg:.3f}",
-            f"{v1.fg_pct:.4f}",
-            f"{v1.ft_pct:.4f}",
-            f"{v1.pts:.3f}",
-            f"{v1.tpm:.3f}",
-            f"{v1.reb:.3f}",
-            f"{v1.ast:.3f}",
-            f"{v1.stl:.3f}",
-            f"{v1.blk:.3f}",
-            f"{v1.tov:.3f}",
-        )
-        lines.append(",".join(cells))
-    return "\n".join(lines) + "\n"
 
 
 def load_canonical(path: Path | None = None) -> list[CanonicalRow]:
@@ -224,27 +227,84 @@ def load_canonical(path: Path | None = None) -> list[CanonicalRow]:
     return rows
 
 
-def write_v1_view(path: Path, rows: list[CanonicalRow] | None = None) -> Path:
-    """Emit the V1-consumable file.
+def to_v1_columns(rows: list[CanonicalRow] | None = None) -> dict[str, list[object]]:
+    """Project canonical rows into V1's columns as a plain dict-of-lists.
 
-    D-01 ships this so D-02 can point ``BBM_PROJECTIONS_PATH`` at a file that
-    already exists in V1's shape, keeping D-02 a pure capture step.
+    **This is the interface D-02 should use.** V1's ``OptimizeLineup`` accepts a
+    ``projections_df`` argument (``optimizer.py`` line 91) and uses it in
+    preference to reading a file at all::
 
-    NOTE for D-02: V1 loads via ``pandas.read_excel``. A CSV at that path is
-    *not* guaranteed to load. The first thing D-02 must do is confirm which
-    format V1's loader actually accepts against ``main`` and, if it insists on
-    Excel, convert here (the adapter is the right seam for that) rather than
-    changing V1's loader — ``main`` is frozen.
+        if self._projections_df is not None:
+            stats_df = self._projections_df.copy()
+        else:
+            stats_df = pd.read_excel(BBM_PROJECTIONS_PATH)
 
-    Writes the CSV form, which is what the D-01 tests assert against. The Excel
-    conversion, if required, is D-02's to add at this same seam.
+    So the fixture reaches V1 by **injection**, not by being written to disk.
+    That matters, and it is why this function returns a dict rather than a path:
+
+    * ``BBM_PROJECTIONS_PATH`` is a hardcoded constant, not env-overridable — you
+      cannot point it anywhere. The original scope line "point
+      ``BBM_PROJECTIONS_PATH`` at it" was not achievable.
+    * V1's fallback path is ``pd.read_excel``, so a CSV at that path would not
+      load. Emitting ``.xlsx`` instead would drag pandas + openpyxl into V2's
+      dependency list for a test fixture, which is a bad trade for a greenfield
+      rebuild that currently depends on neither.
+    * Injection is also strictly more hermetic: no temp files, no filesystem
+      state, no format question.
+
+    Returns a dict of column name → list of values, which pandas turns into a
+    DataFrame in one call. Returning a dict keeps pandas out of *this* module so
+    the fixture stays importable without it; D-02 constructs the DataFrame.
     """
     payload = rows if rows is not None else load_canonical()
-    path.write_text(render_v1(payload))
-    return path
+    columns: dict[str, list[object]] = {name: [] for name in V1_COLUMNS}
+    for row in payload:
+        v1 = to_v1(row)
+        columns["Name"].append(v1.name)
+        columns["g"].append(v1.games)
+        columns["Pos"].append(v1.position)
+        columns["$"].append(v1.dollars)
+        columns["fga/g"].append(v1.fga_pg)
+        columns["fta/g"].append(v1.fta_pg)
+        columns["fg%"].append(v1.fg_pct)
+        columns["ft%"].append(v1.ft_pct)
+        columns["p/g"].append(v1.pts)
+        columns["3/g"].append(v1.tpm)
+        columns["r/g"].append(v1.reb)
+        columns["a/g"].append(v1.ast)
+        columns["s/g"].append(v1.stl)
+        columns["b/g"].append(v1.blk)
+        columns["to/g"].append(v1.tov)
+    return columns
 
 
-if __name__ == "__main__":  # pragma: no cover - developer convenience
-    out = Path(__file__).with_name("synthetic_projections_v1.csv")
-    write_v1_view(out)
-    print(f"wrote V1 view to {out}")
+def render_v1(rows: list[CanonicalRow]) -> str:
+    """Render the V1 view as CSV.
+
+    Exists for reviewability — a committed CSV is diffable in a way a DataFrame
+    is not — and for the adapter's own tests. It is **not** the D-02 delivery
+    mechanism; see ``to_v1_columns``. Kept as a plain renderer so the column
+    contract stays inspectable by eye.
+    """
+    lines: list[str] = [",".join(V1_COLUMNS)]
+    for row in rows:
+        v1 = to_v1(row)
+        cells = (
+            v1.name,
+            f"{v1.games:.2f}",
+            v1.position,
+            f"{v1.dollars:.2f}",
+            f"{v1.fga_pg:.3f}",
+            f"{v1.fta_pg:.3f}",
+            f"{v1.fg_pct:.4f}",
+            f"{v1.ft_pct:.4f}",
+            f"{v1.pts:.3f}",
+            f"{v1.tpm:.3f}",
+            f"{v1.reb:.3f}",
+            f"{v1.ast:.3f}",
+            f"{v1.stl:.3f}",
+            f"{v1.blk:.3f}",
+            f"{v1.tov:.3f}",
+        )
+        lines.append(",".join(cells))
+    return "\n".join(lines) + "\n"
