@@ -151,6 +151,14 @@ class PlayerRow:
     """
 
     key: str
+    # ``name`` and ``position`` are scratch fields, NOT canonical output: neither
+    # is serialised (see ``COLUMNS``) and ``load_canonical`` reads both back as
+    # "". They exist only for generator-internal readability and debugging. The
+    # names/positions a consumer sees are derived in v1_adapter (``v1_name`` from
+    # the id, ``position_for_stats`` from the row's stat shape), because the
+    # canonical artifact must stay keyed on ``player_id`` with no position column
+    # (schema §05). Keeping two schemes in one dataclass is mildly confusing; it
+    # is cheaper to say so than to thread a separate debug struct through.
     name: str
     position: str
     games: float
