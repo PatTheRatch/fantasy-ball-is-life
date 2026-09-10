@@ -58,10 +58,22 @@ OUT="/tmp/claude-review-${STAMP}.txt"
 BUNDLE="/tmp/review-bundle-${STAMP}.txt"
 
 # --- Resolve the comparison range -------------------------------------------
+# For --pr we must review the PR's head commit, NOT the working tree. Building
+# the bundle from `HEAD` while the checkout sits on an unrelated branch produces
+# a confident verdict about the wrong diff — and posts it to the PR. Check the
+# head out explicitly so `HEAD` means what the reviewer thinks it means.
 if [[ -n "$PR" ]]; then
   BRANCH="$(HOME=/home/aisha gh pr view "$PR" --json headRefName --jq '.headRefName')"
   BASE="$(HOME=/home/aisha gh pr view "$PR" --json baseRefName --jq '.baseRefName')"
   echo "=== PR #$PR — $BRANCH → $BASE ===" | tee "$OUT"
+  if ! HOME=/home/aisha gh pr checkout "$PR" --force 2>&1 | tee -a "$OUT"; then
+    echo "error: could not check out PR #$PR — refusing to review the working tree" |& tee -a "$OUT"
+    exit 1
+  fi
+  # Use the remote-tracking ref for the base so a stale local branch can't
+  # silently redefine the comparison range.
+  BASE="origin/$BASE"
+  echo "    HEAD is now $(git rev-parse --short HEAD) ($BRANCH)" | tee -a "$OUT"
 else
   BRANCH="$(git branch --show-current)"
   echo "=== Reviewing ${BRANCH:-detached HEAD} against $BASE ===" | tee "$OUT"

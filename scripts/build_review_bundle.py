@@ -66,7 +66,23 @@ def git_try(args: list[str]) -> str:
         return ""
 
 
+def is_test_path(path: str) -> bool:
+    """True for test files, matched by convention rather than substring.
+
+    A naive `"test" in name` also matches `latest_scores.py`, `greatest.py`,
+    `contest.py` — bundling large unrelated files in full and eating the budget
+    that previews need.
+    """
+    name = Path(path).name.lower()
+    if name.startswith("test_") or name.endswith(("_test.py", ".test.ts", ".test.tsx",
+                                                  ".spec.ts", ".spec.tsx")):
+        return True
+    parts = path.split("/")
+    return "tests" in parts[:-1] or "test" in parts[:-1] or "__tests__" in parts
+
+
 def is_skippable(path: str) -> bool:
+    """True for lockfiles and binary assets — never worth bundling."""
     if any(path.endswith(s) for s in SKIP_SUFFIXES):
         return True
     return Path(path).name in SKIP_NAMES
@@ -87,7 +103,8 @@ def read_lines(repo: Path, path: str, rev: str | None = None) -> list[str] | Non
             text = sh(["git", "show", f"{rev}:{path}"])
         except RuntimeError as exc:
             message = str(exc)
-            if "does not exist" in message or "exists on disk" in message or "unknown revision" in message:
+            missing = ("does not exist", "exists on disk", "unknown revision")
+            if any(token in message for token in missing):
                 return None
             raise
         if "\x00" in text[:4096]:
@@ -159,6 +176,12 @@ def preview(lines: list[str], changed: set[int], radius: int) -> tuple[str, list
             if 1 <= candidate <= len(lines):
                 wanted.add(candidate)
 
+    # A stale line map (e.g. from a rebase or a mismatch between the diffed ref
+    # and the file revision) can reference lines that don't exist. Return empty
+    # rather than raising — the caller reports the omission instead of dying.
+    if not wanted:
+        return "", []
+
     ranges: list[tuple[int, int]] = []
     ordered = sorted(wanted)
     start = prev = ordered[0]
@@ -220,7 +243,8 @@ def main() -> int:
     stats = git_try(["diff", "--stat", f"{args.base}...{args.head}"])
     changed = changed_line_map(raw_diff, "b/")
 
-    sections: list[tuple[str, int, str]] = []   # (title, priority, body) — lower priority = dropped first
+    # (title, priority, body) — HIGHER priority number = dropped first.
+    sections: list[tuple[str, int, str]] = []
     omitted: list[str] = []
 
     # --- Tier 1 (priority 0): the convention files. Cheap, high signal. ---
@@ -240,8 +264,7 @@ def main() -> int:
         if lines is None:
             omitted.append(f"{path} ({classify_absence(repo, path, source_rev)})")
             continue
-        is_test = "test" in Path(path).name.lower() or "/tests/" in path or path.startswith("tests/")
-        if is_test or len(lines) <= args.full_file_lines:
+        if is_test_path(path) or len(lines) <= args.full_file_lines:
             body = "\n".join(f"  {n:>5}| {line}" for n, line in enumerate(lines, 1))
             sections.append((f"Full file: {path} ({len(lines)} lines)", 1, body))
 
@@ -281,7 +304,7 @@ def main() -> int:
     out = sys.stdout
     print("# REVIEW CONTEXT BUNDLE", file=out)
     print(f"\nBase: `{args.base}`  Head: `{args.head}`", file=out)
-    print(f"Files changed: {len(files)}  Bundle: ~{used // BYTES_PER_TOKEN:,} tokens "
+    print(f"Files changed: {len(files)}  Bundle: ~{int(used / BYTES_PER_TOKEN):,} tokens "
           f"(budget {args.budget:,})", file=out)
 
     print("\n## Change stat\n\n```", file=out)
@@ -299,7 +322,8 @@ def main() -> int:
 
     if omitted:
         print("\n## Bundle inventory — NOT included\n", file=out)
-        print("These were deliberately left out. Say so in `## Gaps` if you needed one.\n", file=out)
+        print("These were deliberately left out. Say so in `## Gaps` "
+              "if you needed one.\n", file=out)
         for item in omitted:
             print(f"- {item}", file=out)
 
