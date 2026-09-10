@@ -63,7 +63,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import numpy as np
 import pytest
 
 # Deselected from the default run: these import V1 and therefore cvxpy/pandas.
@@ -108,6 +107,13 @@ def _force_solve_with_incumbent(
     can construct a correct-length selection, a short one, or the all-zero
     degenerate case the source comment warns about.
     """
+    # Imported here, not at module scope. pytest imports a module to collect it
+    # even when every test in it is deselected by marker, so a top-level numpy
+    # import breaks the default CI run — which has no numpy. That is exactly what
+    # happened: this file collected fine locally and failed in CI with
+    # "ModuleNotFoundError: No module named 'numpy'".
+    import numpy as np
+
     real_problem = optimizer_module.cp.Problem
     original_solve = real_problem.solve
 
