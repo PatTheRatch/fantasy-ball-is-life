@@ -342,13 +342,29 @@ def _assign_source_values(rows: list[PlayerRow]) -> list[PlayerRow]:
     ordered = sorted(rows, key=fantasy_impact, reverse=True)
 
     # A plausible auction ladder: a top pick runs ~$70 in a 14-team league, and
-    # the deep bench settles at the $1 floor. Dollars are an exponential decay
-    # across the ranked pool so the distribution is right-skewed like a real
-    # auction, rather than linear.
+    # the deep bench settles at the $1 floor. Dollars decay across the ranked
+    # pool so the distribution is right-skewed like a real auction.
+    #
+    # The floor cluster is NOT cosmetic. V1's `_validate_pool_feasibility`
+    # requires `minimum_value_players` (default 3) players at exactly $1 and
+    # raises otherwise:
+    #   "`minimum_value_players`=3 but only 0 player(s) with $==1 remain"
+    # The solver's endgame logic keys off genuinely cheap players existing, and
+    # an exponential decay alone never reaches the floor — an earlier version of
+    # this generator bottomed out at $1.67 and made the fixture unusable as a
+    # solver input. A real auction does have a $1 tail, so modelling one is both
+    # more realistic and what makes the fixture actually drive the optimizer.
     top, floor = 70.0, 1.0
     decay = 0.977
+    # The last N ranked players are $1. Sized comfortably above V1's default of 3
+    # so a test can raise `minimum_value_players` without regenerating.
+    floor_count = 12
     dollars: dict[str, float] = {}
+    n = len(ordered)
     for rank, row in enumerate(ordered):
+        if rank >= n - floor_count:
+            dollars[row.key] = floor
+            continue
         value = floor + (top - floor) * math.pow(decay, rank)
         dollars[row.key] = _r2(max(floor, value))
 

@@ -101,7 +101,13 @@ def _safe_div(numerator: float, denominator: float) -> float:
 # name it can join on. Deriving rather than storing also means the mapping cannot
 # drift out of sync with the fixture.
 
-_POSITION_CYCLE: tuple[str, ...] = ("G", "SG", "SF", "PF", "C")
+_POSITION_CYCLE: tuple[str, ...] = ("PG", "SG", "SF", "PF", "C")
+"""V1's position vocabulary, for the unknown-player fallback only.
+
+Must stay exactly V1's set — see ``position_for_stats`` for why ``'G'`` is not
+a member. ``C`` is last because V1 caps centers at 3 and matches them by exact
+equality (``Pos == 'C'``), so it is the one label that cannot be used freely.
+"""
 
 
 def v1_name(player_id: str) -> str:
@@ -118,22 +124,43 @@ def v1_name(player_id: str) -> str:
 def position_for_stats(reb: float, ast: float, blk: float, tpm: float) -> str:
     """Infer a plausible position label from a row's stat shape.
 
-    Ordered checks, most distinctive signature first. The thresholds are
-    deliberately loose — this labels a synthetic fixture for display, so the bar
-    is "a big is not called a guard", not a real position classifier. Kept as a
-    pure function of the stats so the label can never disagree with the numbers
-    it came from.
+    **The vocabulary is fixed by V1, not by taste.** ``optimize_roster`` builds
+    position constraints from exactly ``('C', 'PG', 'SG', 'SF', 'PF')`` and
+    validates that each one has at least one eligible player:
 
-    Signals chosen because they are what actually separates positions in the
-    9-category box score: blocks and rebounds for bigs, assists for guards,
-    three-point volume for wings.
+        for position in ('C', 'PG', 'SG', 'SF', 'PF'):
+            available = int(player_data_df['Pos'].str.contains(position).sum())
+            if available < 1: raise ValueError(...)
+
+    and the solver constraints are:
+
+        'C':  Pos == 'C'               (min 1, max 3)
+        'PG': Pos.str.contains('PG')   (min 1)
+        'SG': Pos.str.contains('SG')   (min 1)
+        'SF': Pos.str.contains('SF')   (min 1)
+        'PF': Pos.str.contains('PF')   (min 1)
+
+    Two consequences an earlier version of this function got wrong:
+
+    1. ``'G'`` is **not** a position to V1. It appears in the loop as ``'PG'``,
+       and ``str.contains('PG')`` does not match ``'G'`` — so a fixture labelling
+       its guards ``'G'`` fails pool feasibility with "No eligible players remain
+       at position 'PG'". Guards must be ``'PG'`` or ``'SG'``.
+    2. ``'SF'`` is matched by ``str.contains``, so ``'PF'`` must not be a
+       substring of an SF label and vice versa. The labels below are all
+       distinct two-letter codes, so that holds.
+
+    Ordering is most-distinctive-signature-first. Thresholds are loose on
+    purpose: this labels a synthetic fixture, so the bar is "a big is not called
+    a guard", not a real position classifier. Pure function of the stats, so a
+    label can never disagree with the numbers it came from.
     """
     if blk >= 1.2 and reb >= 7.0:
         return "C"
     if reb >= 6.5:
         return "PF"
     if ast >= 3.5 and tpm >= 1.8:
-        return "G"
+        return "PG"
     if ast >= 2.8 or tpm >= 2.0:
         return "SG"
     return "SF"
