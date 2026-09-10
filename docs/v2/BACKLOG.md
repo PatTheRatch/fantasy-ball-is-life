@@ -278,7 +278,7 @@ H-01 and H-02 are correctness bugs in shipped code.
   for an availability bug. Migration applies and rolls back; four test seeds
   were fixed (not weakened) to seed finalized_at.
 
-- [ ] **H-05b · Cross-league composite keys** — **NEXT** — depends on H-05a
+- [ ] **H-05b · Cross-league composite keys** — depends on H-05a
   `matchups` carries four independent FKs with nothing tying the period and
   both team-seasons to the claimed `league_season_id`, so one row can span
   three leagues with every FK valid. `fantasy_team_seasons` has the same gap
@@ -349,6 +349,99 @@ H-01 and H-02 are correctness bugs in shipped code.
 
 ---
 
+## Gated port — projections, optimizer, and draft engine
+
+Classification [`V1_CLASSIFICATION.md`](V1_CLASSIFICATION.md) §6: the draft
+optimizer, plan diversity, MC targets, and Forge Value are EXTRACT-marked but
+had zero CI coverage — twenty tests skipped on a gitignored `.xls` file
+nothing could commit. This section is that gate, opened one bite at a time.
+
+**Standing note — orphaned-branch sweep.** `scripts/orphan_sweep.sh` runs
+weekly (cron) hunting for work nobody owns. Disposition rule: carry the
+*idea* forward into a new bite here, never reland an orphaned commit
+directly — its target paths are frequently V1-era and no longer exist on
+`v2`. Verify a path exists on `v2` before citing an orphaned commit as a
+reference.
+
+- [x] **D-08 · Synthetic projection fixture** — `7847ba2`
+  ~200-player deterministic generator
+  (`tests/fixtures/projections/build_synthetic.py`, seed 20260) producing
+  `synthetic_projections.csv` (200 rows, digest `a75f7b12d06c1280`), plus
+  `v1_adapter.py` (canonical -> V1 columns) and 28 tests in
+  `test_synthetic_fixture.py`. Un-skips the twenty CI-skipped tests
+  classification §6 flagged. Also fixed a `.gitignore` defect: the bare
+  `*.csv` rule was silently excluding the fixture, breaking CI on the first
+  push — negated with `!tests/fixtures/projections/*.csv`.
+  Review went CHANGES_REQUESTED -> APPROVED_WITH_FINDINGS; the MED finding
+  changed the deliverable from a written file to **injection**
+  (`to_v1_columns()` -> a DataFrame), because `BBM_PROJECTIONS_PATH` is a
+  hardcoded, non-overridable constant and V1's fallback is `pd.read_excel`.
+  V2 depends on neither `pandas` nor `openpyxl`.
+  Gate on merged `v2`: 266 passed, 61 skipped, ruff clean, mypy clean
+  (60 files).
+  *Classification: §6 item 1.*
+
+- [ ] **D-09 · Characterization oracle + solver-cap semantics** — **NEXT** — depends on D-08
+  Run V1 against the fixture and record golden outputs for optimizer /
+  targets / strategies / values; pin the timeout-vs-infeasible solver-cap
+  contract (`SOLVER_TIME_LIMIT_SECONDS=8`) as an explicit golden, not an
+  assumption.
+  **First act, before capturing any golden:** construct the frame and
+  confirm V1's `OptimizeLineup` actually accepts `projections_df` — the one
+  thing the D-08 review could not verify, and everything downstream depends
+  on it. Bundled context for D-09's own review must include `optimizer.py`
+  around the `_projections_df` branch and `BBM_PROJECTIONS_PATH`.
+  D-09's input world is larger than the fixture knows: the orphaned branch
+  `claude/p-series-status-1fo1i8` holds the FCP veteran projection model
+  (`8c852c3`, `fcp_model.py`, 566 lines) plus three fixes — `8485406`
+  (minutes bugs), `f43ac81` (age curve as a level, not a change), `d628783`
+  (team cap shaving ~8% off rotation players) — and `9dc6223` (~25% annual
+  roster churn in that model's synthetic world). That model exists nowhere
+  else: not on `main`, not on `v2`. Each fix encodes a named correct
+  behaviour; reimplement them as D-09's expected-behaviour list against
+  schema §05, rather than relanding the branch — its target paths are
+  V1-era and do not exist on `v2`.
+  *Classification: §6 items 2–3.*
+
+- [ ] **D-10 · Forge Value port** (`backend/draft/values.py`) — depends on D-09
+  Least-trusted of the four gated items: Forge Value has **no V1 test file
+  at all**, so D-09's golden is its only coverage.
+  *Classification: §6 item 4, §7.*
+
+- [ ] **D-11 · MC category targets port** (`targets_mc.py`) — depends on D-09
+
+- [ ] **D-12 · Optimizer / solver port** (`optimizer.py` + `engine.py` solver glue) — depends on D-10, D-11
+  Must assert the solver-cap feasibility contract D-09 pinned — a timeout
+  and an infeasible solve are not the same outcome.
+
+- [ ] **D-13 · Plan diversity + apply-pick engine** (`strategies.py` + `engine.py`) — depends on D-12
+  Carries the seven §7 draft invariants — "never freeze on bad input."
+  Acceptance criterion (applies across this series wherever the draft path
+  touches a projection set): when no active projection set exists, the
+  draft path returns a clean 422, not a 500. Reproduce the small idea in
+  V1 commit `2267043`'s `backend/projections/errors.py` rather than
+  reinventing it.
+
+- [ ] **D-14 · Auction simulation** (`auction_sim.py`) — DEFERRED, not cut
+  Explicitly **not** one of Patrick's four named subsystems (optimizer,
+  plan diversity, MC targets, Forge Value). Revisit after D-13 lands.
+
+- [ ] **D-15 · V2's first projection migration** (the SQL behind schema §05)
+  Reference SQL: `supabase/migrations/20260905120000_projection_sets.sql` on
+  the orphaned branch — an independent implementer reached the same
+  normative rule §05 states (makes *and* attempts, never a bare
+  percentage), which is evidence §05 is right. Do not reland the migration
+  file directly; verify it still applies cleanly to `v2`'s current schema
+  before adapting it.
+
+- [ ] **D-16 · Projection upload UI** — depends on D-15
+  "Upload a BBM season set from inside the Draft Room," downstream of the
+  projection storage tables existing. 201 lines of `ProjectionUpload.tsx`
+  already exist on the orphaned branch (`f41364d`) as a design reference —
+  not a port candidate as-is.
+
+---
+
 ## Slice 2 and beyond — not yet cut
 
 Deliberately unscoped. Cutting bites for work that far out invents detail we
@@ -362,9 +455,9 @@ Known to come, roughly in order:
   *Sequencing is contingent on open question 6 — the "cannot be backfilled"
   premise is under challenge and not yet re-verified.*
 - Projections: sources, immutable sets, adjustments, freezes (D22, D24, D29).
-- The gated port: optimizer, plan diversity, MC targets, Forge Value —
-  **only behind a committed synthetic fixture and characterization tests**
-  (classification §6).
+- The gated port: optimizer, plan diversity, MC targets, Forge Value — **now
+  underway**, see "Gated port — projections, optimizer, and draft engine"
+  below (classification §6).
 - Story domain: story facts, editions, timeline, records, rivalries (D13, D30).
   Surfaces to users as the **Newsroom** — see D30 for which word goes where.
 - FCP projection model (D6).
@@ -384,4 +477,4 @@ Known to come, roughly in order:
 
 ---
 
-*Claude updates this on approval. Last change: H-11 merged — auth wired end-to-end; H-05b next.*
+*Claude updates this on approval. Last change: D-08 merged — synthetic projection fixture, delivered by injection not file write; D-09 next.*
