@@ -120,14 +120,29 @@ ValueError: No eligible players remain at position 'PG' after filtering
 (minimum_game_threshold=20).
 ```
 
-V1's vocabulary is exactly `('C', 'PG', 'SG', 'SF', 'PF')`, matched by
-`str.contains` (except `C`, which is equality):
+V1's vocabulary is exactly `('C', 'PG', 'SG', 'SF', 'PF')`:
 
 ```python
 for position in ('C', 'PG', 'SG', 'SF', 'PF'):
     available = int(player_data_df['Pos'].str.contains(position).sum())
     if available < 1: raise ValueError(...)
 ```
+
+**V1 checks positions in two places with different rules — worth stating
+precisely, because this doc is D-12's handoff:**
+
+| Path | Rule for `C` | Rule for `PG`/`SG`/`SF`/`PF` |
+|---|---|---|
+| `_validate_pool_feasibility` | `str.contains('C')` | `str.contains(code)` |
+| LP position constraint | `Pos == 'C'`, capped `(1, 3)` | `str.contains(code)`, min 1 |
+
+So the feasibility loop treats `C` the same as the others (substring), while the
+LP objective distinguishes it by equality and caps it at 3. For this fixture's
+vocabulary the two rules select the identical set — nothing else contains `"C"`
+as a substring — which is why the defect surfaced as a `PG` failure and not a `C`
+one. But a future label like `"C PF"` would satisfy feasibility and then be
+treated as a centre by the cap, so the distinction is real and a port must keep
+both rules.
 
 `str.contains('PG')` does **not** match `'G'`. Labelling guards `'G'` — the
 obvious choice, and what the fixture did — makes `PG` match zero players.
@@ -209,12 +224,20 @@ verify; this probe is the verification, and it took three rounds.
   solves produced a byte-identical roster (same 13 names, same order), the same
   objective (744.275), and the same cost (200.00), in 0.038–0.044s. So goldens
   on *this* fixture are safe to pin.
-  Caveat, stated because it is a real risk not yet ruled out: this shows the
-  solver is deterministic on a problem with no visible ties, not that it is
-  deterministic in general. A different category, a tighter budget, or a larger
-  pool could produce equal-objective optima where any one may be returned. The
-  capture step should still run each golden N times and assert the *objective*
-  and *cost* are stable, while treating the exact roster as stable-only-if-proven
+  Two caveats, both real risks not yet ruled out:
+
+  1. **Ties.** This shows determinism on a problem with no *visible* ties. A
+     different category or a tighter budget could admit equal-objective optima
+     and return any of them.
+  2. **Solver-internal nondeterminism under the cap — the sharper risk.** This is
+     a binary integer program. If a harder problem reaches
+     `SOLVER_TIME_LIMIT_SECONDS`, the returned incumbent depends on
+     branch-and-bound timing and is genuinely nondeterministic *even with no
+     objective ties at all*. Multithreaded B&B can likewise return different
+     equal-objective optima run-to-run. Naming "ties" alone would understate it.
+
+  Mitigation for both is the same: the capture step asserts **objective and cost**
+  stability across N runs, and treats the exact roster as stable-only-if-proven
   for that specific problem.
 - `optimize_roster` ran in **0.04–0.07s** here — far inside the 8s cap. The cap
   path needs a deliberately hard problem to exercise (large pool, many
