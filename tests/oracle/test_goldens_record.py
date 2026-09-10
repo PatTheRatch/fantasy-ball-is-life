@@ -33,6 +33,24 @@ Asserted (properties of the record):
 
 NOT asserted: that V2 matches. V2 does not exist yet. D-12 asserts that, against
 this record, with the tolerance policy below.
+
+Known limit of this suite, named rather than implied away
+---------------------------------------------------------
+This suite pins **structure and coverage** of the record, not the *magnitude* of
+most objectives. A hand-edit of AST's objective from 180.25 to 175.0 passes every
+test here — it stays finite, numeric and positive, and the cost is untouched.
+Only PTS and REB have a magnitude floor (``> budget``), and that is a weak floor
+rather than an equality.
+
+Why not pin them exactly: recomputing ``sum(frame[f'{cat} PW'])`` over each
+roster would mean reimplementing V1's per-week weighting here, i.e. duplicating
+the very logic the oracle exists to check independently. That is a worse trade
+than the residual risk, and it would also drag pandas into the default suite.
+
+So the magnitudes are trustworthy because they were *captured* (by
+``capture_goldens.py``, which is committed and re-runnable) rather than because
+this suite verifies them. If you need to confirm an objective, re-run the
+harness; do not treat a green run here as confirmation of the numbers.
 """
 
 from __future__ import annotations
@@ -70,6 +88,13 @@ SOLVABLE_CATEGORIES = {"PTS", "REB", "AST", "STL", "BLK", "3PM", "TO"}
 #
 # Recorded so D-12 reproduces the asymmetry rather than inventing percentage
 # support V1 never had, and so the omission is visible instead of silent.
+# UNDECIDED: bug vs by-design. This records the SHAPE of V1's behaviour, which is
+# all a characterization pass should do. Whether "percentages cannot be maximized"
+# is correct behaviour that V2 must faithfully reproduce, or a V1 gap that V2
+# should leave behind, is a charter/D-12 decision — NOT something this record
+# settles. An earlier draft of these docstrings said "D-12 must reproduce the
+# asymmetry", which over-committed: it pre-decided a port obligation from a
+# characterization artifact. D-12's scope should answer bug-vs-by-design first.
 UNSOLVABLE_CATEGORIES = {"FG%": "KeyError", "FT%": "KeyError"}
 
 # Tolerance policy for D-12. Floats are rounded at capture (3dp objective, 2dp

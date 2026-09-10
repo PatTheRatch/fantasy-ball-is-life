@@ -33,24 +33,28 @@ namespace, so patching the *method* on the real problem class intercepts cleanly
 
 The three recorded outcomes
 ---------------------------
-============================  ==========================================  ==========
-solver (status, value)        V1 behaviour                                branch
-============================  ==========================================  ==========
-(`user_limit`, None)          ValueError naming the 8s limit; says the    2
-                              result "doesn't necessarily mean it's
-                              infeasible"
-(`infeasible`, None)          ValueError, message includes                3
-                              `status=infeasible`
-(`unbounded`/other, None)     same shape as infeasible, includes the      3
-                              actual status
-(`user_limit`, real           accepted; count verified against            1
-incumbent of wrong length)    `roster_size - len(current_roster)`
-(`user_limit`, all-zero       the count check fires → ValueError          1
-degenerate)                   naming both counts
-============================  ==========================================  ==========
+Numbering follows SOURCE ORDER in `optimize_roster`, so it can be checked
+against the code without a mapping table. (An earlier version numbered these the
+other way round, which contradicted both the source and the PR narrative — the
+kind of mismatch that confuses whoever ports this next.)
 
-Branches 2 and 3 are captured as executable assertions below. Branch 1 is
-**documented, not asserted** — see the trap note.
+==============================  ========================================  ======
+solver (status, value)          V1 behaviour                              branch
+==============================  ========================================  ======
+(`user_limit`, None)            ValueError naming the 8s limit; says it   B1
+                                "doesn't necessarily mean it's
+                                infeasible"
+(any non-accepted status, None) ValueError including `status=<status>`    B2
+                                — covers `infeasible`, `unbounded`, ...
+(`user_limit`, incumbent whose  the count check fires → ValueError       B3
+length != needed)               naming both counts
+(`user_limit`, correctly-sized  ACCEPTED, roster returned                B4
+incumbent)
+==============================  ========================================  ======
+
+All four are now executable assertions below. B3 was originally documented but
+not asserted, on a false belief that it was unreachable — see the note above for
+why that was wrong.
 """
 
 from __future__ import annotations
@@ -59,6 +63,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 # Deselected from the default run: these import V1 and therefore cvxpy/pandas.
@@ -68,24 +73,54 @@ pytestmark = pytest.mark.capture
 # V1 is imported lazily so that collection of this module by the default pytest
 # run does not explode when cvxpy is absent. The marker in pyproject.toml is the
 # primary guard; this is belt-and-braces.
-V1_ROOT = Path(__file__).with_name("v1_root")
 
 
-# --- The trap, recorded because it cost real time ---------------------------
+# --- Reaching the count-check branch, and a wrong first conclusion -------------
 #
-# Branch 1 (a `user_limit` incumbent whose length is wrong) CANNOT be reached by
-# faking `prob.status` alone. `player_vars.value` is written by the real solver
-# during `prob.solve`; if the call is stubbed out, the variable is never
-# populated, so `player_vars.value is None` and V1 takes branch 2 instead.
+# An earlier version of this file claimed the count-check branch (a `user_limit`
+# incumbent whose length is wrong) could NOT be tested without a real capped
+# solve, and therefore documented it instead of asserting it. **That was wrong**,
+# and the review caught it. The reasoning was: `player_vars.value` is written by
+# the real solver, so faking the status leaves it None and V1 takes the
+# "no incumbent" branch instead.
 #
-# Reaching branch 1 honestly requires a real incumbent of the wrong length, i.e.
-# an actual capped solve — which is the wall-clock-nondeterministic thing we are
-# trying to avoid. So it is recorded as documented behaviour with its exact
-# message and the code path that produces it, and NOT asserted. D-12 should
-# implement the count check; it should not build a test that pretends to prove
-# V1 does it under a stub, because that test would pass for the wrong reason.
+# That is only true if you fake the status ALONE. The `self` inside a patched
+# `Problem.solve` is the **real** problem object, which holds its variables via
+# `self.variables()`. Assigning `.value` on those injects a genuine incumbent, so
+# the "value is None" branch is skipped, `user_limit` is in the accepted set (so
+# the generic error is skipped), and the count check runs — deterministically,
+# with no wall-clock involvement, because no real solve happens.
+#
+# The generalizable lesson, since it cost a review round: "I tried one way and it
+# didn't work" is not "it cannot be done". The first attempt failed because it was
+# a bad seam, not because no seam existed.
 #
 # Source: optimizer.py ~556-579, in the `user_limit` handling block.
+
+
+def _force_solve_with_incumbent(
+    optimizer_module, incumbents: list[float] | None, status: str = "user_limit"
+):
+    """Patch ``cp.Problem.solve`` to inject a controlled solver result.
+
+    ``incumbents=None`` reproduces "solver returned no values" (the variable's
+    ``.value`` is never assigned). A list assigns it index-by-index, so a caller
+    can construct a correct-length selection, a short one, or the all-zero
+    degenerate case the source comment warns about.
+    """
+    real_problem = optimizer_module.cp.Problem
+    original_solve = real_problem.solve
+
+    def forced_solve(self, **kwargs):  # noqa: ANN001 - mirrors cvxpy's signature
+        if incumbents is not None:
+            for variable in self.variables():
+                vector = np.zeros(variable.shape)
+                vector[: len(incumbents)] = incumbents
+                variable.value = vector
+        self._status = status
+        return None
+
+    return patch.object(real_problem, "solve", forced_solve), original_solve
 
 
 def _import_v1(v1_root: Path):
@@ -164,25 +199,21 @@ def _build_v1_optimizer(v1_root: Path):
 
 
 def _solve_with_status(optimizer_module, opt, status: str) -> str:
-    """Force a solver status and return V1's error message.
+    """Force a solver status (no incumbent) and return V1's error message.
 
     Patches the *method* on the real `cp.Problem` class, so the objective and
-    constraints are built for real and only the solve result is injected.
+    constraints are built for real and only the solve result is injected. The
+    variable is never assigned, which is what a real capped solve looks like when
+    it found nothing.
     """
-    real_problem = optimizer_module.cp.Problem
-    original_solve = real_problem.solve
-
-    def forced_solve(self, **kwargs):  # noqa: ANN001 - mirrors cvxpy's signature
-        self._status = status
-        return None
-
+    patcher, original_solve = _force_solve_with_incumbent(optimizer_module, None, status)
     try:
-        with patch.object(real_problem, "solve", forced_solve):
+        with patcher:
             opt.optimize_roster("PTS")
     except ValueError as exc:
         return str(exc)
     finally:
-        real_problem.solve = original_solve
+        optimizer_module.cp.Problem.solve = original_solve
     raise AssertionError(f"expected a ValueError for status={status!r}, got none")
 
 
@@ -232,3 +263,93 @@ def test_unknown_status_is_not_silently_accepted(v1_root: Path) -> None:
 
     assert "No feasible roster found" in message
     assert "status=unbounded" in message
+
+
+def test_user_limit_with_degenerate_incumbent_triggers_count_check(v1_root: Path) -> None:
+    """The count check: a `user_limit` incumbent of the wrong length is REJECTED.
+
+    This is the most dangerous branch and it was originally left untested on a
+    false belief that it was unreachable. It is reachable: injecting a value on
+    the real problem's variables produces a genuine incumbent, so V1 skips the
+    "no incumbent" branch and runs the count check.
+
+    Why it matters more than the other two: this is the branch that stops a
+    degenerate all-zero selection from being handed to a user as a lineup. V1's
+    own comment names the case —
+
+        "HiGHS can return a degenerate all-zero selection when it hits the time
+         limit before finding a single complete roster. Verify the count before
+         trusting it; a size mismatch here means 'ran out of time', not a usable
+         (if suboptimal) roster."
+
+    A D-12 port that trusted a `user_limit` incumbent without verifying length
+    would silently return a 0- or 5-player roster — and nothing else in this
+    oracle suite would catch it.
+    """
+    opt, optimizer = _build_v1_optimizer(v1_root)
+    patcher, original_solve = _force_solve_with_incumbent(optimizer, [])  # all zeros
+    try:
+        with patcher:
+            opt.optimize_roster("PTS")
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        pytest.fail("V1 accepted a degenerate all-zero incumbent")
+    finally:
+        optimizer.cp.Problem.solve = original_solve
+
+    # Names both counts, so the user can see how short the incumbent was.
+    assert "without completing a valid" in message
+    assert "got 0" in message
+    assert "status=user_limit" in message
+    assert "13-player" in message, "the required roster size should be named"
+
+
+def test_user_limit_with_short_incumbent_names_both_counts(v1_root: Path) -> None:
+    """A non-degenerate but short incumbent (5 of 13) is rejected the same way.
+
+    Distinct from the all-zero case: this proves the check compares *counts*
+    rather than special-casing the all-zero pattern. An implementation that only
+    detected "everything is zero" would pass the previous test and fail this one.
+    """
+    opt, optimizer = _build_v1_optimizer(v1_root)
+    patcher, original_solve = _force_solve_with_incumbent(optimizer, [1.0] * 5)
+    try:
+        with patcher:
+            opt.optimize_roster("PTS")
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        pytest.fail("V1 accepted a 5-of-13 incumbent")
+    finally:
+        optimizer.cp.Problem.solve = original_solve
+
+    assert "got 5" in message
+    assert "13-player" in message
+
+
+def test_user_limit_with_correct_length_incumbent_is_accepted(v1_root: Path) -> None:
+    """The positive case: a correctly-sized `user_limit` incumbent IS returned.
+
+    Without this, the suite would only prove V1 rejects things. The contract is
+    that `user_limit` is accepted like `optimal_inaccurate` — the solver ran out
+    of time but produced a usable roster — and that has to be demonstrated too,
+    or D-12 could implement rejection-of-everything and pass.
+
+    The returned cost here is NOT bound by the budget check the happy path gets,
+    which is exactly why the count check matters: a `user_limit` roster is
+    trusted on length alone.
+
+    (Observed: 13 players, cost 207.0. The over-budget cost is a property of this
+    synthetic incumbent, not of V1 — it reflects that a stubbed incumbent is not
+    constrained by the LP.)
+    """
+    opt, optimizer = _build_v1_optimizer(v1_root)
+    patcher, original_solve = _force_solve_with_incumbent(optimizer, [1.0] * 13)
+    try:
+        with patcher:
+            roster = opt.optimize_roster("PTS")
+    finally:
+        optimizer.cp.Problem.solve = original_solve
+
+    assert len(roster) == 13, "a correctly-sized incumbent should be returned"

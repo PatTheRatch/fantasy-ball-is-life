@@ -37,7 +37,7 @@ testpaths = ["tests"]
 #   D09_V1_ROOT=/path/to/v1-worktree pytest -m capture
 addopts = "-q -m 'not capture'"
 markers = [
-    "capture: imports V1 (cvxpy/pandas); opt-in, needs --v1-root",
+    "capture: imports V1 (cvxpy/pandas); opt-in, needs D09_V1_ROOT",
 ]
 
 [tool.ruff]
